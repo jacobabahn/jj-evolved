@@ -77,7 +77,8 @@ test("popup trees and revision summaries render JJ token colors", async () => {
   const { RGBA } = await import("@opentui/core");
   const { TreeComparisonView } = await import("../src/tree-comparison");
   const { ChangePreview } = await import("../src/change-preview");
-  const { jjColors } = await import("../src/jj-highlighting");
+  const { themes } = await import("../src/theme");
+  const jjColors = themes.terminal;
   const screen = await createTestRenderer({ width: 120, height: 15 });
   const trees = new TreeComparisonView(screen.renderer, "popup-trees");
   const summary = new ChangePreview(screen.renderer, "popup-summary", "Source qwrtyuok / abcdef123456\nA description\nInto zzzzzzzz / 000000000000 Destination");
@@ -96,12 +97,12 @@ test("popup trees and revision summaries render JJ token colors", async () => {
     const spans = screen.captureSpans().lines.flatMap(line => line.spans);
     for (const [token, color] of [
       ["qw", jjColors.changeId], ["rtyuok", jjColors.muted], ["[feature]", jjColors.bookmark],
-      ["@", jjColors.workingCopy], ["◆", jjColors.commit],
+      ["@", jjColors.accent], ["◆", jjColors.commit],
       ["[conflict]", jjColors.conflict], ["abcdef123456", jjColors.commit],
-    ]) {
+    ] satisfies [string, InstanceType<typeof RGBA>][]) {
       const matches = spans.filter(span => token === "@" || token === "◆" ? span.text.includes(token) : span.text.trim() === token);
       if (!matches.length) throw new Error(`Missing token ${token}: ${screen.captureCharFrame()}`);
-      for (const span of matches) expect(span.fg).toEqual(RGBA.fromHex(color ?? ""));
+      for (const span of matches) expect(span.fg).toEqual(color);
     }
     expect(spans.filter(span => span.text.trim() === "qw")).toHaveLength(3);
     expect(screen.captureCharFrame()).toContain("Description");

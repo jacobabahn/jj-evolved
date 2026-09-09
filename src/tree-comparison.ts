@@ -1,3 +1,4 @@
+import { getTheme } from "./theme";
 import { highlightJjText } from "./jj-highlighting";
 import { BorderChars, BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
 import type { TreeComparison } from "./repository";
@@ -12,9 +13,9 @@ export class TreeComparisonView extends BoxRenderable {
     const column = (side: "before" | "after", title: string) => {
       const column = new BoxRenderable(ctx, { id: `${id}-${side}-column`, title, border: side === "after" ? true : ["top", "right", "bottom"],
         customBorderChars: side === "after" ? { ...BorderChars.single, topRight: "┬", bottomRight: "┴" } : BorderChars.single,
-        borderColor: "#6ed6bd", width: "50%", height: "100%", minWidth: 0 });
+        borderColor: getTheme(this.ctx).accent, width: "50%", height: "100%", minWidth: 0 });
       const text = new TextRenderable(ctx, { id: `${id}-${side}`, width: "100%",
-        fg: "#d6e2eb", wrapMode: "none", truncate: true, flexShrink: 0 });
+        fg: getTheme(this.ctx).text, wrapMode: "none", truncate: true, flexShrink: 0 });
       const viewport = new BoxRenderable(ctx, { width: "100%", height: "100%", overflow: "hidden" });
       viewport.add(text);
       column.add(viewport);
@@ -27,11 +28,19 @@ export class TreeComparisonView extends BoxRenderable {
     this.before = column("before", " Current tree ").text;
   }
 
+  applyTheme() {
+    for (const child of this.getChildren()) {
+      if (child instanceof BoxRenderable) child.borderColor = getTheme(this.ctx).accent;
+    }
+    this.before.fg = this.after.fg = getTheme(this.ctx).text;
+  }
+
   setTrees(trees: TreeComparison | null, action?: "rebase" | "squash") {
+    this.applyTheme();
     this.visible = trees !== null;
     this.afterColumn.title = action ? ` After ${action} ` : " Proposed tree ";
-    this.before.content = highlightJjText(trees?.before.trimEnd() || "", trees?.beforePrefixes);
-    this.after.content = highlightJjText(trees?.after.trimEnd() || "", trees?.afterPrefixes);
+    this.before.content = highlightJjText(trees?.before.trimEnd() || "", trees?.beforePrefixes, getTheme(this.ctx));
+    this.after.content = highlightJjText(trees?.after.trimEnd() || "", trees?.afterPrefixes, getTheme(this.ctx));
     this.height = trees ? Math.max(trees.before.trimEnd().split("\n").length, trees.after.trimEnd().split("\n").length) + 2 : 0;
   }
 }

@@ -1,3 +1,4 @@
+import { getTheme, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./theme";
 import { highlightJjText, revisionPrefixes } from "./jj-highlighting";
 import { ChangePreview } from "./change-preview";
 import {
@@ -14,6 +15,7 @@ type Choice = { name: string; description: string; choose: () => void; preview?:
 
 type Prompt =
   | { kind: "browse" }
+  | { kind: "theme"; original: Theme }
   | { kind: "inline"; source: Revision; action: { kind: "rebase"; descendants: boolean } | { kind: "squash" } }
   | { kind: "form"; form: HistoryForm }
   | { kind: "revset" }
@@ -41,6 +43,7 @@ o                 Operation history, inspection and restore
 u                 Preview undo of the latest operation
 f                 Browse files changed in selected revision
 Enter             Return to the selected revision preview
+t                 Choose a theme, preview and save
 ?                 Show this help
 q / Ctrl-C        Quit
 
@@ -56,8 +59,9 @@ History shows at most 200 revisions.
 Select a revision to return from status or help.
 Commands use your installed jj and its repository rules.`;
 
-export function createApp(renderer: CliRenderer, repository: Repository) {
-  const colors = { bg: "#101820", panel: "#15212c", text: "#d6e2eb", muted: "#91a6b7", accent: "#6ed6bd", border: "#344958" };
+export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}) {
+  setTheme(renderer, theme);
+  let colors = getTheme(renderer);
   const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg });
   const header = new TextRenderable(renderer, { id: "header", height: 1, fg: colors.accent, content: terminalText(`jj-evolved  /  ${repository.root}`) });
   const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset: all()" });
@@ -69,11 +73,11 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
-  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel });
+  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text, placeholderColor: colors.muted });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh\nSpace actions  b bookmarks  o op log  u undo  ? help  q quit" });
-  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: "#294a51", selectedTextColor: "#ffffff", descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false });
+  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh\nSpace actions  b bookmarks  o op log  u undo  t theme  ? help  q quit" });
+  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
   const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
@@ -108,7 +112,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
   function report(text: string, error = false) {
     if (stopped) return;
     if (overlay.visible) { message.content = ""; overlay.report(text, error); return; }
-    message.fg = error ? "#ffad9e" : colors.muted;
+    message.fg = error ? colors.conflict : colors.muted;
     message.content = terminalText(text);
   }
   function setFocus(next: typeof focus) {
@@ -123,11 +127,11 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     overlayText.content = terminalText(text);
     overlayPreview.scrollTo(0);
   }
-  function activateOverlay(title: string) {
-    ++previewRequest;
+  function activateOverlay(title: string, cancelPreview = true) {
+    if (cancelPreview) ++previewRequest;
     if (!overlay.visible) {
       const revision = selected();
-      overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision])) : "Repository actions";
+      overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision]), colors) : "Repository actions";
     }
     overlay.title = ` ${title} `;
     overlay.height = "84%";
@@ -281,7 +285,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
       if (back) {
         inlineHint.visible = false;
         if (action.kind === "rebase" || action.kind === "squash") {
-          overlay.context.content = highlightJjText(`Source ${shortChangeId(action.revision)} / ${action.revision.commitId.slice(0, 12)}\n${action.revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([action.revision]));
+          overlay.context.content = highlightJjText(`Source ${shortChangeId(action.revision)} / ${action.revision.commitId.slice(0, 12)}\n${action.revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([action.revision]), colors);
         }
         overlay.hints.content = "Enter apply  Esc choose destination  p refresh preview  PgUp/Dn scroll";
       }
@@ -290,7 +294,81 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
   function ask(label: string, value: string, accept: (value: string) => void) {
     openPrompt({ kind: "text", accept }, label, value);
   }
+  function applyTheme(theme: Theme) {
+    colors = theme;
+    setTheme(renderer, theme);
+    app.backgroundColor = colors.bg;
+    header.fg = promptLabel.fg = inlineHint.fg = shortcuts.fg = result.fg = colors.accent;
+    filter.fg = message.fg = colors.muted;
+    listBox.backgroundColor = colors.panel;
+    listBox.borderColor = focus === "list" ? colors.accent : colors.border;
+    preview.borderColor = focus === "preview" ? colors.accent : colors.border;
+    overlayPreview.borderColor = colors.border;
+    input.backgroundColor = input.focusedBackgroundColor = colors.panel;
+    input.textColor = input.focusedTextColor = colors.text;
+    input.placeholderColor = colors.muted;
+    chooser.backgroundColor = chooser.focusedBackgroundColor = colors.panel;
+    chooser.textColor = chooser.focusedTextColor = colors.text;
+    chooser.descriptionColor = colors.muted;
+    chooser.selectedBackgroundColor = colors.selected;
+    chooser.selectedTextColor = chooser.selectedDescriptionColor = colors.selectedText;
+    list.applyTheme();
+    detail.applyTheme();
+    overlay.applyTheme();
+    overlayText.applyTheme();
+    comparison.applyTheme();
+  }
+
+  function previewTheme() {
+    const name = themeNames[chooser.getSelectedIndex()];
+    if (!name) return;
+    applyTheme(themes[name]);
+    overlay.context.content = `Previewing ${themeLabels[name]}`;
+    showOverlay(`diff --git a/example.ts b/example.ts
+--- a/example.ts
++++ b/example.ts
+@@ -1 +1 @@
+-export const greeting = "Hello";
++export const greeting = "Hello, Jujutsu!";
+`, "Theme preview");
+  }
+
+  function pickTheme() {
+    const original = colors;
+    activateOverlay("Theme", false);
+    prompt = { kind: "theme", original };
+    input.blur();
+    input.visible = promptLabel.visible = false;
+    chooser.visible = true;
+    chooser.showDescription = false;
+    chooser.options = themeNames.map(name => ({
+      name: `${themeLabels[name]}${themes[name] === original ? "  (current)" : ""}`,
+      description: "",
+    }));
+    chooser.setSelectedIndex(Math.max(0, themeNames.findIndex(name => themes[name] === original)));
+    chooser.focus();
+    overlay.hints.content = "j/k preview  Enter save  Esc restore";
+    previewTheme();
+  }
+
+  async function keepTheme() {
+    const name = themeNames[chooser.getSelectedIndex()];
+    if (!name || busy) return;
+    busy = true;
+    try {
+      await saveTheme(name);
+      if (stopped) return;
+      closePrompt();
+      report(`Theme: ${themeLabels[name]}`);
+    } catch (error) {
+      if (!stopped) overlay.report(`Could not save theme: ${errorText(error)}`, true);
+    } finally {
+      busy = false;
+    }
+  }
+
   function previewChoice() {
+    if (prompt.kind === "theme") { previewTheme(); return; }
     if (prompt.kind !== "picker") return;
     const choice = prompt.choices[chooser.getSelectedIndex()];
     const request = ++previewRequest;
@@ -307,6 +385,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     promptLabel.visible = false;
     prompt = { kind: "picker", choices };
     chooser.visible = true;
+    chooser.showDescription = true;
     chooser.options = choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
     chooser.setSelectedIndex(0);
     chooser.focus();
@@ -492,6 +571,17 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     if (stopped) return;
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (prompt.kind === "theme") {
+      key.preventDefault();
+      if (busy) return;
+      if (key.name === "escape") {
+        applyTheme(prompt.original);
+        closePrompt();
+      } else if (key.name === "j" || key.name === "down") chooser.moveDown();
+      else if (key.name === "k" || key.name === "up") chooser.moveUp();
+      else if (key.name === "return") void keepTheme();
+      return;
+    }
     if (prompt.kind === "inline") {
       key.preventDefault();
       if (busy) return;
@@ -551,6 +641,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
       return;
     }
     if (busy) return;
+    if (name === "t") { key.preventDefault(); pickTheme(); return; }
     if (key.sequence === "R" || key.sequence === "S" || (key.shift && (name === "r" || name === "s"))) {
       key.preventDefault();
       const revision = selected();

@@ -21,6 +21,27 @@ bun start /path/to/your/jj-repository
 
 With no path, the app opens the current directory. The source checkout is not automatically initialized as a jj repository. `bun dev /path/to/your/jj-repository` runs with source watching.
 
+## Themes
+
+Press `t` to open the theme picker. Use `j`/`k` or the arrow keys to preview each theme across the app. Enter saves your choice; Escape restores the previous theme.
+
+Available themes are Terminal, Dark, Light, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, and Vesper. The default Terminal theme inherits your terminal's foreground, background, and ANSI palette. It marks the selected revision with an arrow and diff additions and deletions with colored signs, preserving the terminal background.
+
+Your selection is saved in `$XDG_CONFIG_HOME/jj-evolved/theme`, or `~/.config/jj-evolved/theme` when that variable is unset. It applies across repositories and to `bun run demo`.
+
+You can also choose a theme at startup:
+
+```bash
+bun start --theme gruvbox /path/to/repository
+bun start --theme tokyonight /path/to/repository
+bun start --theme catppuccin /path/to/repository
+bun start --theme vesper /path/to/repository
+```
+
+Startup precedence is `--theme`, then `JJ_EVOLVED_THEME`, then the saved choice, then `terminal`. The picker can change any startup choice for the current session. An explicit flag or environment variable still takes precedence on the next launch. Choose Terminal in the picker to save terminal colors as your preference.
+
+The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo Night](https://github.com/folke/tokyonight.nvim), [Catppuccin Mocha](https://github.com/catppuccin/palette), and [Vesper](https://github.com/raunofreiberg/vesper) to the app's graph and diff colors.
+
 ## Keyboard controls
 
 | Key | Action |
@@ -41,6 +62,7 @@ With no path, the app opens the current directory. The source checkout is not au
 | `u` | Preview undo of the latest operation |
 | `f` | Browse the selected revision's changed files |
 | Enter | Return to the revision preview |
+| `t` | Preview and save a theme |
 | `?` | Show help |
 | Escape | Cancel a prompt |
 | `q`, Ctrl-C | Quit |

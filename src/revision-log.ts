@@ -1,8 +1,8 @@
-import { changeIdChunks, graphChunks, jjColors } from "./jj-highlighting";
+import { getTheme } from "./theme";
+import { changeIdChunks, graphChunks } from "./jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText, shortChangeId, type Bookmark, type Revision, type Snapshot } from "./repository";
 
-const colors = { background: "#15212c", text: "#d6e2eb", muted: "#91a6b7", selected: "#294a51", accent: "#6ed6bd", drop: "#435d38" };
 
 type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; revisionIndex: number | null; heading: boolean; text: StyledText };
 type BookmarkSource = { bookmark: Bookmark; revision: Revision };
@@ -13,6 +13,7 @@ export class RevisionLog extends ScrollBoxRenderable {
   canDragBookmark = () => false;
   onBookmarkDrop = (_name: string, _revision: Revision) => {};
   onDragHint = (_text: string) => {};
+  private snapshot: { data: Snapshot; bookmarks: Bookmark[] } | null = null;
   private selectedIndex = 0;
   private revisions: Revision[] = [];
   private sourceIndex: number | null = null;
@@ -24,11 +25,21 @@ export class RevisionLog extends ScrollBoxRenderable {
   constructor(context: RenderContext) {
     super(context, {
       id: "revisions", width: "100%", height: "100%", scrollY: true, scrollX: false,
-      backgroundColor: colors.background, contentOptions: { flexDirection: "column" },
+      backgroundColor: getTheme(context).panel, contentOptions: { flexDirection: "column" },
     });
   }
 
+  applyTheme() {
+    this.backgroundColor = getTheme(this.ctx).panel;
+    if (this.snapshot) {
+      const top = this.scrollTop;
+      this.setSnapshot(this.snapshot.data, this.snapshot.bookmarks);
+      this.scrollTop = top;
+    }
+  }
+
   setSnapshot(snapshot: Snapshot, bookmarks: Bookmark[]) {
+    this.snapshot = { data: snapshot, bookmarks };
     this.cancelDrag();
     for (const row of this.rows) row.node.destroyRecursively();
     this.rows = [];
@@ -38,9 +49,9 @@ export class RevisionLog extends ScrollBoxRenderable {
       const revision = row.kind === "edge" ? null : row.revision;
       const revisionIndex = revision ? snapshot.revisions.indexOf(revision) : null;
       const heading = row.kind === "revision";
-      const chunks = graphChunks(row.kind === "edge" ? row.text : row.prefix);
-      if (row.kind === "revision") chunks.push(...changeIdChunks(shortChangeId(row.revision), row.revision.changePrefix));
-      else if (row.kind === "description") chunks.push(fg(jjColors.text)(terminalText(row.revision.description.split("\n")[0] || "(no description)")));
+      const chunks = graphChunks(row.kind === "edge" ? row.text : row.prefix, getTheme(this.ctx));
+      if (row.kind === "revision") chunks.push(...changeIdChunks(shortChangeId(row.revision), row.revision.changePrefix, getTheme(this.ctx)));
+      else if (row.kind === "description") chunks.push(fg(getTheme(this.ctx).text)(terminalText(row.revision.description.split("\n")[0] || "(no description)")));
       const text = new StyledText(chunks);
       const node = new BoxRenderable(this.ctx, {
         id: `revision-row-${rowIndex}`, height: 1, width: "100%", flexShrink: 0,
@@ -67,7 +78,7 @@ export class RevisionLog extends ScrollBoxRenderable {
           if (!bookmark.remote) this.bookmarkSources.set(badge, { bookmark, revision });
         }
         if (revision.conflict) node.add(new TextRenderable(this.ctx, {
-          height: 1, flexShrink: 0, selectable: false, content: " ! conflict", fg: "#ffad9e",
+          height: 1, flexShrink: 0, selectable: false, content: " ! conflict", fg: getTheme(this.ctx).conflict,
         }));
       }
       this.add(node);
@@ -141,14 +152,14 @@ export class RevisionLog extends ScrollBoxRenderable {
       const selected = row.revisionIndex === this.selectedIndex;
       const source = row.revisionIndex === this.sourceIndex && row.heading;
       const drop = this.dropIndex !== null && row.revisionIndex === this.dropIndex;
-      const background = drop ? colors.drop : selected ? colors.selected : colors.background;
-      row.label.content = new StyledText([bold(fg(source ? colors.accent : "#ffffff")(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...row.text.chunks]);
+      const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : getTheme(this.ctx).panel;
+      row.label.content = new StyledText([bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...row.text.chunks]);
       row.node.backgroundColor = background;
       row.label.bg = background;
       for (const badge of row.badges) {
         const bookmark = this.bookmarkSources.get(badge)?.bookmark;
-        badge.bg = this.drag?.kind === "dragging" && bookmark === this.drag.bookmark ? colors.drop : background;
-        badge.fg = jjColors.bookmark;
+        badge.bg = this.drag?.kind === "dragging" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
+        badge.fg = getTheme(this.ctx).bookmark;
       }
     }
   }

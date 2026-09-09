@@ -21,3 +21,39 @@ test("help works without jj and missing jj fails before entering the terminal", 
   expect(missing.stderr).toContain("jj is not installed");
   expect(missing.stdout).toBe("");
 });
+
+test("themes validate before opening a repository and CLI overrides the environment", async () => {
+  const env = { ...process.env, PATH: "/nonexistent", JJ_EVOLVED_THEME: "invalid" };
+  for (const args of [[], ["--theme", "invalid"], ["--theme=invalid"]]) {
+    const result = await cli(args, env);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Unknown theme");
+    expect(result.stdout).toBe("");
+  }
+  for (const theme of ["terminal", "dark", "light"]) {
+    const result = await cli(["--theme", theme], env);
+    expect(result.stderr).toContain("jj is not installed");
+    expect(result.stderr).not.toContain("Unknown theme");
+  }
+  expect((await cli(["--theme"], env)).code).toBe(1);
+  expect((await cli(["--help"], env)).stdout).toContain("--theme");
+});
+
+test("startup reads the saved theme and explicit choices override it", async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const directory = await mkdtemp(join(tmpdir(), "jj-cli-theme-"));
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: "/nonexistent", XDG_CONFIG_HOME: directory };
+  delete env.JJ_EVOLVED_THEME;
+  try {
+    await mkdir(join(directory, "jj-evolved"));
+    await writeFile(join(directory, "jj-evolved", "theme"), "broken-theme");
+    expect((await cli([], env)).stderr).toContain('Unknown theme "broken-theme"');
+    expect((await cli([], { ...env, JJ_EVOLVED_THEME: "vesper" })).stderr).toContain("jj is not installed");
+    expect((await cli(["--theme", "gruvbox"], env)).stderr).toContain("jj is not installed");
+    await writeFile(join(directory, "jj-evolved", "theme"), "catppuccin");
+    expect((await cli([], env)).stderr).toContain("jj is not installed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
