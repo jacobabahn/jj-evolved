@@ -119,3 +119,45 @@ test("JJ markings retain distinct colors when selected and marked as an action s
     }
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
 });
+
+test("rebase drag highlights the source change ID until cancelled", async () => {
+  const { RevisionLog } = await import("../src/revision-log");
+  const screen = await createTestRenderer({ width: 90, height: 10 });
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  const source = {
+    changeId: "qwertyui", changePrefix: "qw", commitId: "a".repeat(40), description: "Source",
+    author: "Test User", bookmarks: "feature", parents: [], workingCopy: false, conflict: false,
+  };
+  const destination = { ...source, changeId: "rtyuiopq", changePrefix: "rt", commitId: "b".repeat(40), bookmarks: "" };
+  try {
+    log.setSnapshot({ root: "/test", revisions: [source, destination], graph: [
+      { kind: "revision", revision: source, prefix: "○  " },
+      { kind: "revision", revision: destination, prefix: "○  " },
+    ] }, [{ name: "feature", remote: "", conflict: false, targets: [source.commitId] }]);
+    log.canDrag = () => true;
+    screen.renderer.root.onMouse = event => log.handleDragMouse(event);
+    await screen.waitForVisualIdle();
+    const label = screen.renderer.root.findDescendantById("revision-label-0");
+    const target = screen.renderer.root.findDescendantById("revision-label-1");
+    if (!label || !target) throw new Error("Missing revision labels");
+    const spans = () => screen.captureSpans().lines.flatMap(line => line.spans);
+    const original = spans().find(span => span.text.trim() === "qw");
+    if (!original) throw new Error("Missing source ID prefix");
+    await screen.mockMouse.pressDown(label.x + 5, label.y);
+    await screen.mockMouse.emitMouseEvent("drag", target.x + 5, target.y);
+    await screen.waitForVisualIdle();
+    const highlighted = spans().find(span => span.text.trim() === source.changeId);
+    if (!highlighted) throw new Error("Missing highlighted source ID");
+    expect(highlighted.bg).not.toEqual(original.bg);
+    expect(highlighted.bg).not.toEqual(spans().find(span => span.text.trim() === "[feature]")?.bg);
+    expect(screen.captureCharFrame()).toContain("● ○");
+    expect(screen.captureCharFrame()).toContain("→ ○");
+    log.cancelDrag();
+    await screen.mockMouse.release(target.x + 5, target.y);
+    await screen.waitForVisualIdle();
+    expect(spans().find(span => span.text.trim() === "qw")?.bg).toEqual(original.bg);
+    expect(screen.captureCharFrame()).not.toContain("● ○");
+    expect(screen.captureCharFrame()).not.toContain("→ ○");
+  } finally { log.destroyRecursively(); screen.renderer.destroy(); }
+});

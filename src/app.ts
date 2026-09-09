@@ -36,6 +36,7 @@ r                 Refresh history
 d                 Describe selected change, single line
 e                 Make selection the working copy immediately
 R / S             Choose rebase / squash destination in the graph
+Drag change       Drop onto another change to preview rebase
 n                 Create an empty child of selection
 Space             Action menu: edit, rebase, squash, split, abandon
 b                 Local and remote bookmarks
@@ -678,10 +679,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
-  list.canDragBookmark = () => !stopped && !busy && prompt.kind === "browse";
+  list.canDrag = () => !stopped && !busy && prompt.kind === "browse";
+  list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });
   list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });
   list.onDragHint = text => report(text || "Ready. ? shows all controls.");
-  app.onMouse = event => list.handleBookmarkMouse(event);
+  app.onMouse = event => list.handleDragMouse(event);
   renderer.keyInput.on("keypress", onKey);
   list.on("selectionChanged", onSelection);
   chooser.on("selectionChanged", previewChoice);

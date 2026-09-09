@@ -24,11 +24,63 @@ try {
   await Bun.write(join(directory, "README.md"), "# A small jj workspace\n\nBrowse revisions with j and k.\n");
   await jj("describe", "-m", "Start the workspace");
   await jj("bookmark", "create", "main");
-  await jj("new", "-m", "Add a greeting");
-  await Bun.write(join(directory, "hello.ts"), 'export const greeting = "Hello, Jujutsu!";\n');
-  await jj("bookmark", "create", "greeting");
-  await jj("new", "-m", "Polish the greeting");
-  await Bun.write(join(directory, "hello.ts"), 'export const greeting = "Hello from jj-evolved!";\n');
+  async function change({ parents, description, files, bookmarks }: {
+    parents: string[];
+    description: string;
+    files: Record<string, string>;
+    bookmarks: string[];
+  }) {
+    await jj("new", ...parents, "-m", description);
+    for (const [path, content] of Object.entries(files)) await Bun.write(join(directory, path), content);
+    if (bookmarks.length) await jj("bookmark", "create", ...bookmarks);
+  }
+  await change({
+    parents: ["main"], description: "Add a greeting", bookmarks: ["greeting"],
+    files: { "hello.ts": 'export const greeting = "Hello, Jujutsu!";\n' },
+  });
+  await change({
+    parents: ["greeting"], description: "Polish the greeting", bookmarks: ["greeting-polish", "ready-for-review"],
+    files: { "hello.ts": 'export const greeting = "Hello from jj-evolved!";\n' },
+  });
+  await change({
+    parents: ["main"], description: "Document the keyboard controls", bookmarks: ["docs"],
+    files: { "docs/controls.md": "# Controls\n\nj/k: browse changes\nR: rebase a change\nS: squash changes\n" },
+  });
+  await change({
+    parents: ["docs"], description: "Explain drag and drop", bookmarks: ["docs-drag"],
+    files: { "docs/controls.md": "# Controls\n\nj/k: browse changes\nR: rebase a change\nS: squash changes\n\nDrag a change onto another change to preview a rebase.\nDrag a bookmark label to move just that bookmark.\n" },
+  });
+  await change({
+    parents: ["main"], description: "Add command-line options", bookmarks: ["cli"],
+    files: { "options.ts": 'export const options = { color: true, verbose: false };\n' },
+  });
+  await change({
+    parents: ["cli"], description: "Support verbose output", bookmarks: ["cli-verbose"],
+    files: {
+      "options.ts": 'export const options = { color: true, verbose: true };\n',
+      "logging.ts": 'export function log(message: string) {\n  console.log(message);\n}\n',
+    },
+  });
+  await change({
+    parents: ["cli-verbose"], description: "Document CLI usage", bookmarks: ["cli-ready"],
+    files: { "docs/cli.md": "# CLI usage\n\nEnable verbose output to inspect each operation.\n" },
+  });
+  await change({
+    parents: ["greeting-polish", "docs-drag"], description: "Merge greeting and documentation", bookmarks: ["integration"],
+    files: {},
+  });
+  await change({
+    parents: ["greeting"], description: "Try an alternative greeting", bookmarks: ["greeting-alternative"],
+    files: { "hello.ts": 'export const greeting = "Welcome to the workspace!";\n' },
+  });
+  await change({
+    parents: ["greeting-polish", "greeting-alternative"], description: "Conflicting greeting proposals", bookmarks: ["greeting-conflict"],
+    files: {},
+  });
+  await change({
+    parents: ["integration"], description: "Prepare a release", bookmarks: [],
+    files: { "CHANGELOG.md": "# Next release\n\n- Friendlier greeting\n- Keyboard and mouse documentation\n\nStill to review: CLI options and alternative greeting.\n" },
+  });
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/index.ts"), directory], {
     stdin: "inherit", stdout: "inherit", stderr: "inherit",
   });

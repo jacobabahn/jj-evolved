@@ -588,3 +588,57 @@ test("remote bookmark labels stay read-only and overlays block bookmark drags", 
     expect(await t.repo.operationId()).toBe(before);
   } finally { await t.cleanup(); }
 }, 15_000);
+
+test("dragging a change previews a rebase and applies only after confirmation", async () => {
+  const t = await setup();
+  try {
+    const { badge, target, destination } = await bookmarkDragTargets(t);
+    const snapshot = await t.repo.snapshot("all()");
+    const source = snapshot.revisions.find(revision => revision.description.trim() === "Initial feature");
+    if (!source) throw new Error("Missing source change");
+    const before = await t.repo.operationId();
+    await t.screen.mockMouse.pressDown(target.x + 3, badge.y);
+    await t.screen.mockMouse.emitMouseEvent("drag", target.x + 3, target.y);
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).toContain("only this change");
+    expect(t.screen.captureCharFrame()).toContain("→");
+    await t.screen.mockMouse.release(target.x + 3, target.y);
+    await t.until("Confirm operation");
+    await t.until("Ready.");
+    expect(await t.repo.operationId()).toBe(before);
+    t.screen.mockInput.pressEnter();
+    await t.until("rebase completed");
+    const after = await t.repo.snapshot("all()");
+    const moved = after.revisions.find(revision => revision.changeId === source.changeId);
+    const parent = after.revisions.find(revision => revision.changeId === destination.changeId);
+    if (!parent) throw new Error("Missing destination after rebase");
+    expect(moved?.parents).toEqual([parent.commitId]);
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("change clicks, invalid drops, Escape and cancelled previews do not rebase", async () => {
+  const t = await setup();
+  try {
+    const { badge, target } = await bookmarkDragTargets(t);
+    const x = target.x + 3;
+    const before = await t.repo.operationId();
+    await t.screen.mockMouse.click(x, badge.y);
+    for (const mode of ["same", "outside", "escape", "right"]) {
+      const button = mode === "right" ? 2 : 0;
+      await t.screen.mockMouse.pressDown(x, badge.y, button);
+      await t.screen.mockMouse.emitMouseEvent("drag", x + 1, badge.y, button);
+      if (mode === "escape") t.screen.mockInput.pressEscape();
+      await t.screen.mockMouse.release(mode === "outside" ? 90 : x, mode === "same" ? badge.y : target.y, button);
+      await t.screen.renderOnce();
+      expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+      expect(await t.repo.operationId()).toBe(before);
+    }
+    await t.screen.mockMouse.drag(x, badge.y, x, target.y);
+    await t.until("Confirm operation");
+    await t.until("Ready.");
+    t.screen.mockInput.pressEscape();
+    await t.until("diff --git");
+    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(await t.repo.operationId()).toBe(before);
+  } finally { await t.cleanup(); }
+}, 15_000);

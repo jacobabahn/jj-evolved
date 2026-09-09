@@ -1,16 +1,18 @@
 import { getTheme } from "./theme";
 import { changeIdChunks, graphChunks } from "./jj-highlighting";
-import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
+import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText, shortChangeId, type Bookmark, type Revision, type Snapshot } from "./repository";
 
 
-type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; revisionIndex: number | null; heading: boolean; text: StyledText };
+type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; revisionIndex: number | null; heading: boolean; text: StyledText; dragText: StyledText };
 type BookmarkSource = { bookmark: Bookmark; revision: Revision };
-type Drag = BookmarkSource & { kind: "pressed" | "dragging" };
+type DragSource = ({ action: "bookmark" } & BookmarkSource) | { action: "rebase"; revision: Revision };
+type Drag = DragSource & { kind: "pressed" | "dragging" };
 
 export class RevisionLog extends ScrollBoxRenderable {
   mouseSelectionEnabled = true;
-  canDragBookmark = () => false;
+  canDrag = () => false;
+  onRebaseDrop = (_source: Revision, _destination: Revision) => {};
   onBookmarkDrop = (_name: string, _revision: Revision) => {};
   onDragHint = (_text: string) => {};
   private snapshot: { data: Snapshot; bookmarks: Bookmark[] } | null = null;
@@ -19,6 +21,7 @@ export class RevisionLog extends ScrollBoxRenderable {
   private sourceIndex: number | null = null;
   private rows: Row[] = [];
   private bookmarkSources = new Map<Renderable, BookmarkSource>();
+  private revisionSources = new Map<Renderable, Revision>();
   private drag: Drag | null = null;
   private dropIndex: number | null = null;
 
@@ -44,6 +47,7 @@ export class RevisionLog extends ScrollBoxRenderable {
     for (const row of this.rows) row.node.destroyRecursively();
     this.rows = [];
     this.bookmarkSources.clear();
+    this.revisionSources.clear();
     this.revisions = snapshot.revisions;
     for (const [rowIndex, row] of snapshot.graph.entries()) {
       const revision = row.kind === "edge" ? null : row.revision;
@@ -53,6 +57,9 @@ export class RevisionLog extends ScrollBoxRenderable {
       if (row.kind === "revision") chunks.push(...changeIdChunks(shortChangeId(row.revision), row.revision.changePrefix, getTheme(this.ctx)));
       else if (row.kind === "description") chunks.push(fg(getTheme(this.ctx).text)(terminalText(row.revision.description.split("\n")[0] || "(no description)")));
       const text = new StyledText(chunks);
+      const dragText = row.kind === "revision"
+        ? new StyledText([...graphChunks(row.prefix, getTheme(this.ctx)), bg(getTheme(this.ctx).selected)(bold(fg(getTheme(this.ctx).selectedText)(shortChangeId(row.revision))))])
+        : text;
       const node = new BoxRenderable(this.ctx, {
         id: `revision-row-${rowIndex}`, height: 1, width: "100%", flexShrink: 0,
         flexDirection: "row", overflow: "hidden",
@@ -66,6 +73,7 @@ export class RevisionLog extends ScrollBoxRenderable {
         wrapMode: "none", truncate: true, selectable: false, content: text,
       });
       node.add(label);
+      if (revision) this.revisionSources.set(label, revision);
       const badges: TextRenderable[] = [];
       if (heading && revision) {
         for (const [index, bookmark] of bookmarks.filter(item => item.targets.includes(revision.commitId)).entries()) {
@@ -82,36 +90,42 @@ export class RevisionLog extends ScrollBoxRenderable {
         }));
       }
       this.add(node);
-      this.rows.push({ node, label, badges, revisionIndex, heading, text });
+      this.rows.push({ node, label, badges, revisionIndex, heading, text, dragText });
     }
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.revisions.length - 1));
     this.paintSelection();
   }
 
-  handleBookmarkMouse(event: MouseEvent) {
+  handleDragMouse(event: MouseEvent) {
     if (event.type === "down") {
       this.cancelDrag();
-      const source = event.target ? this.bookmarkSources.get(event.target) : undefined;
-      if (event.button === 0 && source && this.canDragBookmark()) {
+      const bookmark = event.target ? this.bookmarkSources.get(event.target) : undefined;
+      const revision = event.target ? this.revisionSources.get(event.target) : undefined;
+      const source: DragSource | null = bookmark ? { action: "bookmark", ...bookmark } : revision ? { action: "rebase", revision } : null;
+      if (event.button === 0 && source && this.canDrag()) {
         this.drag = { kind: "pressed", ...source };
         event.preventDefault();
       }
       return;
     }
     if (!this.drag) return;
-    if (!this.canDragBookmark()) { this.cancelDrag(); return; }
+    if (!this.canDrag()) { this.cancelDrag(); return; }
     if (event.type === "drag" && event.button === 0) {
       this.drag.kind = "dragging";
       this.dropIndex = this.destinationAt(event.x, event.y);
       const destination = this.dropIndex === null ? null : this.revisions[this.dropIndex];
-      this.onDragHint(`Move ${this.drag.bookmark.name} → ${destination?.changeId.slice(0, 8) || "choose another change"} · release to preview · Esc cancel`);
+      const operation = this.drag.action === "bookmark" ? `Move ${this.drag.bookmark.name}` : `Rebase ${this.drag.revision.changeId.slice(0, 8)} (only this change)`;
+      this.onDragHint(`${operation} → ${destination?.changeId.slice(0, 8) || "choose another change"} · release to preview · Esc cancel`);
       this.paintSelection();
     } else if (event.type === "up" && event.button === 0) {
       const drag = this.drag;
       const index = this.destinationAt(event.x, event.y);
       const destination = index === null ? null : this.revisions[index];
       this.cancelDrag();
-      if (drag.kind === "dragging" && destination) this.onBookmarkDrop(drag.bookmark.name, destination);
+      if (drag.kind === "dragging" && destination) {
+        if (drag.action === "bookmark") this.onBookmarkDrop(drag.bookmark.name, destination);
+        else this.onRebaseDrop(drag.revision, destination);
+      }
     }
   }
 
@@ -150,15 +164,17 @@ export class RevisionLog extends ScrollBoxRenderable {
   private paintSelection() {
     for (const row of this.rows) {
       const selected = row.revisionIndex === this.selectedIndex;
-      const source = row.revisionIndex === this.sourceIndex && row.heading;
+      const draggingSource = this.drag?.kind === "dragging" && this.drag.action === "rebase" &&
+        row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.drag.revision.commitId;
+      const source = (row.revisionIndex === this.sourceIndex || draggingSource) && row.heading;
       const drop = this.dropIndex !== null && row.revisionIndex === this.dropIndex;
       const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : getTheme(this.ctx).panel;
-      row.label.content = new StyledText([bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...row.text.chunks]);
+      row.label.content = new StyledText([bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks]);
       row.node.backgroundColor = background;
       row.label.bg = background;
       for (const badge of row.badges) {
         const bookmark = this.bookmarkSources.get(badge)?.bookmark;
-        badge.bg = this.drag?.kind === "dragging" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
+        badge.bg = this.drag?.kind === "dragging" && this.drag.action === "bookmark" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
         badge.fg = getTheme(this.ctx).bookmark;
       }
     }
