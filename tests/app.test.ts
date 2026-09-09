@@ -471,3 +471,109 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     expect(t.screen.captureCharFrame()).not.toContain("Rebase from ●");
   } finally { await t.cleanup(); }
 }, 15_000);
+
+async function bookmarkDragTargets(t: Awaited<ReturnType<typeof setup>>, name = "feature", remote = "") {
+  await t.screen.renderOnce();
+  const snapshot = await t.repo.snapshot("all()");
+  const bookmarks = await t.repo.bookmarks();
+  const source = bookmarks.find(bookmark => bookmark.name === name && bookmark.remote === remote);
+  const sourceRow = snapshot.graph.findIndex(row => row.kind === "revision" && source?.targets.includes(row.revision.commitId));
+  const row = snapshot.graph[sourceRow];
+  if (!row || row.kind !== "revision") throw new Error("Missing bookmark source row");
+  const badgeIndex = bookmarks.filter(bookmark => bookmark.targets.includes(row.revision.commitId)).findIndex(bookmark => bookmark.name === name && bookmark.remote === remote);
+  const badge = t.screen.renderer.root.findDescendantById(`bookmark-${sourceRow}-${badgeIndex}`);
+  const targetIndex = snapshot.graph.findIndex(row => row.kind === "revision" && row.revision.workingCopy);
+  const target = t.screen.renderer.root.findDescendantById(`revision-row-${targetIndex}`);
+  const destination = snapshot.revisions.find(revision => revision.workingCopy);
+  if (!badge || !target || !destination) throw new Error("Missing drag target");
+  return { badge, target, destination };
+}
+
+test("dragging an individual bookmark highlights a change and moves only after confirmation", async () => {
+  const t = await setup();
+  try {
+    await t.f.jj("bookmark", "create", "aaa", "-r", "feature");
+    t.screen.mockInput.pressKey("r");
+    await t.until("Ready.");
+    const { badge, target, destination } = await bookmarkDragTargets(t);
+    const before = await t.repo.bookmarks();
+    await t.screen.mockMouse.pressDown(badge.x + 2, badge.y);
+    await t.screen.mockMouse.emitMouseEvent("drag", target.x + 2, target.y);
+    await t.until("Move feature →");
+    expect(t.screen.captureCharFrame()).toContain(`→ @`);
+    await t.screen.mockMouse.release(target.x + 2, target.y);
+    await t.until("Confirm operation");
+    expect(await t.repo.bookmarks()).toEqual(before);
+    expect(t.screen.captureCharFrame()).toContain("bookmark-move feature");
+    t.screen.mockInput.pressEnter();
+    await t.until("Bookmark move completed");
+    const after = await t.repo.bookmarks();
+    expect(after.find(bookmark => bookmark.name === "feature")?.targets).toEqual([destination.commitId]);
+    expect(after.find(bookmark => bookmark.name === "aaa")?.targets).toEqual(before.find(bookmark => bookmark.name === "aaa")?.targets);
+    await t.until("[feature]");
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("bookmark click, same-change drop, outside drop, Escape and right drag do not move bookmarks", async () => {
+  const t = await setup();
+  try {
+    const { badge, target } = await bookmarkDragTargets(t);
+    const before = await t.repo.operationId();
+    await t.screen.mockMouse.click(badge.x + 2, badge.y);
+    for (const mode of ["same", "outside", "escape", "right"]) {
+      const button = mode === "right" ? 2 : 0;
+      await t.screen.mockMouse.pressDown(badge.x + 2, badge.y, button);
+      await t.screen.mockMouse.emitMouseEvent("drag", badge.x + 3, badge.y, button);
+      if (mode === "escape") t.screen.mockInput.pressEscape();
+      const x = mode === "outside" ? 90 : mode === "same" ? badge.x + 3 : target.x + 2;
+      const y = mode === "same" ? badge.y : target.y;
+      await t.screen.mockMouse.release(x, y, button);
+      await t.screen.renderOnce();
+      expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+      expect(t.screen.captureCharFrame()).not.toContain("release to preview");
+      expect(await t.repo.operationId()).toBe(before);
+    }
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("bookmark drop confirmation can be cancelled and rejects an external operation", async () => {
+  const t = await setup();
+  try {
+    const { badge, target } = await bookmarkDragTargets(t);
+    const before = await t.repo.bookmarks();
+    async function drop() {
+      await t.screen.mockMouse.drag(badge.x + 2, badge.y, target.x + 2, target.y);
+      await t.until("Confirm operation");
+    }
+    await drop();
+    t.screen.mockInput.pressEscape();
+    await t.until("Empty change.");
+    expect(await t.repo.bookmarks()).toEqual(before);
+    await drop();
+    await t.f.jj("bookmark", "create", "external");
+    t.screen.mockInput.pressEnter();
+    await t.until("Repository changed");
+    expect((await t.repo.bookmarks()).find(bookmark => bookmark.name === "feature")).toEqual(before.find(bookmark => bookmark.name === "feature"));
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("remote bookmark labels stay read-only and overlays block bookmark drags", async () => {
+  const t = await setup();
+  try {
+    t.screen.resize(120, 30);
+    const { badge, target } = await bookmarkDragTargets(t, "feature", "git");
+    const before = await t.repo.operationId();
+    await t.screen.mockMouse.drag(badge.x + 2, badge.y, target.x + 2, target.y);
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(await t.repo.operationId()).toBe(before);
+    const local = await bookmarkDragTargets(t);
+    t.screen.mockInput.pressKey("b");
+    await t.until("Bookmarks");
+    await t.until("Ready.");
+    await t.screen.mockMouse.drag(local.badge.x + 2, local.badge.y, local.target.x + 2, local.target.y);
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(await t.repo.operationId()).toBe(before);
+  } finally { await t.cleanup(); }
+}, 15_000);
