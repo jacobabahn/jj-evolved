@@ -1,0 +1,119 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`styled selection and help layout at 80 columns: selected revision 80 1`] = `
+[
+  {
+    "attributes": 0,
+    "bg": "#101820",
+    "fg": "#d6e2eb",
+    "text": "Next change",
+    "width": 11,
+  },
+  {
+    "attributes": 0,
+    "bg": "#294a51",
+    "fg": "#d6e2eb",
+    "text": "Next change",
+    "width": 11,
+  },
+]
+`;
+
+exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
+"▀─ Help ─────────────────────────────────────┐
+Keyboard reference                           │
+                                             │
+j / k or arrows   Move through revisions     │
+Tab               Switch revisions / preview │
+focus                                        │
+Page Up / Down    Scroll preview             │
+s                 Working-copy status        │
+r                 Refresh history            │
+/                 Enter a revset; empty      │
+restores all()                               │
+d                 Describe selected change,  │
+single line                                  │
+e                 Make selection the working │
+copy immediately                             │
+R / S             Choose rebase / squash     │
+destination in the graph                     │
+n                 Create an empty child of   │
+selection                                    │
+Space             Action menu: edit, rebase, │
+squash, split, abandon                       │
+b                 Local and remote bookmarks │
+o                 Operation history,         │
+inspection and restore                       │
+─────────────────────────────────────────────┘"
+`;
+
+exports[`styled selection and help layout at 80 columns: footer styles 80 1`] = `
+[
+  {
+    "attributes": 0,
+    "bg": "#101820",
+    "fg": "#6ed6bd",
+    "text": "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh",
+    "width": 76,
+  },
+]
+`;
+
+exports[`styled selection and help layout at 120 columns: selected revision 120 1`] = `
+[
+  {
+    "attributes": 0,
+    "bg": "#101820",
+    "fg": "#d6e2eb",
+    "text": "Next change",
+    "width": 11,
+  },
+  {
+    "attributes": 0,
+    "bg": "#294a51",
+    "fg": "#d6e2eb",
+    "text": "Next change",
+    "width": 11,
+  },
+]
+`;
+
+exports[`styled selection and help layout at 120 columns: help layout 120 1`] = `
+"▀─ Help ─────────────────────────────────────────────────────────────┐
+Keyboard reference                                                   │
+                                                                     │
+j / k or arrows   Move through revisions                             │
+Tab               Switch revisions / preview focus                   │
+Page Up / Down    Scroll preview                                     │
+s                 Working-copy status                                │
+r                 Refresh history                                    │
+/                 Enter a revset; empty restores all()               │
+d                 Describe selected change, single line              │
+e                 Make selection the working copy immediately        │
+R / S             Choose rebase / squash destination in the graph    │
+n                 Create an empty child of selection                 │
+Space             Action menu: edit, rebase, squash, split, abandon  │
+b                 Local and remote bookmarks                         │
+o                 Operation history, inspection and restore          │
+u                 Preview undo of the latest operation               │
+f                 Browse files changed in selected revision          │
+Enter             Return to the selected revision preview            │
+t                 Choose a theme, preview and save                   │
+?                 Show this help                                     │
+q / Ctrl-C        Quit                                               │
+                                                                     │
+In prompts                                                           │
+─────────────────────────────────────────────────────────────────────┘"
+`;
+
+exports[`styled selection and help layout at 120 columns: footer styles 120 1`] = `
+[
+  {
+    "attributes": 0,
+    "bg": "#101820",
+    "fg": "#6ed6bd",
+    "text": "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh",
+    "width": 76,
+  },
+]
+`;

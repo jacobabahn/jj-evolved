@@ -98,4 +98,14 @@ bun test
 
 Tests require `jj` on PATH. They use temporary repositories and exercise real CLI operations and the OpenTUI renderer.
 
+For styled snapshots, recorded UI scenarios, and a browsable gallery:
+
+```bash
+bun run test:ui
+bun run ui gallery
+bun run ui record rebase
+```
+
+Open the printed HTML path to inspect frames, play a recording, or switch scenarios. Scenario failures save a replay under `artifacts/ui/failures/`. See [the UI tooling guide](docs/ui-tooling.md) to add scenarios and update snapshots.
+
 See the [feature specification](docs/features.md) for scope and acceptance criteria, and the [implementation record](docs/implementation.md) for the architecture decision.
