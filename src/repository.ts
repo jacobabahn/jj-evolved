@@ -1,6 +1,7 @@
 export interface Revision {
   commitId: string;
   changeId: string;
+  changePrefix: string;
   description: string;
   author: string;
   bookmarks: string;
@@ -31,10 +32,14 @@ export type Mutation =
   | { kind: "bookmark-delete"; name: string }
   | { kind: "undo" | "restore"; operation: Operation };
 
+export type InteractiveAction =
+  | { kind: "squash"; revision: Revision; destination: Revision }
+  | { kind: "split"; revision: Revision };
+
 export interface Operation { id: string; description: string; time: string; current: boolean }
 export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean }
 export interface ChangedFile { path: string; status: string }
-export interface TreeComparison { before: string; after: string }
+export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string> }
 export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null }
 
 function string(value: unknown): string {
@@ -53,14 +58,19 @@ function tuples(output: string): unknown[][] {
   return output.split("\n").filter(Boolean).map(line => array(JSON.parse(line)));
 }
 function literalPath(path: string): string { return `root-file:${JSON.stringify(path)}`; }
+export function shortChangeId(revision: Pick<Revision, "changeId" | "changePrefix">): string {
+  return revision.changeId.slice(0, Math.max(8, revision.changePrefix.length));
+}
+
 function label(revision: Revision): string {
-  return `${revision.changeId.slice(0, 8)} / ${revision.commitId.slice(0, 12)} ${revision.description.trim() || "(no description)"}`;
+  return `${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)} ${revision.description.trim() || "(no description)"}`;
 }
 
 
 const LOG_TEMPLATE = `'{'
   ++ '"commitId":' ++ json(commit_id)
   ++ ',"changeId":' ++ json(change_id)
+  ++ ',"changePrefix":' ++ json(change_id.shortest().prefix())
   ++ ',"description":' ++ json(description)
   ++ ',"author":' ++ json(author.name())
   ++ ',"bookmarks":' ++ json(stringify(bookmarks))
@@ -78,6 +88,7 @@ function parseRevision(value: unknown): Revision {
     typeof value !== "object" || value === null ||
     !("commitId" in value) || typeof value.commitId !== "string" || !/^[0-9a-f]{40,64}$/.test(value.commitId) ||
     !("changeId" in value) || typeof value.changeId !== "string" || !/^[k-z]+$/.test(value.changeId) ||
+    !("changePrefix" in value) || typeof value.changePrefix !== "string" || !/^[k-z]+$/.test(value.changePrefix) || !value.changeId.startsWith(value.changePrefix) ||
     !("description" in value) || typeof value.description !== "string" ||
     !("author" in value) || typeof value.author !== "string" ||
     !("bookmarks" in value) || typeof value.bookmarks !== "string" ||
@@ -93,7 +104,7 @@ function parseRevision(value: unknown): Revision {
     parents.push(parent);
   }
   return {
-    commitId: value.commitId, changeId: value.changeId,
+    commitId: value.commitId, changeId: value.changeId, changePrefix: value.changePrefix,
     description: value.description, author: value.author,
     bookmarks: value.bookmarks, parents,
     workingCopy: value.workingCopy, conflict: value.conflict,
@@ -136,12 +147,18 @@ async function projectedTree(root: string, action: HistoryMutation, operationId:
   }
   const affected = `(${changes.map(change => `present(${change})`).join(" | ")} | present(${action.destination.changeId})::)`;
   const args = ["log", "--config", "ui.log-word-wrap=false", "--limit", "40", "-r", `${affected} | parents(${affected})`, "-T",
-    'change_id.short(8) ++ " " ++ local_bookmarks.map(|b| b.name()).join(" ") ++ " " ++ description.first_line() ++ if(conflict, " [conflict]") ++ "\\n\\n"'];
-  const [before, after] = await Promise.all([
+    'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ "]").join(" ") ++ if(conflict, " [conflict]") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"'];
+  const prefixArgs = [...args.slice(0, -1), '"[" ++ json(change_id) ++ "," ++ json(change_id.shortest().prefix()) ++ "]" ++ "\\n"', "--no-graph"];
+  const [before, after, beforeIds, afterIds] = await Promise.all([
     run(root, ["--at-op", operationId, ...args]),
     run(root, ["--at-op", projectedOperation || operationId, ...args]),
+    run(root, ["--at-op", operationId, ...prefixArgs]),
+    run(root, ["--at-op", projectedOperation || operationId, ...prefixArgs]),
   ]);
-  return { before: terminalText(before), after: terminalText(after) };
+  return { before: terminalText(before), after: terminalText(after),
+    beforePrefixes: new Map(tuples(beforeIds).map(row => [string(row[0]), string(row[1])])),
+    afterPrefixes: new Map(tuples(afterIds).map(row => [string(row[0]), string(row[1])])),
+  };
 }
 
 export class Repository {
@@ -205,6 +222,44 @@ export class Repository {
     const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
       `'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'`]);
     return tuples(output).map(([path, status]) => ({ path: string(path), status: string(status) }));
+  }
+
+  async interactive(action: InteractiveAction): Promise<void> {
+    await this.status();
+    const targets = action.kind === "squash" ? [action.revision, action.destination] : [action.revision];
+    for (const revision of targets) {
+      if (!(await this.snapshot(`present(${revision.changeId})`)).revisions.some(current => current.commitId === revision.commitId)) {
+        throw new Error("The selected revision has changed. Refresh and select it again.");
+      }
+    }
+    const args = action.kind === "squash"
+      ? ["squash", "--interactive", "--from", action.revision.commitId, "--into", action.destination.commitId]
+      : ["split", "--interactive", "--revision", action.revision.commitId];
+    const editorProcess = Bun.spawn(["jj", "--no-pager", ...args], {
+      cwd: this.root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
+      env: { ...process.env, JJ_INTERACTIVE: "1" },
+    });
+    const interrupt = () => { editorProcess.kill("SIGINT"); };
+    process.on("SIGINT", interrupt);
+    try {
+      const code = await editorProcess.exited;
+      if (code !== 0) throw new Error(`Interactive ${action.kind} did not complete (exit code ${code}).`);
+    } finally { process.off("SIGINT", interrupt); }
+  }
+
+  async openHunk(revision: Revision): Promise<void> {
+    const executable = Bun.which("hunk", { PATH: process.env.PATH ?? "" });
+    if (!executable) throw new Error("Hunk is not installed or is not on PATH. Install it with npm install -g hunkdiff, then try again.");
+    const viewer = Bun.spawn([executable, "show", revision.commitId], {
+      cwd: this.root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
+      env: process.env,
+    });
+    const interrupt = () => { viewer.kill("SIGINT"); };
+    process.on("SIGINT", interrupt);
+    try {
+      const code = await viewer.exited;
+      if (code !== 0) throw new Error(`Hunk exited with code ${code}.`);
+    } finally { process.off("SIGINT", interrupt); }
   }
 
   async prepare(action: Mutation): Promise<PreparedMutation> {

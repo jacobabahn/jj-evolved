@@ -49,3 +49,23 @@ test("describes literal text and creates a real child change", async () => {
 test("surfaces a non-repository error", async () => {
   await expect(Repository.open("/tmp")).rejects.toThrow();
 });
+
+test("short change prefixes come from JJ and resolve beyond the filtered graph", async () => {
+  const f = await fixture();
+  try {
+    for (let index = 0; index < 17; index++) await f.jj("new", "-m", `Prefix collision ${index}`);
+    const repo = await Repository.open(f.path);
+    const all = await repo.snapshot("all()");
+    const collision = all.revisions.find(revision => revision.changePrefix.length > 1);
+    if (!collision) throw new Error("Expected two changes sharing an initial letter");
+    for (const revision of all.revisions) {
+      const expected = await f.jj("log", "--no-graph", "-r", revision.commitId, "-T", "change_id.shortest().prefix()");
+      expect(revision.changePrefix).toBe(expected);
+      const resolved = await f.jj("log", "--no-graph", "-r", revision.changePrefix, "-T", "change_id");
+      expect(resolved).toBe(revision.changeId);
+    }
+    const filtered = await repo.snapshot(collision.commitId);
+    expect(filtered.revisions).toHaveLength(1);
+    expect(filtered.revisions[0]?.changePrefix).toBe(collision.changePrefix);
+  } finally { await f.cleanup(); }
+});

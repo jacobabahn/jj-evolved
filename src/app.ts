@@ -1,12 +1,14 @@
+import { highlightJjText, revisionPrefixes } from "./jj-highlighting";
+import { ChangePreview } from "./change-preview";
 import {
-  BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable,
-  TextRenderable, StyledText, fg, type CliRenderer, type KeyEvent,
+  BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable,
+  TextRenderable, type CliRenderer, type KeyEvent,
 } from "@opentui/core";
 import { TreeComparisonView } from "./tree-comparison";
 import { ActionOverlay } from "./action-overlay";
 import { HistoryForm } from "./history-form";
 import { RevisionLog } from "./revision-log";
-import { Repository, terminalText, type Mutation, type Revision, type PreparedMutation } from "./repository";
+import { Repository, terminalText, shortChangeId, type InteractiveAction, type Mutation, type Revision, type PreparedMutation } from "./repository";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string> };
 
@@ -56,26 +58,26 @@ Commands use your installed jj and its repository rules.`;
 
 export function createApp(renderer: CliRenderer, repository: Repository) {
   const colors = { bg: "#101820", panel: "#15212c", text: "#d6e2eb", muted: "#91a6b7", accent: "#6ed6bd", border: "#344958" };
-  const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg, paddingX: 1 });
+  const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg });
   const header = new TextRenderable(renderer, { id: "header", height: 1, fg: colors.accent, content: terminalText(`jj-evolved  /  ${repository.root}`) });
   const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset: all()" });
   const body = new BoxRenderable(renderer, { id: "body", flexDirection: "row", flexGrow: 1, minHeight: 1 });
-  const listBox = new BoxRenderable(renderer, { id: "revision-pane", width: "42%", minWidth: 26, flexShrink: 0, border: true, borderColor: colors.accent, title: " Revisions ", backgroundColor: colors.panel });
+  const listBox = new BoxRenderable(renderer, { id: "revision-pane", width: "42%", minWidth: 26, flexShrink: 0, border: true, customBorderChars: { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }, borderColor: colors.accent, title: " Revisions ", backgroundColor: colors.panel });
   const list = new RevisionLog(renderer);
   list.height = 0;
   list.flexGrow = 1;
-  const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: true, borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true });
-  const detail = new TextRenderable(renderer, { id: "preview-text", content: "Loading repository…", fg: colors.text, wrapMode: "word", flexShrink: 0 });
+  const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
+  const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
   const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh\nSpace actions  b bookmarks  o op log  u undo  ? help  q quit" });
-  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: "#294a51", selectedTextColor: "#ffffff", descriptionColor: colors.muted, showDescription: true, wrapSelection: false });
+  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: "#294a51", selectedTextColor: "#ffffff", descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
-  const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, border: true, borderColor: colors.border, title: " Preview " });
-  const overlayText = new TextRenderable(renderer, { id: "overlay-preview-text", fg: colors.text, wrapMode: "word", flexShrink: 0 });
+  const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
+  const overlayText = new ChangePreview(renderer, "overlay-preview-text");
   const comparison = new TreeComparisonView(renderer, "confirmation-trees");
   overlayPreview.add(comparison);
   overlayPreview.add(overlayText);
@@ -125,7 +127,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     ++previewRequest;
     if (!overlay.visible) {
       const revision = selected();
-      overlay.context.content = revision ? terminalText(`Source ${revision.changeId.slice(0, 8)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`) : "Repository actions";
+      overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision])) : "Repository actions";
     }
     overlay.title = ` ${title} `;
     overlay.height = "84%";
@@ -143,18 +145,14 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     if (stopped) return;
     preview.title = ` ${title} `;
     const safe = terminalText(text);
-    detail.content = title === "Change preview"
-      ? new StyledText(safe.split("\n").map(line => fg(
-        line.startsWith("+") ? "#8cddb0" : line.startsWith("-") ? "#ffad9e" : line.startsWith("@@") ? "#9ebdf5" : colors.text,
-      )(`${line}\n`)))
-      : safe;
+    detail.content = safe;
     preview.scrollTo(0);
   }
   async function loadPreview() {
     const request = ++previewRequest;
     const revision = selected();
     if (!revision) { show("No revisions match this revset. Press / to change it.", "No revisions"); return; }
-    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? "CONFLICT\nUse jj resolve in another terminal, then r to refresh." : ""}\n\n`);
+    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? "CONFLICT\nUse jj resolve in another terminal, then r to refresh." : ""}`.trimEnd() + "\n\n");
     show(`${metadata}Loading diff…`, "Change preview");
     try {
       const diff = await repository.diff(revision);
@@ -171,6 +169,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     const bookmarks = await repository.bookmarks();
     if (stopped) return;
     revisions = snapshot.revisions;
+    detail.prefixes = overlayText.prefixes = revisionPrefixes(revisions);
     revset = nextRevset;
     filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions (limit 200)`);
     let index = workingCopy ? revisions.findIndex(item => item.workingCopy) : -1;
@@ -277,12 +276,12 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
       if (stopped) return;
       ++previewRequest;
       showOverlay(prepared.summary, "Confirm operation");
-      comparison.setTrees(prepared.trees);
+      comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
       openPrompt({ kind: "confirm", prepared, edit, back }, "Review preview before applying");
       if (back) {
         inlineHint.visible = false;
         if (action.kind === "rebase" || action.kind === "squash") {
-          overlay.context.content = terminalText(`Source ${action.revision.changeId.slice(0, 8)} / ${action.revision.commitId.slice(0, 12)}\n${action.revision.description.split("\n")[0] || "(no description)"}`);
+          overlay.context.content = highlightJjText(`Source ${shortChangeId(action.revision)} / ${action.revision.commitId.slice(0, 12)}\n${action.revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([action.revision]));
         }
         overlay.hints.content = "Enter apply  Esc choose destination  p refresh preview  PgUp/Dn scroll";
       }
@@ -318,6 +317,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     void run("Loading destinations…", async () => {
       const snapshot = await repository.snapshot("all()");
       if (stopped) return;
+      overlayText.prefixes = revisionPrefixes(snapshot.revisions);
       pick(title, snapshot.revisions.filter(item => item.commitId !== source?.commitId).map(item => ({
         name: `${item.changeId.slice(0, 8)} ${item.description.trim() || "(no description)"}`,
         description: `${item.commitId.slice(0, 12)} ${item.bookmarks}`,
@@ -427,6 +427,24 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     if (revision.description.trimEnd().includes("\n")) report("This description has multiple lines. Use jj describe in your terminal.", true);
     else openPrompt({ kind: "describe", revision }, `Describe ${revision.changeId.slice(0, 8)}`, revision.description.trimEnd());
   }
+  function editInteractively(action: InteractiveAction) {
+    openExternal(`JJ's diff editor for ${action.kind}`, () => repository.interactive(action));
+  }
+  function openExternal(name: string, launch: () => Promise<void>) {
+    void run(`Opening ${name}…`, async () => {
+      closePrompt();
+      try {
+        renderer.suspend();
+        await launch();
+      } finally {
+        renderer.resume();
+        await refresh("all()", true).catch(error => {
+          throw new Error(`Refreshing after ${name} failed. Press r to reload before repeating the action. ${errorText(error)}`);
+        });
+      }
+    });
+  }
+
   function actions(revision: Revision) {
     pick("Actions", [
       { name: "Edit change", description: "Make selection the working copy", choose: () => confirm({ kind: "edit", revision }) },
@@ -434,10 +452,13 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
       { name: "Rebase change", description: "Source, destination, scope and preview", choose: () => openHistory(revision, "rebase", false) },
       { name: "Rebase change and descendants", description: "Move the selected stack", choose: () => openHistory(revision, "rebase", true) },
       { name: "Squash changes", description: "Source, destination, files and description", choose: () => openHistory(revision, "squash") },
+      { name: "Squash interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => destination("Squash interactively into", revision, destination => editInteractively({ kind: "squash", revision, destination })) },
+      { name: "Split interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => editInteractively({ kind: "split", revision }) },
       { name: "Split change", description: "Put selected files in a first change", choose: () => chooseFiles(revision, "Split files", files => ask("First change description", "", description => confirm({ kind: "split", revision, files, description }))) },
       { name: "Create bookmark", description: "Name the selected revision", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
       { name: "Abandon change", description: "Remove selection and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
+      { name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
     ]);
   }
   function updateInlineHint() {
