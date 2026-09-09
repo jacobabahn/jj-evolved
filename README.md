@@ -49,9 +49,13 @@ Menu actions open in overlays, leaving the graph and selected revision visible b
 
 For inline rebase or squash, press `R` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. Tab toggles rebase between the selected change and its descendants. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
 
-Rebase and squash previews show Before and After trees side by side with native graph lines, local bookmarks, and conflict markers. Both columns scroll together; long labels are clipped to preserve tree alignment. The view includes relevant descendants and parents, up to 40 revisions. Previewing does not change the working copy or live operation log.
+Rebase and squash previews show the proposed tree on the left and the current tree on the right with native graph lines, local bookmarks, and conflict markers. Both columns scroll together; long labels are clipped to preserve tree alignment. The view includes relevant descendants and parents, up to 40 revisions. Previewing does not change the working copy or live operation log.
 
 The rebase and squash menu forms show the source, destination, options, and preview in one form. Enter edits the selected field. Choose **Apply** after reviewing the preview. You can change a field without restarting the action. Press `p` to refresh a stale preview.
+
+For individual files or hunks, open the Space menu and choose **Squash interactively** or **Split interactively**. Squash asks you to choose a destination change first. The app pauses while JJ opens your configured diff editor, followed by your description editor when needed. Save and close the editor to let JJ apply your selection. Cancel using the editor's controls or Ctrl-C. The app resumes and refreshes the graph when JJ exits.
+
+To review a change in [Hunk](https://github.com/modem-dev/hunk/), install its CLI with `npm install -g hunkdiff`, then select the change and choose **Open in Hunk** from the Space menu. The app runs `hunk show` with the selected commit in the repository directory. Close Hunk to return to the app and refresh the graph. Hunk is optional and must be on your PATH.
 
 Errors stay inside the overlay and preserve your input. Success closes it, selects the resulting revision when available, and briefly shows a confirmation above the graph. The footer contains keyboard hints. If another command or working-copy edit changes the repository before confirmation, the app rejects the stale action.
 

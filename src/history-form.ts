@@ -1,7 +1,9 @@
-import { InputRenderable, ScrollBoxRenderable, SelectRenderable, TextRenderable, type KeyEvent, type RenderContext } from "@opentui/core";
+import { highlightJjText, revisionPrefixes } from "./jj-highlighting";
+import { ChangePreview } from "./change-preview";
+import { InputRenderable, ScrollBoxRenderable, SelectRenderable, type KeyEvent, type RenderContext } from "@opentui/core";
 import { TreeComparisonView } from "./tree-comparison";
 import { ActionOverlay } from "./action-overlay";
-import { Repository, terminalText, type ChangedFile, type Mutation, type PreparedMutation, type Revision } from "./repository";
+import { Repository, terminalText, shortChangeId, type ChangedFile, type Mutation, type PreparedMutation, type Revision } from "./repository";
 
 type Draft =
   | { kind: "rebase"; descendants: boolean }
@@ -17,7 +19,7 @@ export class HistoryForm extends ActionOverlay {
   private readonly choices: SelectRenderable;
   private readonly input: InputRenderable;
   private readonly preview: ScrollBoxRenderable;
-  private readonly text: TextRenderable;
+  private readonly text: ChangePreview;
   private readonly comparison: TreeComparisonView;
   private destination: Revision | null = null;
   private mode: Mode = { kind: "fields" };
@@ -32,12 +34,12 @@ export class HistoryForm extends ActionOverlay {
     private readonly draft: Draft, private readonly apply: (prepared: PreparedMutation) => Promise<void>) {
     super(ctx, "history-form");
     this.title = draft.kind === "rebase" ? " Rebase change " : " Squash changes ";
-    this.context.content = terminalText(`Source ${source.changeId.slice(0, 8)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`);
+    this.context.content = highlightJjText(`Source ${shortChangeId(source)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([source]));
     this.controls = new SelectRenderable(ctx, { id: "history-fields", height: draft.kind === "rebase" ? 3 : 4, flexShrink: 0, showDescription: false, wrapSelection: true, backgroundColor: "#15212c", focusedBackgroundColor: "#15212c", selectedBackgroundColor: "#294a51", textColor: "#d6e2eb", focusedTextColor: "#d6e2eb" });
     this.choices = new SelectRenderable(ctx, { id: "history-choices", flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: "#15212c", focusedBackgroundColor: "#15212c", textColor: "#d6e2eb", focusedTextColor: "#d6e2eb" });
     this.input = new InputRenderable(ctx, { id: "history-description", visible: false, textColor: "#d6e2eb", backgroundColor: "#294a51" });
-    this.preview = new ScrollBoxRenderable(ctx, { id: "history-preview", flexGrow: 1, minHeight: 1, border: true, title: " Preview ", borderColor: "#344958" });
-    this.text = new TextRenderable(ctx, { id: "history-preview-text", content: "Choose a destination to preview the result.", fg: "#d6e2eb", wrapMode: "word", flexShrink: 0 });
+    this.preview = new ScrollBoxRenderable(ctx, { id: "history-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, title: " Preview ", borderColor: "#344958" });
+    this.text = new ChangePreview(ctx, "history-preview-text", "Choose a destination to preview the result.");
     this.fields.add(this.controls);
     this.fields.add(this.input);
     this.comparison = new TreeComparisonView(ctx, "history-trees");
@@ -82,7 +84,8 @@ export class HistoryForm extends ActionOverlay {
       const prepared = await this.repository.prepare(action);
       if (this.disposed || generation !== this.generation) return;
       this.prepared = prepared;
-      this.comparison.setTrees(prepared.trees);
+      this.comparison.setTrees(prepared.trees, this.draft.kind);
+      this.text.prefixes = revisionPrefixes([this.source, ...(this.destination ? [this.destination] : [])]);
       this.text.content = prepared.summary;
       this.preview.scrollTo(0);
       this.report("Preview ready. Review it, then select Apply.");

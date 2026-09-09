@@ -44,7 +44,7 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
   try {
     await t.until("Empty change.");
     t.screen.mockInput.pressKey("j");
-    await t.until("+hello from jj-evolved");
+    await t.until("+ hello from jj-evolved");
     t.screen.mockInput.pressKey("s");
     await t.until("Working-copy status");
     await t.until("Working copy");
@@ -68,6 +68,10 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
     expect(frame).toContain("jj-evolved");
     expect(frame).toContain("Revisions");
     expect(frame).toContain("q quit");
+    expect(frame).toContain("┬");
+    expect(frame).toContain("┴");
+    expect(frame).not.toContain("┐┌");
+    expect(frame).not.toContain("┘└");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -163,6 +167,8 @@ test("an older diff cannot replace a newer selection", async () => {
     status: () => repo.status(),
     prepare: action => repo.prepare(action),
     apply: prepared => repo.apply(prepared),
+    interactive: action => repo.interactive(action),
+    openHunk: revision => repo.openHunk(revision),
     operations: limit => repo.operations(limit),
     operationId: () => repo.operationId(),
     operationDiff: operation => repo.operationDiff(operation),
@@ -184,14 +190,14 @@ test("an older diff cannot replace a newer selection", async () => {
     screen.mockInput.pressKey("j");
     for (let attempt = 0; attempt < 100; attempt++) {
       await screen.renderOnce();
-      if (screen.captureCharFrame().includes("+hello from jj-evolved")) break;
+      if (screen.captureCharFrame().includes("+ hello from jj-evolved")) break;
       await Bun.sleep(10);
     }
-    expect(screen.captureCharFrame()).toContain("+hello from jj-evolved");
+    expect(screen.captureCharFrame()).toContain("+ hello from jj-evolved");
     gate.resolve();
     await loading;
     await screen.renderOnce();
-    expect(screen.captureCharFrame()).toContain("+hello from jj-evolved");
+    expect(screen.captureCharFrame()).toContain("+ hello from jj-evolved");
   } finally {
     gate.resolve();
     app.stop();
@@ -402,18 +408,23 @@ test("inline squash reviews a graph destination before applying", async () => {
     expect(t.screen.captureCharFrame()).toContain("Revisions");
     t.screen.mockInput.pressEnter();
     await t.until("Confirm operation");
-    await t.until("Before");
-    await t.until("After");
+    await t.until("Current tree");
+    await t.until("After squash");
     const treeText = t.screen.renderer.root.findDescendantById("confirmation-trees-after");
     const beforeText = t.screen.renderer.root.findDescendantById("confirmation-trees-before");
     if (!treeText || !beforeText) throw new Error("Missing confirmation trees");
-    expect(beforeText.x).toBeLessThan(treeText.x);
+    expect(treeText.x).toBeLessThan(beforeText.x);
     expect(beforeText.y).toBe(treeText.y);
-    expect(t.screen.captureCharFrame().split("\n").some(line => line[beforeText.x] === "│")).toBe(true);
-    expect(t.screen.captureCharFrame().split("\n").some(line => line[treeText.x] === "│")).toBe(true);
+    const afterColumn = t.screen.renderer.root.findDescendantById("confirmation-trees-after-column");
+    if (!afterColumn) throw new Error("Missing tree border");
+    expect(t.screen.captureCharFrame().split("\n")[afterColumn.y]?.[afterColumn.x + afterColumn.width - 1]).toBe("┬");
+    const treeFrame = t.screen.captureCharFrame().split("\n");
+    for (let y = afterColumn.y + 1; y < afterColumn.y + afterColumn.height - 1; y++) {
+      expect(treeFrame[y]?.[afterColumn.x + afterColumn.width - 1]).toBe("│");
+    }
     t.screen.resize(120, 30);
     await t.screen.renderOnce();
-    expect(beforeText.x).toBeLessThan(treeText.x);
+    expect(treeText.x).toBeLessThan(beforeText.x);
     expect(beforeText.y).toBe(treeText.y);
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressEscape();
@@ -421,8 +432,8 @@ test("inline squash reviews a graph destination before applying", async () => {
     expect(t.screen.captureCharFrame()).toContain("Squash from ●");
     t.screen.mockInput.pressEnter();
     await t.until("Confirm operation");
-    await t.until("Before");
-    await t.until("After");
+    await t.until("Current tree");
+    await t.until("After squash");
     t.screen.mockInput.pressEnter();
     await t.until("squash completed");
     const target = (await t.repo.snapshot("feature")).revisions[0];
@@ -459,8 +470,8 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     t.screen.mockInput.pressTab();
     t.screen.mockInput.pressEnter();
     await t.until("Confirm operation");
-    await t.until("Before");
-    await t.until("After");
+    await t.until("Current tree");
+    await t.until("After rebase");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressEnter();
     await t.until("rebase completed");

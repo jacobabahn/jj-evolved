@@ -12,7 +12,7 @@ export class ActionOverlay extends BoxRenderable {
     super(ctx, {
       id, position: "absolute", left: "12%", top: "8%", width: "82%", height: "84%",
       zIndex: 20, border: true, borderColor: "#6ed6bd", backgroundColor: "#15212c",
-      paddingX: 1, flexDirection: "column",
+      flexDirection: "column",
     });
     this.context = new TextRenderable(ctx, { id: `${id}-source`, height: 2, flexShrink: 0, fg: "#91a6b7", truncate: true });
     this.fields = new BoxRenderable(ctx, { id: `${id}-fields`, flexDirection: "column", flexShrink: 0 });

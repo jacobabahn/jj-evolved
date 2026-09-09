@@ -80,3 +80,42 @@ test("selected revisions remain visible while scrolling through a long graph", a
     expect(screen.captureCharFrame()).toContain("▶ @");
   } finally { app.stop(); screen.renderer.destroy(); await f.cleanup(); }
 });
+
+test("JJ markings retain distinct colors when selected and marked as an action source", async () => {
+  const { RevisionLog } = await import("../src/revision-log");
+  const screen = await createTestRenderer({ width: 90, height: 10 });
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  const revision = {
+    changeId: "qwertyui", changePrefix: "qw", commitId: "a".repeat(40), description: "A conflicted change",
+    author: "Test User", bookmarks: "feature", parents: [], workingCopy: true, conflict: true,
+  };
+  try {
+    log.setSnapshot({ root: "/test", revisions: [revision], graph: [
+      { kind: "revision", revision, prefix: "@  " },
+      { kind: "description", revision, prefix: "│  " },
+    ] }, [{ name: "feature", remote: "", conflict: false, targets: [revision.commitId] }]);
+    for (const source of [null, 0]) {
+      log.markSource(source);
+      await screen.waitForVisualIdle();
+      const spans = screen.captureSpans().lines.flatMap(line => line.spans);
+      const token = (text: string) => {
+        const span = spans.find(span => span.text.trim() === text);
+        if (!span) throw new Error(`Missing token ${text}: ${screen.captureCharFrame()}`);
+        return span;
+      };
+      const id = token("qw");
+      expect(token("ertyui").fg).not.toEqual(id.fg);
+      expect(token("ertyui").attributes).not.toBe(id.attributes);
+      const bookmark = token("[feature]");
+      const conflict = token("! conflict");
+      const workingCopy = token("@");
+      expect(id.fg).not.toEqual(bookmark.fg);
+      expect(conflict.fg).not.toEqual(id.fg);
+      expect(workingCopy.fg).not.toEqual(id.fg);
+      expect(token("│").fg).not.toEqual(workingCopy.fg);
+      expect(id.bg).toEqual(bookmark.bg);
+      expect(screen.captureCharFrame()).toContain(source === null ? "▶ @" : "● @");
+    }
+  } finally { log.destroyRecursively(); screen.renderer.destroy(); }
+});
