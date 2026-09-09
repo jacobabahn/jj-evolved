@@ -47,6 +47,8 @@ Enter             Apply / confirm
 Escape            Cancel
 
 @ marks the working copy. ! marks a conflict.
+Drag a local [bookmark] onto another change to preview a move.
+Escape or dropping outside the graph cancels. Remote bookmarks are read-only.
 Tree lines show ancestry; ~ marks omitted history.
 History shows at most 200 revisions.
 Select a revision to return from status or help.
@@ -164,7 +166,9 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
   async function refresh(nextRevset = revset, workingCopy = false) {
     const previous = selected();
+    list.cancelDrag();
     const snapshot = await repository.snapshot(nextRevset);
+    const bookmarks = await repository.bookmarks();
     if (stopped) return;
     revisions = snapshot.revisions;
     revset = nextRevset;
@@ -176,7 +180,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
       if (matches.length === 1) index = revisions.findIndex(item => item.changeId === previous.changeId);
     }
     replacing = true;
-    list.setSnapshot(snapshot);
+    list.setSnapshot(snapshot, bookmarks);
     if (revisions.length) list.setSelectedIndex(Math.max(0, index));
     replacing = false;
     await loadPreview();
@@ -465,6 +469,7 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
   }
   function onKey(key: KeyEvent) {
     if (stopped) return;
+    list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (prompt.kind === "inline") {
       key.preventDefault();
@@ -561,6 +566,10 @@ export function createApp(renderer: CliRenderer, repository: Repository) {
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
+  list.canDragBookmark = () => !stopped && !busy && prompt.kind === "browse";
+  list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });
+  list.onDragHint = text => report(text || "Ready. ? shows all controls.");
+  app.onMouse = event => list.handleBookmarkMouse(event);
   renderer.keyInput.on("keypress", onKey);
   list.on("selectionChanged", onSelection);
   chooser.on("selectionChanged", previewChoice);

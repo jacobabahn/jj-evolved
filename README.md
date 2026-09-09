@@ -57,7 +57,7 @@ Errors stay inside the overlay and preserve your input. Success closes it, selec
 
 Rebase can move one change or its descendants. Squash accepts all files or a selected group and lets you keep or replace the destination description. In its description field, Ctrl-D restores the choice to keep the destination text. Split selects whole files for the first change and preserves the original description on the second change. Enter toggles files in the file-selection menu; select **Continue** when the group is ready.
 
-Bookmark entries with a remote name are read-only. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
+Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Bookmark entries with a remote name are read-only. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
 
 The revision list and destination pickers show at most 200 revisions. Operation history starts with 50 entries and offers **Load older operations**. Refresh manually after commands in another terminal. Existing multiline descriptions can be preserved during squash but require the jj CLI for editing.
 
