@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { Repository } from "../src/repository";
-import { createApp } from "../src/app";
-import { fixture } from "./fixture";
+import { Repository } from "../../src/repository/repository";
+import { createApp } from "../../src/app";
+import { fixture } from "../fixture";
 
 async function branchingFixture() {
   const f = await fixture();
@@ -82,7 +82,7 @@ test("selected revisions remain visible while scrolling through a long graph", a
 });
 
 test("JJ markings retain distinct colors when selected and marked as an action source", async () => {
-  const { RevisionLog } = await import("../src/revision-log");
+  const { RevisionLog } = await import("../../src/revisions/revision-log");
   const screen = await createTestRenderer({ width: 90, height: 10 });
   const log = new RevisionLog(screen.renderer);
   screen.renderer.root.add(log);
@@ -121,7 +121,7 @@ test("JJ markings retain distinct colors when selected and marked as an action s
 });
 
 test("rebase drag highlights the source change ID until cancelled", async () => {
-  const { RevisionLog } = await import("../src/revision-log");
+  const { RevisionLog } = await import("../../src/revisions/revision-log");
   const screen = await createTestRenderer({ width: 90, height: 10 });
   const log = new RevisionLog(screen.renderer);
   screen.renderer.root.add(log);

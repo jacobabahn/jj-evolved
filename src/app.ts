@@ -1,15 +1,19 @@
-import { getTheme, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./theme";
-import { highlightJjText, revisionPrefixes } from "./jj-highlighting";
-import { ChangePreview } from "./change-preview";
+import { MutationReview } from "./history/mutation-review";
+import { PreviewSession } from "./preview/preview-session";
+import { getTheme, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
+import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
+import { ChangePreview } from "./preview/change-preview";
 import {
   BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable,
   TextRenderable, type CliRenderer, type KeyEvent,
 } from "@opentui/core";
-import { TreeComparisonView } from "./tree-comparison";
-import { ActionOverlay } from "./action-overlay";
-import { HistoryForm } from "./history-form";
-import { RevisionLog } from "./revision-log";
-import { Repository, terminalText, shortChangeId, type InteractiveAction, type Mutation, type Revision, type PreparedMutation } from "./repository";
+import { TreeComparisonView } from "./history/tree-comparison";
+import { ActionOverlay } from "./ui/action-overlay";
+import { HistoryForm } from "./history/history-form";
+import { RevisionLog } from "./revisions/revision-log";
+import { Repository } from "./repository/repository";
+import { terminalText } from "./terminal-text";
+import { shortChangeId, type InteractiveAction, type Mutation, type Revision } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string> };
 
@@ -23,7 +27,7 @@ type Prompt =
   | { kind: "new"; parent: Revision }
   | { kind: "picker"; choices: Choice[] }
   | { kind: "text"; accept: (value: string) => void }
-  | { kind: "confirm"; prepared: PreparedMutation; edit: (() => void) | null; back: (() => void) | null };
+  | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
 const HELP = `Keyboard reference
 
@@ -106,7 +110,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let busy = false;
   let stopped = false;
   let replacing = false;
-  let previewRequest = 0;
+  const review = new MutationReview(repository, refreshAfterMutation);
+  const previews = new PreviewSession(({ target, text, title }) => {
+    if (target === "overlay") {
+      comparison.setTrees(null);
+      overlayPreview.title = ` ${title} `;
+      overlayText.content = text;
+      overlayPreview.scrollTo(0);
+    } else {
+      preview.title = ` ${title} `;
+      detail.content = text;
+      preview.scrollTo(0);
+    }
+  });
+  function isBusy() { return busy || review.applying; }
   let focus: "list" | "preview" = "list";
 
   function selected() { return revisions[list.getSelectedIndex()]; }
@@ -123,13 +140,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (next === "list") list.focus(); else preview.focus();
   }
   function showOverlay(text: string, title: string) {
-    comparison.setTrees(null);
-    overlayPreview.title = ` ${title} `;
-    overlayText.content = terminalText(text);
-    overlayPreview.scrollTo(0);
+    previews.show({ target: "overlay", text, title });
   }
   function activateOverlay(title: string, cancelPreview = true) {
-    if (cancelPreview) ++previewRequest;
+    if (cancelPreview) previews.cancel();
     if (!overlay.visible) {
       const revision = selected();
       overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision]), colors) : "Repository actions";
@@ -147,24 +161,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     preview.blur();
   }
   function show(text: string, title: string) {
-    if (stopped) return;
-    preview.title = ` ${title} `;
-    const safe = terminalText(text);
-    detail.content = safe;
-    preview.scrollTo(0);
+    previews.show({ target: "main", text, title });
   }
   async function loadPreview() {
-    const request = ++previewRequest;
     const revision = selected();
     if (!revision) { show("No revisions match this revset. Press / to change it.", "No revisions"); return; }
     const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? "CONFLICT\nUse jj resolve in another terminal, then r to refresh." : ""}`.trimEnd() + "\n\n");
-    show(`${metadata}Loading diff…`, "Change preview");
-    try {
-      const diff = await repository.diff(revision);
-      if (!stopped && request === previewRequest) show(metadata + (diff.trim() ? diff : "Empty change. No file differences."), "Change preview");
-    } catch (error) {
-      if (!stopped && request === previewRequest) show(metadata + errorText(error), "Preview error");
-    }
+    await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
+      prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences." });
   }
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
   async function refresh(nextRevset = revset, workingCopy = false) {
@@ -190,7 +194,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     await loadPreview();
   }
   async function run(label: string, action: () => Promise<void>) {
-    if (busy || stopped) return;
+    if (isBusy() || stopped) return;
     busy = true;
     report(label);
     try { await action(); report("Ready. ? shows all controls."); }
@@ -203,7 +207,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function closePrompt() {
     if (prompt.kind === "form") prompt.form.dispose();
     prompt = { kind: "browse" };
-    ++previewRequest;
+    review.cancel();
+    previews.cancel();
     overlay.visible = false;
     inlineHint.visible = false;
     list.markSource(null);
@@ -235,37 +240,37 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (next.kind === "confirm") overlay.hints.content = "Enter apply  p refresh preview  Esc cancel  PgUp/Dn scroll";
   }
   async function submit() {
-    if (busy) return;
+    if (isBusy()) return;
     const current = prompt;
     const value = input.value;
     if (current.kind === "text") { current.accept(value); return; }
-    if (current.kind === "confirm") { await run("Applying jj operation…", () => applyAndRefresh(current.prepared)); return; }
+    if (current.kind === "confirm") { await run("Applying jj operation…", applyReviewed); return; }
     if (current.kind === "revset") await run("Loading revset…", async () => { await refresh(value.trim() || "all()"); closePrompt(); });
     else if (current.kind === "describe" || current.kind === "new") {
       const mutation: Mutation = current.kind === "new" ? { kind: "new", parent: current.parent } : { kind: "describe", revision: current.revision, description: value };
       await run("Applying jj operation…", async () => {
-        await applyAndRefresh(await repository.prepare(mutation));
+        if (await review.prepare(mutation)) await applyReviewed();
       });
     }
   }
-  async function applyAndRefresh(prepared: PreparedMutation) {
-    await repository.apply(prepared);
+  async function refreshAfterMutation(action: Mutation) {
     if (stopped) return;
-    const followWorkingCopy = ["new", "edit", "restore", "undo", "split"].includes(prepared.action.kind);
-    try {
-      await refresh(followWorkingCopy ? "all()" : revset, followWorkingCopy);
-      const target = prepared.action.kind === "squash" ? prepared.action.destination : "revision" in prepared.action ? prepared.action.revision : null;
-      if (!followWorkingCopy && target) {
-        const index = revisions.findIndex(revision => revision.changeId === target.changeId);
-        if (index >= 0) { list.setSelectedIndex(index); await loadPreview(); }
-      }
-    } catch (error) {
-      closePrompt();
-      throw new Error(`Operation succeeded, but refresh failed. Press r; do not repeat the action. ${errorText(error)}`);
+    const followWorkingCopy = ["new", "edit", "restore", "undo", "split"].includes(action.kind);
+    await refresh(followWorkingCopy ? "all()" : revset, followWorkingCopy);
+    if (stopped) return;
+    const target = action.kind === "squash" ? action.destination : "revision" in action ? action.revision : null;
+    if (!followWorkingCopy && target) {
+      const index = revisions.findIndex(revision => revision.changeId === target.changeId);
+      if (index >= 0) { list.setSelectedIndex(index); await loadPreview(); }
     }
-    if (stopped) return;
+  }
+  async function applyReviewed() {
+    const outcome = await review.apply();
+    if (outcome.kind === "not-ready") throw new Error("Review the action again before applying. Press p to refresh the preview.");
+    if (outcome.kind !== "applied" || stopped) return;
     closePrompt();
-    result.content = `${prepared.action.kind.replace("bookmark-", "Bookmark ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
+    if (outcome.refreshError) throw new Error(outcome.refreshError);
+    result.content = `${outcome.action.kind.replace("bookmark-", "Bookmark ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
     result.visible = true;
     clearTimeout(resultTimer);
     resultTimer = setTimeout(() => { if (!stopped) result.visible = false; }, 4000);
@@ -277,12 +282,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const back = previous.kind === "inline" ? () => resumeInline(previous) : previous.kind === "confirm" ? previous.back : null;
     const edit = back || (previous.kind === "text" ? () => openPrompt(previous, label, value) : previous.kind === "confirm" ? previous.edit : null);
     void run("Preparing operation preview…", async () => {
-      const prepared = await repository.prepare(action);
-      if (stopped) return;
-      ++previewRequest;
+      const prepared = await review.prepare(action);
+      if (!prepared) return;
       showOverlay(prepared.summary, "Confirm operation");
       comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
-      openPrompt({ kind: "confirm", prepared, edit, back }, "Review preview before applying");
+      openPrompt({ kind: "confirm", action, edit, back }, "Review preview before applying");
       if (back) {
         inlineHint.visible = false;
         if (action.kind === "rebase" || action.kind === "squash") {
@@ -354,7 +358,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
 
   async function keepTheme() {
     const name = themeNames[chooser.getSelectedIndex()];
-    if (!name || busy) return;
+    if (!name || isBusy()) return;
     busy = true;
     try {
       await saveTheme(name);
@@ -372,12 +376,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind === "theme") { previewTheme(); return; }
     if (prompt.kind !== "picker") return;
     const choice = prompt.choices[chooser.getSelectedIndex()];
-    const request = ++previewRequest;
-    if (!choice) return;
-    showOverlay(`${choice.name}\n\n${choice.description}`, "Selection");
-    if (choice.preview) void choice.preview().then(text => {
-      if (request === previewRequest && !stopped) showOverlay(text, "Selection preview");
-    }).catch(error => { if (request === previewRequest) showOverlay(errorText(error), "Preview error"); });
+    if (!choice) { previews.cancel(); return; }
+    if (choice.preview) void previews.load({ target: "overlay", title: "Selection preview",
+      loading: `${choice.name}\n\n${choice.description}`, read: choice.preview });
+    else showOverlay(`${choice.name}\n\n${choice.description}`, "Selection");
   }
   function pick(title: string, choices: Choice[]) {
     activateOverlay(title);
@@ -431,7 +433,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (stopped) return;
       pick("Changed files", files.map(file => ({ name: file.path, description: file.status,
         preview: () => repository.diff(revision, [file.path]),
-        choose: () => { const request = ++previewRequest; void repository.diff(revision, [file.path]).then(text => { if (request === previewRequest) showOverlay(text, "Change preview"); }).catch(error => report(errorText(error), true)); },
+        choose: () => { void previews.load({ target: "overlay", title: "Change preview", loading: "Loading diff…", read: () => repository.diff(revision, [file.path]) }); },
       })));
       if (!files.length) showOverlay("Empty change. No changed files.", "Changed files");
     });
@@ -466,7 +468,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         description: `${operation.id.slice(0, 12)} ${operation.time}`,
         preview: () => repository.operationDiff(operation),
         choose: () => pick("Operation actions", [
-          { name: "Inspect operation", description: operation.id, choose: () => { const request = ++previewRequest; void repository.operationDiff(operation).then(text => { if (request === previewRequest) showOverlay(text, "Operation details"); }).catch(error => report(errorText(error), true)); } },
+          { name: "Inspect operation", description: operation.id, choose: () => { void previews.load({ target: "overlay", title: "Operation details", loading: "Loading operation…", read: () => repository.operationDiff(operation) }); } },
           { name: "Restore this operation", description: "Restore repository state and local bookmarks", choose: () => confirm({ kind: "restore", operation }) },
         ]),
       }));
@@ -478,23 +480,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void run("Loading latest operation…", async () => {
       const operation = (await repository.operations(1))[0];
       if (!operation) throw new Error("No operation to undo.");
-      const prepared = await repository.prepare({ kind: "undo", operation });
-      if (stopped) return;
-      ++previewRequest;
+      const action: Mutation = { kind: "undo", operation };
+      const prepared = await review.prepare(action);
+      if (!prepared) return;
       showOverlay(prepared.summary, "Confirm undo");
-      openPrompt({ kind: "confirm", prepared, edit: null, back: null }, "Review undo before applying");
+      openPrompt({ kind: "confirm", action, edit: null, back: null }, "Review undo before applying");
     });
   }
   function openHistory(revision: Revision, kind: "rebase" | "squash", descendants = false) {
     closePrompt();
     const form = new HistoryForm(renderer, repository, revision,
       kind === "rebase" ? { kind, descendants } : { kind, files: [], description: "", keepDescription: true },
-      async prepared => {
-        if (busy) return;
-        busy = true;
-        try { await applyAndRefresh(prepared); report("Ready. ? shows all controls."); }
+      review, async () => {
+        try { await applyReviewed(); report("Ready. ? shows all controls."); }
         catch (error) { if (prompt.kind === "browse") report(errorText(error), true); throw error; }
-        finally { busy = false; }
       });
     app.add(form);
     prompt = { kind: "form", form };
@@ -574,7 +573,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (prompt.kind === "theme") {
       key.preventDefault();
-      if (busy) return;
+      if (isBusy()) return;
       if (key.name === "escape") {
         applyTheme(prompt.original);
         closePrompt();
@@ -585,7 +584,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     if (prompt.kind === "inline") {
       key.preventDefault();
-      if (busy) return;
+      if (isBusy()) return;
       if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
       else if (key.name === "j" || key.name === "down") list.moveDown();
       else if (key.name === "k" || key.name === "up") list.moveUp();
@@ -608,17 +607,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (prompt.kind !== "browse") {
-      if (busy) { key.preventDefault(); return; }
+      if (isBusy()) { key.preventDefault(); return; }
       if (key.name === "escape") { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
       else if (key.name === "pageup" || key.name === "pagedown") { key.preventDefault(); overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3)); }
       else if (prompt.kind === "picker") {
         key.preventDefault();
-        if (busy) return;
+        if (isBusy()) return;
         if (key.name === "j" || key.name === "down") chooser.moveDown();
         else if (key.name === "k" || key.name === "up") chooser.moveUp();
         else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; choice?.choose(); }
       }
-      else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.prepared.action); }
+      else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.action); }
       else if (key.name === "return") { key.preventDefault(); void submit(); }
       return;
     }
@@ -633,15 +632,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (direction < 0) list.moveUp(); else list.moveDown();
       return;
     }
-    if (name === "?") { key.preventDefault(); ++previewRequest; show(HELP, "Help"); return; }
+    if (name === "?") { key.preventDefault(); show(HELP, "Help"); return; }
     if (name === "s" && !key.shift && key.sequence !== "S") {
       key.preventDefault();
-      const request = ++previewRequest;
-      show("Loading status…", "Working-copy status");
-      void repository.status().then(text => { if (request === previewRequest) show(text, "Working-copy status"); }).catch(error => { if (request === previewRequest) show(errorText(error), "Status error"); });
+      void previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…",
+        read: () => repository.status(), errorTitle: "Status error" });
       return;
     }
-    if (busy) return;
+    if (isBusy()) return;
     if (name === "t") { key.preventDefault(); pickTheme(); return; }
     if (key.sequence === "R" || key.sequence === "S" || (key.shift && (name === "r" || name === "s"))) {
       key.preventDefault();
@@ -662,7 +660,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const revision = selected();
       if (!revision) { report("Select a revision first.", true); return; }
       if (name === "e") void run("Switching working copy…", async () => {
-        await applyAndRefresh(await repository.prepare({ kind: "edit", revision }));
+        if (await review.prepare({ kind: "edit", revision })) await applyReviewed();
       });
       else if (name === "n") openPrompt({ kind: "new", parent: revision }, `Create child of ${revision.changeId.slice(0, 8)}?`);
       else describe(revision);
@@ -673,13 +671,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     stopped = true;
     clearTimeout(resultTimer);
     if (prompt.kind === "form") prompt.form.dispose();
-    ++previewRequest;
+    previews.dispose();
+    review.dispose();
     renderer.keyInput.off("keypress", onKey);
     list.off("selectionChanged", onSelection);
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
-  list.canDrag = () => !stopped && !busy && prompt.kind === "browse";
+  list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });
   list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });
   list.onDragHint = text => report(text || "Ready. ? shows all controls.");

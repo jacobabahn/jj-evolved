@@ -3,8 +3,8 @@ import { resolve, join } from "node:path";
 import { SelectRenderable, type Renderable } from "@opentui/core";
 import { createTestRenderer, type MockInput } from "@opentui/core/testing";
 import { createApp } from "../src/app";
-import { Repository } from "../src/repository";
-import { themes, type ThemeName } from "../src/theme";
+import { Repository } from "../src/repository/repository";
+import { themes, type ThemeName } from "../src/ui/theme";
 import { fixture } from "../tests/fixture";
 import { recordScreen, styledFrame, writeRecording } from "./recording";
 

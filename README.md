@@ -93,6 +93,7 @@ The log uses jj's native ancestry lines and node symbols. Editing both split des
 
 ```bash
 bun run typecheck
+bun run check:architecture
 bun test
 ```
 

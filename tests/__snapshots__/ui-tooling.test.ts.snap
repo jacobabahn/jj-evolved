@@ -37,13 +37,13 @@ e                 Make selection the working │
 copy immediately                             │
 R / S             Choose rebase / squash     │
 destination in the graph                     │
+Drag change       Drop onto another change to│
+preview rebase                               │
 n                 Create an empty child of   │
 selection                                    │
 Space             Action menu: edit, rebase, │
 squash, split, abandon                       │
 b                 Local and remote bookmarks │
-o                 Operation history,         │
-inspection and restore                       │
 ─────────────────────────────────────────────┘"
 `;
 
@@ -91,6 +91,7 @@ r                 Refresh history                                    │
 d                 Describe selected change, single line              │
 e                 Make selection the working copy immediately        │
 R / S             Choose rebase / squash destination in the graph    │
+Drag change       Drop onto another change to preview rebase         │
 n                 Create an empty child of selection                 │
 Space             Action menu: edit, rebase, squash, split, abandon  │
 b                 Local and remote bookmarks                         │
@@ -102,7 +103,6 @@ t                 Choose a theme, preview and save                   │
 ?                 Show this help                                     │
 q / Ctrl-C        Quit                                               │
                                                                      │
-In prompts                                                           │
 ─────────────────────────────────────────────────────────────────────┘"
 `;
 

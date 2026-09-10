@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { CodeRenderable, DiffRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { ChangePreview } from "../src/change-preview";
+import { ChangePreview } from "../../src/preview/change-preview";
 
 const patch = `diff --git a/hello.ts b/hello.ts
 --- a/hello.ts

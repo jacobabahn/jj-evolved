@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readThemePreference, saveThemePreference } from "../src/theme-preference";
+import { readThemePreference, saveThemePreference } from "../../src/ui/theme-preference";
 
 test("preferences default to terminal and survive saves without leftover temporary files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "jj-theme-"));

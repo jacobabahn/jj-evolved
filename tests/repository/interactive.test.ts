@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SelectRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { createApp } from "../src/app";
-import { Repository } from "../src/repository";
-import { fixture } from "./fixture";
+import { createApp } from "../../src/app";
+import { Repository } from "../../src/repository/repository";
+import { fixture } from "../fixture";
 
 const baseline = `first=old\n${"context\n".repeat(20)}last=old\n`;
 const selected = baseline.replace("first=old", "first=selected");

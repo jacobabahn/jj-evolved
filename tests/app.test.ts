@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { SelectRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createApp } from "../src/app";
-import { Repository } from "../src/repository";
+import { Repository } from "../src/repository/repository";
 import { fixture } from "./fixture";
 
 async function setup() {
@@ -161,29 +161,16 @@ test("an older diff cannot replace a newer selection", async () => {
   const gate = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
   let first = true;
-  const delayed: Repository = {
-    root: repo.root,
-    snapshot: revset => repo.snapshot(revset),
-    status: () => repo.status(),
-    prepare: action => repo.prepare(action),
-    apply: prepared => repo.apply(prepared),
-    interactive: action => repo.interactive(action),
-    openHunk: revision => repo.openHunk(revision),
-    operations: limit => repo.operations(limit),
-    operationId: () => repo.operationId(),
-    operationDiff: operation => repo.operationDiff(operation),
-    bookmarks: () => repo.bookmarks(),
-    files: revision => repo.files(revision),
-    diff: async revision => {
-      if (first) {
-        first = false;
-        started.resolve();
-        await gate.promise;
-      }
-      return repo.diff(revision);
-    },
-  };
-  const app = createApp(screen.renderer, delayed);
+  const originalDiff = repo.diff.bind(repo);
+  const delayed = spyOn(repo, "diff").mockImplementation(async (revision, files) => {
+    if (first) {
+      first = false;
+      started.resolve();
+      await gate.promise;
+    }
+    return originalDiff(revision, files);
+  });
+  const app = createApp(screen.renderer, repo);
   try {
     const loading = app.start();
     await started.promise;
@@ -200,6 +187,7 @@ test("an older diff cannot replace a newer selection", async () => {
     expect(screen.captureCharFrame()).toContain("+ hello from jj-evolved");
   } finally {
     gate.resolve();
+    delayed.mockRestore();
     app.stop();
     screen.renderer.destroy();
     await f.cleanup();
@@ -642,3 +630,53 @@ test("change clicks, invalid drops, Escape and cancelled previews do not rebase"
     expect(await t.repo.operationId()).toBe(before);
   } finally { await t.cleanup(); }
 }, 15_000);
+
+for (const flow of ["confirmation", "form"] as const) {
+  test(`${flow} closes after a successful write even if refreshing the graph fails`, async () => {
+    const t = await setup();
+    const source = (await t.repo.snapshot("@")).revisions[0];
+    if (!source) throw new Error("Missing source");
+    let reload: ReturnType<typeof spyOn<typeof t.repo, "snapshot">> | undefined;
+    try {
+      if (flow === "confirmation") {
+        t.screen.mockInput.pressKey("n");
+        await t.until("Create child");
+      } else {
+        t.screen.mockInput.pressKey(" ");
+        t.choose("Rebase change");
+        await t.until("Destination: Choose a revision");
+        t.screen.mockInput.pressEnter();
+        await t.until("j/k choose");
+        const choices = t.screen.renderer.root.findDescendantById("history-choices");
+        if (!(choices instanceof SelectRenderable)) throw new Error("Missing destinations");
+        for (let i = 0; i < choices.options.length - 1; i++) t.screen.mockInput.pressKey("j");
+        t.screen.mockInput.pressEnter();
+        await t.until("Preview ready");
+        t.screen.mockInput.pressKey("j");
+        t.screen.mockInput.pressKey("j");
+      }
+      // Preparation itself reads snapshots; fail only the post-write refresh.
+      const snapshot = t.repo.snapshot.bind(t.repo);
+      const apply = t.repo.apply.bind(t.repo);
+      const write = spyOn(t.repo, "apply").mockImplementation(async prepared => {
+        await apply(prepared);
+        reload = spyOn(t.repo, "snapshot").mockRejectedValue(new Error("Graph unavailable"));
+      });
+      try {
+        t.screen.mockInput.pressEnter();
+        await t.until("Operation succeeded, but refresh failed");
+        reload?.mockRestore();
+        expect(t.screen.renderer.root.findDescendantById("action-overlay")?.visible).toBe(false);
+        expect(t.screen.renderer.root.findDescendantById("history-form")).toBeUndefined();
+        const current = (await snapshot("@")).revisions[0];
+        if (flow === "confirmation") expect(current?.parents).toContain(source.commitId);
+        else expect(current?.parents).toEqual(["0".repeat(40)]);
+        const operation = await t.repo.operationId();
+        t.screen.mockInput.pressEnter();
+        await t.until("Change preview");
+        expect(await t.repo.operationId()).toBe(operation);
+        expect(write).toHaveBeenCalledTimes(1);
+      } finally { write.mockRestore(); }
+    } finally { reload?.mockRestore(); await t.cleanup(); }
+  }, 15_000);
+}
