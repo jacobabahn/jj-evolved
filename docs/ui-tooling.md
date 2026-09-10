@@ -20,7 +20,15 @@ bun run ui record rebase artifacts/ui/rebase-before
 bun run ui gallery artifacts/ui/gallery-after
 ```
 
-The scenarios cover browsing, a diff, help at 80 columns, rebase review and cancellation, an empty revset, an editable bookmark error, bookmark dragging, live themes, and Unicode paste. They create and remove their own repositories. Theme scenarios use an in-memory save callback, so they do not change your saved theme.
+The eight scenarios cover browsing, a diff, help at 80 columns, rebase review and cancellation, an empty revset, an editable bookmark error, bookmark dragging, live themes, Unicode paste, stale-review recovery, and late diff responses. They create and remove their own repositories. Theme scenarios use an in-memory save callback, so they do not change your saved theme.
+
+## Verify review and preview lifetimes
+
+`bun run ui record review-retry` records an editable rebase form rejecting a stale preview after an external jj operation. It then refreshes the review, applies the rebase, and checks the actual parent relationship and closed form.
+
+`bun run ui record preview-race` delays a real diff while the user selects another revision. It records both late success and late failure, checking that neither replaces the newer preview. The scenario restores the original diff method after each controlled delay.
+
+Both scenarios run automatically in `bun run test:ui` and appear in `bun run ui gallery`.
 
 ## Add a scenario
 
