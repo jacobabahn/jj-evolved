@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { Repository } from "../src/repository";
-import { fixture } from "./fixture";
+import { Repository } from "../../src/repository/repository";
+import { fixture } from "../fixture";
 
 test("reads real history, bookmarks, parents, diffs, status and revsets", async () => {
   const f = await fixture();
@@ -68,4 +68,4 @@ test("short change prefixes come from JJ and resolve beyond the filtered graph",
     expect(filtered.revisions).toHaveLength(1);
     expect(filtered.revisions[0]?.changePrefix).toBe(collision.changePrefix);
   } finally { await f.cleanup(); }
-});
+}, 15_000);

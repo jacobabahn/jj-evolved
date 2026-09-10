@@ -1,7 +1,7 @@
-import { getTheme } from "./theme";
-import { highlightJjText } from "./jj-highlighting";
+import { getTheme } from "../ui/theme";
+import { highlightJjText } from "../ui/jj-highlighting";
 import { BoxRenderable, DiffRenderable, SyntaxStyle, TextRenderable, pathToFiletype, type RenderContext } from "@opentui/core";
-import { terminalText } from "./repository";
+import { terminalText } from "../terminal-text";
 
 export class ChangePreview extends BoxRenderable {
   prefixes: ReadonlyMap<string, string> = new Map();

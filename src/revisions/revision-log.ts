@@ -1,7 +1,8 @@
-import { getTheme } from "./theme";
-import { changeIdChunks, graphChunks } from "./jj-highlighting";
+import { getTheme } from "../ui/theme";
+import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
-import { terminalText, shortChangeId, type Bookmark, type Revision, type Snapshot } from "./repository";
+import { terminalText } from "../terminal-text";
+import { shortChangeId, type Bookmark, type Revision, type Snapshot } from "../repository/model";
 
 
 type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; bookmarkPreview: TextRenderable | null; revisionIndex: number | null; heading: boolean; text: StyledText; dragText: StyledText };

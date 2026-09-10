@@ -1,6 +1,6 @@
 import { getTheme } from "./theme";
 import { BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
-import { terminalText } from "./repository";
+import { terminalText } from "../terminal-text";
 
 export class ActionOverlay extends BoxRenderable {
   readonly context: TextRenderable;

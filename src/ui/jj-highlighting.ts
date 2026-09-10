@@ -1,6 +1,7 @@
 import { themes, type Theme } from "./theme";
 import { StyledText, bold, fg } from "@opentui/core";
-import { terminalText, type Revision } from "./repository";
+import { terminalText } from "../terminal-text";
+import type { Revision } from "../repository/model";
 
 export function graphChunks(prefix: string, colors: Theme = themes.terminal) {
   return [...terminalText(prefix)].map(mark => fg(

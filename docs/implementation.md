@@ -17,7 +17,11 @@ The current build implements the local history-management workflows in the [feat
 
 The entry point opens `Repository`, creates an OpenTUI renderer, and starts `createApp(renderer, repository)`. Tests supply a real renderer and a repository in a temporary directory.
 
-The repository module owns subprocess arguments, JSON templates, validation, command timeouts, and operation previews. `Mutation` is a discriminated union of supported actions. `prepare(action)` returns a `PreparedMutation` containing the action, the current operation ID, and review text. `apply(prepared)` checks that repository state still matches before running the command. Rebase and squash previews run the same command arguments at the captured operation with `--no-integrate-operation`, then render `jj log` at the returned operation. These detached operations create repository objects but leave the live operation log and working copy unchanged. Context includes up to 200 original affected changes, with up to 40 displayed revisions and their immediate parents. Local bookmark names omit remote synchronization decorations. Newly generated change IDs can differ when the operation is applied. Preview preparation rejects invalid operations before confirmation.
+The repository module owns subprocess arguments, JSON templates, validation, command timeouts, and operation previews. Callers import `repository/repository.ts` for operations and `repository/model.ts` for domain types. Internal modules own command execution, log parsing, mutation arguments, projected trees, and external tool lifetime. Projected previews and apply share command construction through `mutationArgs`.
+
+`Mutation` is a discriminated union of supported actions. `prepare(action)` returns a `PreparedMutation` containing the action, the current operation ID, and review text. `apply(prepared)` checks that repository state still matches before running the command.
+
+Rebase and squash previews run the same command arguments at the captured operation with `--no-integrate-operation`, then render `jj log` at the returned operation. These detached operations create repository objects but leave the live operation log and working copy unchanged. Context includes up to 200 original affected changes, with up to 40 displayed revisions and their immediate parents. Local bookmark names omit remote synchronization decorations. Newly generated change IDs can differ when the operation is applied. Preview preparation rejects invalid operations before confirmation.
 
 Preparing an action snapshots pending working-copy edits and verifies that revision targets remain visible. Before applying, the repository snapshots again and compares operation IDs. An external command or file edit invalidates the confirmation. This check does not lock out external jj processes; jj still owns concurrency handling if another process writes during execution.
 
@@ -27,15 +31,33 @@ Operation and bookmark inspection use read-only command options. Undo applies th
 
 `snapshot(revset)` reads graph-prefixed JSON metadata and a marked description row from one `jj log` command. The adapter retains jj's graph prefixes and connector rows. Word wrapping is disabled for the metadata protocol. Each node and description row references its parsed revision.
 
-`RevisionLog` displays the graph in a scrollable pane, highlights a selected revision's two rows, and skips connectors during keyboard navigation. Lines truncate to the available width instead of wrapping and breaking the graph. The app owns selection, focus, inputs, menus, and confirmations. Prompt variants distinguish browsing, text entry, selection, confirmation, and a history-editing form. A selected action captures its source before opening subsequent pickers. Preview requests use a generation counter so older responses cannot replace a newer selection. A busy state serializes writes through refresh.
+`RevisionLog` displays the graph in a scrollable pane, highlights a selected revision's two rows, and skips connectors during keyboard navigation. Lines truncate to the available width instead of wrapping and breaking the graph. The app owns selection, focus, inputs, menus, and confirmations. Prompt variants distinguish browsing, text entry, selection, confirmation, and a history-editing form. A selected action captures its source before opening subsequent pickers.
+
+`PreviewSession` owns request replacement, stale successes and failures, and disposal. The main pane and overlay share one session: changing the active preview invalidates work for either pane, matching the existing interaction. Rendering stays in `ChangePreview`. `MutationReview` serializes writes through refresh; the app separately excludes overlapping menu and loading work.
 
 `TreeComparisonView` renders captured before/after graph text in equal-width columns inside the shared preview scroller. Graph lines do not wrap; long labels are clipped. Both confirmation dialogs and history forms use this view.
 
 `ActionOverlay` supplies the shared dialog layout: source context, fields, local feedback, preview, and keyboard hints. Quick inputs use a smaller height. The background graph stays visible and its mouse selection is disabled until the overlay closes.
 
-`HistoryForm` owns rebase and squash drafts. Destination, scope or files, description, and Apply remain in one form. Editing a field returns to that form, and a new preview invalidates the prior prepared operation. Failed operations preserve the draft and require a refreshed preview. Quick-input failures return to the editable input with its value intact. Success closes the overlay and shows a short result message above the graph.
+`HistoryForm` owns rebase and squash drafts. Destination, scope or files, description, and Apply remain in one form. Editing a field returns to that form. Both the form and ordinary confirmations use the same `MutationReview` instance. The review module owns prepared-operation validity, ignores superseded preparation results, and requires fresh preparation after failure. Confirmation prompts retain the selected action for editing but do not hold a second prepared operation. Failed operations preserve the draft and require a refreshed preview. Quick-input failures return to the editable input with its value intact. Success closes the overlay and shows a short result message above the graph.
 
-After a successful write, refresh errors say that the operation succeeded and direct the user to refresh instead of repeating the action. Working-copy-changing actions reset the filter to `all()` and select the working copy. Other actions preserve the active revset and recover selection by commit ID, then a unique change ID.
+After a successful write, `MutationReview` returns an applied result even if refresh fails. Both interaction paths close their overlay and report that the operation succeeded, directing the user to refresh instead of repeating the action. Working-copy-changing actions reset the filter to `all()` and select the working copy. Other actions preserve the active revset and recover selection by commit ID, then a unique change ID.
+
+## Source organization
+
+| Directory or file | Ownership |
+| --- | --- |
+| `src/app.ts` | Navigation, focus, selection recovery, and connecting modules |
+| `src/history/` | Mutation review, editable history forms, and tree comparison |
+| `src/preview/` | Preview request lifetime and text or diff rendering |
+| `src/revisions/` | Revision graph rendering, selection, and dragging |
+| `src/repository/` | Repository operations and their internal jj implementation |
+| `src/ui/` | Shared overlays, highlighting, themes, and theme preferences |
+| `src/terminal-text.ts` | Terminal-control filtering shared by command output and rendering |
+
+Tests follow these directories. `tests/app.test.ts` retains complete user workflows; `tests/ui-tooling.test.ts` and `tooling/` retain scenario recording and styled snapshots. Lifecycle tests use delayed adapters for deterministic ordering and disposable jj repositories for actual writes.
+
+Run `bun run check:architecture` to verify that imports resolve, the source graph has no cycles, and callers only import the repository's entry point or domain model. Run `rg --files src tests | sort` to list the current tree.
 
 ## Current limits
 
@@ -47,8 +69,8 @@ A broader destination search and an integrated conflict editor are not implement
 
 Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 
-- `bun run typecheck` passes.
-- `bun test` passes 24 tests with 126 assertions.
+- `bun run typecheck` and `bun run check:architecture` pass.
+- `bun test` passes 97 tests with 566 assertions and 6 snapshots.
 - Repository tests verify bookmark targets, edit/abandon behavior, operation inspection without writes, undo/restore, and rebase parent relationships in both move modes.
 - File-level split and squash tests compare the final repository contents with the original. Literal filenames include spaces and wildcard characters. Partial squash verifies that unselected files remain in the source.
 - Graph tests compare branches, merges, filtered ancestry, and empty results with native jj output. Renderer tests verify commit selection, narrow layout, and scrolling through long graphs.

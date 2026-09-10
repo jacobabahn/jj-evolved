@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { fixture } from "./fixture";
-import { Repository } from "../src/repository";
+import { fixture } from "../fixture";
+import { Repository } from "../../src/repository/repository";
 
 const template = 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ "]").join(" ") ++ if(conflict, " [conflict]") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"';
 
@@ -75,9 +75,9 @@ test("an unchanged rebase still renders a tree without creating a live operation
 test("popup trees and revision summaries render JJ token colors", async () => {
   const { createTestRenderer } = await import("@opentui/core/testing");
   const { RGBA } = await import("@opentui/core");
-  const { TreeComparisonView } = await import("../src/tree-comparison");
-  const { ChangePreview } = await import("../src/change-preview");
-  const { themes } = await import("../src/theme");
+  const { TreeComparisonView } = await import("../../src/history/tree-comparison");
+  const { ChangePreview } = await import("../../src/preview/change-preview");
+  const { themes } = await import("../../src/ui/theme");
   const jjColors = themes.terminal;
   const screen = await createTestRenderer({ width: 120, height: 15 });
   const trees = new TreeComparisonView(screen.renderer, "popup-trees");
@@ -118,7 +118,7 @@ test("popup trees and revision summaries render JJ token colors", async () => {
 
 test("rebase previews retain ancestry lines beside descriptions like the standard log", async () => {
   const { createTestRenderer } = await import("@opentui/core/testing");
-  const { TreeComparisonView } = await import("../src/tree-comparison");
+  const { TreeComparisonView } = await import("../../src/history/tree-comparison");
   const f = await fixture();
   const screen = await createTestRenderer({ width: 120, height: 20 });
   const trees = new TreeComparisonView(screen.renderer, "ancestry-trees");

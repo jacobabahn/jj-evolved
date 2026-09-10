@@ -1,10 +1,13 @@
-import { getTheme } from "./theme";
-import { highlightJjText, revisionPrefixes } from "./jj-highlighting";
-import { ChangePreview } from "./change-preview";
+import { MutationReview } from "./mutation-review";
+import { getTheme } from "../ui/theme";
+import { highlightJjText, revisionPrefixes } from "../ui/jj-highlighting";
+import { ChangePreview } from "../preview/change-preview";
 import { InputRenderable, ScrollBoxRenderable, SelectRenderable, type KeyEvent, type RenderContext } from "@opentui/core";
 import { TreeComparisonView } from "./tree-comparison";
-import { ActionOverlay } from "./action-overlay";
-import { Repository, terminalText, shortChangeId, type ChangedFile, type Mutation, type PreparedMutation, type Revision } from "./repository";
+import { ActionOverlay } from "../ui/action-overlay";
+import { Repository } from "../repository/repository";
+import { terminalText } from "../terminal-text";
+import { shortChangeId, type ChangedFile, type Mutation, type Revision } from "../repository/model";
 
 type Draft =
   | { kind: "rebase"; descendants: boolean }
@@ -24,15 +27,12 @@ export class HistoryForm extends ActionOverlay {
   private readonly comparison: TreeComparisonView;
   private destination: Revision | null = null;
   private mode: Mode = { kind: "fields" };
-  private prepared: PreparedMutation | null = null;
-  private generation = 0;
   private disposed = false;
-  private applying = false;
   private loadingField = false;
   private fieldRequest = 0;
 
   constructor(ctx: RenderContext, private readonly repository: Repository, private readonly source: Revision,
-    private readonly draft: Draft, private readonly apply: (prepared: PreparedMutation) => Promise<void>) {
+    private readonly draft: Draft, private readonly review: MutationReview, private readonly apply: () => Promise<void>) {
     super(ctx, "history-form");
     this.title = draft.kind === "rebase" ? " Rebase change " : " Squash changes ";
     this.context.content = highlightJjText(`Source ${shortChangeId(source)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([source]), getTheme(this.ctx));
@@ -73,25 +73,22 @@ export class HistoryForm extends ActionOverlay {
   }
 
   private async updatePreview() {
-    const generation = ++this.generation;
-    this.prepared = null;
     this.comparison.setTrees(null);
     this.text.content = "Choose a destination to preview the result.";
     const action = this.mutation();
-    if (!action) { this.report("Choose a destination first.", true); return; }
+    if (!action) { this.review.cancel(); this.report("Choose a destination first.", true); return; }
     this.report("Preparing preview…");
     this.text.content = "Preparing tree comparison…";
     try {
-      const prepared = await this.repository.prepare(action);
-      if (this.disposed || generation !== this.generation) return;
-      this.prepared = prepared;
+      const prepared = await this.review.prepare(action);
+      if (!prepared) return;
       this.comparison.setTrees(prepared.trees, this.draft.kind);
       this.text.prefixes = revisionPrefixes([this.source, ...(this.destination ? [this.destination] : [])]);
       this.text.content = prepared.summary;
       this.preview.scrollTo(0);
       this.report("Preview ready. Review it, then select Apply.");
     } catch (error) {
-      if (!this.disposed && generation === this.generation) this.report(error instanceof Error ? error.message : String(error), true);
+      if (!this.disposed) this.report(error instanceof Error ? error.message : String(error), true);
     }
   }
 
@@ -175,20 +172,18 @@ export class HistoryForm extends ActionOverlay {
   }
 
   private async submit() {
-    if (!this.prepared) { await this.updatePreview(); return; }
-    this.applying = true;
+    if (!this.review.ready) { await this.updatePreview(); return; }
     this.report(`Applying ${this.draft.kind}…`);
-    try { await this.apply(this.prepared); }
+    try { await this.apply(); }
     catch (error) {
       if (!this.disposed) {
-        this.prepared = null;
         this.report(`${error instanceof Error ? error.message : String(error)} Press p to review again.`, true);
       }
-    } finally { this.applying = false; }
+    }
   }
 
   handleKey(key: KeyEvent): "close" | "handled" {
-    if (this.applying) { key.preventDefault(); return "handled"; }
+    if (this.review.applying) { key.preventDefault(); return "handled"; }
     if (key.name === "escape") {
       key.preventDefault();
       ++this.fieldRequest;
@@ -225,5 +220,5 @@ export class HistoryForm extends ActionOverlay {
     return "handled";
   }
 
-  dispose() { if (this.disposed) return; this.disposed = true; ++this.generation; this.destroyRecursively(); }
+  dispose() { if (this.disposed) return; this.disposed = true; this.review.cancel(); this.destroyRecursively(); }
 }

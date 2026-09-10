@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SelectRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { createApp } from "../src/app";
-import { Repository } from "../src/repository";
-import { fixture } from "./fixture";
+import { createApp } from "../../src/app";
+import { Repository } from "../../src/repository/repository";
+import { fixture } from "../fixture";
 
 for (const code of [0, 1]) {
   test(`Open in Hunk passes the selected commit and restores the app after exit ${code}`, async () => {

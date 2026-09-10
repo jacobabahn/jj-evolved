@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { TextRenderable, DiffRenderable, parseColor } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { ActionOverlay } from "../src/action-overlay";
-import { ChangePreview } from "../src/change-preview";
-import { getTheme, setTheme, themes, themeNames } from "../src/theme";
+import { ActionOverlay } from "../../src/ui/action-overlay";
+import { ChangePreview } from "../../src/preview/change-preview";
+import { getTheme, setTheme, themes, themeNames } from "../../src/ui/theme";
 
 test("terminal defaults retain terminal color intent", () => {
   expect(themes.terminal.bg.intent).toBe("default");
@@ -56,11 +56,11 @@ test("themes belong to each renderer", async () => {
 });
 
 test("the theme picker previews, cancels and saves without changing the selected revision", async () => {
-  const { fixture } = await import("./fixture");
-  const { Repository } = await import("../src/repository");
-  const { createApp } = await import("../src/app");
+  const { fixture } = await import("../fixture");
+  const { Repository } = await import("../../src/repository/repository");
+  const { createApp } = await import("../../src/app");
   const { SelectRenderable, BoxRenderable } = await import("@opentui/core");
-  const { themeNames, themeLabels } = await import("../src/theme");
+  const { themeNames, themeLabels } = await import("../../src/ui/theme");
   const f = await fixture();
   const screen = await createTestRenderer({ width: 100, height: 35 });
   const saved: string[] = [];
@@ -122,9 +122,9 @@ test("the theme picker previews, cancels and saves without changing the selected
 });
 
 test("failed theme saves stay in the picker and Escape restores the previous theme", async () => {
-  const { fixture } = await import("./fixture");
-  const { Repository } = await import("../src/repository");
-  const { createApp } = await import("../src/app");
+  const { fixture } = await import("../fixture");
+  const { Repository } = await import("../../src/repository/repository");
+  const { createApp } = await import("../../src/app");
   const f = await fixture();
   const screen = await createTestRenderer({ width: 100, height: 30 });
   const app = createApp(screen.renderer, await Repository.open(f.path), themes.light, async () => { throw new Error("Read-only config"); });

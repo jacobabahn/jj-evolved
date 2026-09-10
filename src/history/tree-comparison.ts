@@ -1,7 +1,7 @@
-import { getTheme } from "./theme";
-import { highlightJjText } from "./jj-highlighting";
+import { getTheme } from "../ui/theme";
+import { highlightJjText } from "../ui/jj-highlighting";
 import { BorderChars, BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
-import type { TreeComparison } from "./repository";
+import type { TreeComparison } from "../repository/model";
 
 export class TreeComparisonView extends BoxRenderable {
   private readonly afterColumn: BoxRenderable;

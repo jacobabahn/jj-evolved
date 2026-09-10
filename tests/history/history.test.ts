@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { Repository, type Mutation } from "../src/repository";
-import { fixture } from "./fixture";
+import { Repository } from "../../src/repository/repository";
+import type { Mutation } from "../../src/repository/model";
+import { fixture } from "../fixture";
 
 async function setup() {
   const f = await fixture();

@@ -1,9 +1,9 @@
-import { readThemePreference, saveThemePreference } from "./theme-preference";
+import { readThemePreference, saveThemePreference } from "./ui/theme-preference";
 import { parseArgs } from "node:util";
-import { parseThemeName, themes, themeNames } from "./theme";
+import { parseThemeName, themes, themeNames } from "./ui/theme";
 import { createCliRenderer } from "@opentui/core";
 import { createApp } from "./app";
-import { Repository } from "./repository";
+import { Repository } from "./repository/repository";
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
