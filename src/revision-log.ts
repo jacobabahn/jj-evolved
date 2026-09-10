@@ -4,7 +4,7 @@ import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, f
 import { terminalText, shortChangeId, type Bookmark, type Revision, type Snapshot } from "./repository";
 
 
-type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; revisionIndex: number | null; heading: boolean; text: StyledText; dragText: StyledText };
+type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; bookmarkPreview: TextRenderable | null; revisionIndex: number | null; heading: boolean; text: StyledText; dragText: StyledText };
 type BookmarkSource = { bookmark: Bookmark; revision: Revision };
 type DragSource = ({ action: "bookmark" } & BookmarkSource) | { action: "rebase"; revision: Revision };
 type Drag = DragSource & { kind: "pressed" | "dragging" };
@@ -75,7 +75,14 @@ export class RevisionLog extends ScrollBoxRenderable {
       node.add(label);
       if (revision) this.revisionSources.set(label, revision);
       const badges: TextRenderable[] = [];
+      let bookmarkPreview: TextRenderable | null = null;
       if (heading && revision) {
+        bookmarkPreview = new TextRenderable(this.ctx, {
+          id: `bookmark-preview-${rowIndex}`, height: 1, marginLeft: 1, flexShrink: 0,
+          selectable: false, wrapMode: "none", visible: false, opacity: 0.5,
+          fg: getTheme(this.ctx).bookmark,
+        });
+        node.add(bookmarkPreview);
         for (const [index, bookmark] of bookmarks.filter(item => item.targets.includes(revision.commitId)).entries()) {
           const badge = new TextRenderable(this.ctx, {
             id: `bookmark-${rowIndex}-${index}`, height: 1, marginLeft: 1, flexShrink: 0, selectable: false, wrapMode: "none",
@@ -90,7 +97,7 @@ export class RevisionLog extends ScrollBoxRenderable {
         }));
       }
       this.add(node);
-      this.rows.push({ node, label, badges, revisionIndex, heading, text, dragText });
+      this.rows.push({ node, label, badges, bookmarkPreview, revisionIndex, heading, text, dragText });
     }
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.revisions.length - 1));
     this.paintSelection();
@@ -172,6 +179,13 @@ export class RevisionLog extends ScrollBoxRenderable {
       row.label.content = new StyledText([bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks]);
       row.node.backgroundColor = background;
       row.label.bg = background;
+      if (row.bookmarkPreview) {
+        const bookmark = drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
+          ? this.drag.bookmark : null;
+        row.bookmarkPreview.visible = bookmark !== null;
+        row.bookmarkPreview.content = bookmark ? terminalText(`[${bookmark.name}${bookmark.conflict ? "!" : ""}]`) : "";
+        row.bookmarkPreview.bg = background;
+      }
       for (const badge of row.badges) {
         const bookmark = this.bookmarkSources.get(badge)?.bookmark;
         badge.bg = this.drag?.kind === "dragging" && this.drag.action === "bookmark" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
