@@ -125,4 +125,78 @@ export const scenarios: Scenario[] = [
       await ui.capture("Saved Unicode description");
     },
   },
+  {
+    name: "review-retry", title: "Stale rebase review, refresh, and apply",
+    async run(ui) {
+      const source = (await ui.repo.snapshot("@")).revisions[0];
+      assert(source);
+      ui.key(" ");
+      ui.choose("Rebase change");
+      await ui.until("Destination: Choose a revision");
+      ui.key("RETURN");
+      await ui.until("j/k choose");
+      ui.key("j");
+      ui.key("RETURN");
+      await ui.until("Preview ready");
+      await ui.capture("Form has a reviewed rebase onto root");
+      await ui.f.jj("bookmark", "create", "external-operation");
+      const external = await ui.repo.operationId();
+      ui.key("j"); ui.key("j");
+      ui.key("RETURN");
+      await ui.until("Repository changed");
+      await ui.capture("Stale review rejected; destination and draft retained");
+      assert.equal(await ui.repo.operationId(), external);
+      assert.deepEqual((await ui.repo.snapshot(source.changeId)).revisions[0]?.parents, source.parents);
+      assert(ui.screen.captureCharFrame().includes("Destination: zzzzzzzz"));
+      ui.key("p");
+      await ui.until("Preview ready");
+      await ui.capture("Refreshed review is ready to apply");
+      ui.key("RETURN");
+      await ui.until("rebase completed");
+      assert.deepEqual((await ui.repo.snapshot(source.changeId)).revisions[0]?.parents, ["0".repeat(40)]);
+      assert.equal(ui.screen.renderer.root.findDescendantById("history-form"), undefined);
+      await ui.capture("Rebase applied once and form closed");
+    },
+  },
+  {
+    name: "preview-race", title: "Late diff success and failure cannot replace the selection",
+    async run(ui) {
+      const originalDiff = ui.repo.diff.bind(ui.repo);
+      for (const outcome of ["success", "failure"] as const) {
+        const started = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const finished = Promise.withResolvers<void>();
+        let delay = true;
+        ui.repo.diff = async (revision, files) => {
+          if (!delay) return originalDiff(revision, files);
+          delay = false;
+          started.resolve();
+          try {
+            await release.promise;
+            if (outcome === "failure") throw new Error("Obsolete diff failure");
+            return await originalDiff(revision, files);
+          } finally { finished.resolve(); }
+        };
+        try {
+          ui.key("j");
+          await started.promise;
+          await ui.until("Loading diff…");
+          await ui.capture(`Older diff pending before ${outcome}`);
+          ui.key("k");
+          await ui.until("Empty change.");
+          await ui.capture("New selection displayed before older request settles");
+          release.resolve();
+          await finished.promise;
+          await ui.capture(`Late ${outcome} leaves the new selection intact`);
+          const frame = ui.screen.captureCharFrame();
+          assert(frame.includes("Empty change."));
+          assert(!frame.includes("+ hello from jj-evolved"));
+          assert(!frame.includes("Obsolete diff failure"));
+        } finally {
+          release.resolve();
+          ui.repo.diff = originalDiff;
+        }
+      }
+    },
+  },
 ];
