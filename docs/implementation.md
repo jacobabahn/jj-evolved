@@ -11,6 +11,8 @@ The current build implements the local history-management workflows in the [feat
 - Splitting selected whole files into a first change while preserving the original description on the second.
 - Listing local and remote bookmarks and creating, moving, renaming, or deleting local bookmarks.
 - Operation-history browsing with incremental expansion, operation inspection, undo, and restore.
+- Absorb with a projected operation patch, remaining source edits, and confirmation.
+- Change evolution with incremental expansion and native patches for individual historical versions.
 - Action discovery through Space and help, confirmation previews, stale-action rejection, and conflict markers with CLI resolution guidance.
 
 ## Architecture
@@ -25,9 +27,19 @@ Rebase and squash previews run the same command arguments at the captured operat
 
 Preparing an action snapshots pending working-copy edits and verifies that revision targets remain visible. Before applying, the repository snapshots again and compares operation IDs. An external command or file edit invalidates the confirmation. This check does not lock out external jj processes; jj still owns concurrency handling if another process writes during execution.
 
+`rebaseScope` reads the source and all descendants at a fixed operation without the main graph's 200-revision limit. Inline rebase and the history form mark scope members by full commit ID. Confirmation recomputes the scope at its captured operation and includes every member in the summary. The projected trees use stable change IDs to mark the corresponding before and after versions. The form refreshes scope with its preview; request counters and disposal checks prevent late reads from restoring old markers.
+
 Revision commands use captured full commit IDs. File selections use literal root-relative filesets, so spaces and glob characters in filenames retain their meaning. Bookmark deletion uses an exact name pattern. Commands use argument arrays without a shell, disable paging and color, and time out after 30 seconds.
 
 Operation and bookmark inspection use read-only command options. Undo applies the inverse of the exact latest operation displayed in the preview. Restore selects an explicit operation ID. Both restore repository state and local bookmarks while preserving remote-tracking state.
+
+Absorb uses `confirm({ kind: "absorb", revision })` through the existing mutation flow. Its projection shares the detached-operation helper with rebase and squash. The preview combines JJ's distribution report, `op diff` for the projected result, and the resulting source diff. A no-op states that no edits move. Applying uses the same captured source commit and the standard stale-operation check. Target validation resolves the visible versions of a change and checks the captured commit ID; resolving a full commit ID alone can still find an obsolete version.
+
+The evolution picker calls `Repository.evolution(revision, options)` for an `EvolutionPage` containing `operationId`, `entries`, and `hasMore`. Each `EvolutionEntry` contains its commit ID, description, operation description, and time. The repository reads one extra row to detect another page. Later pages retain the first page's operation ID. `Repository.evolutionDiff(operationId, entry)` uses one-entry `jj evolog --patch`, which handles actual predecessor relationships and description patches. Adjacent picker rows are never used as a comparison baseline.
+
+The design keeps both features in `Repository` and the existing overlays. A separate client and capability-session design was considered, but it duplicated mutation coordination and required changes to startup and existing callers. The chosen design retains its useful constraints: fixed-operation evolution reads, explicit absorb no-op feedback, and working-copy selection when the source disappears. Absorb uses textual patches because its main effect is distributing edits, while ancestry usually stays the same. Patches are buffered and history pagination refetches a larger prefix, matching the existing operation browser.
+
+`navigationRevisions(revset)` reads uncapped metadata with `--ignore-working-copy --at-op=@`. Search matches descriptions and structured local and remote bookmark names case-insensitively, and IDs by prefix. Search request counters prevent superseded queries from replacing the view. Temporary navigation uses `snapshot(revset, true)` with the same read-only flags. Explicit refresh retains its existing working-copy snapshot behavior.
 
 `snapshot(revset)` reads graph-prefixed JSON metadata and a marked description row from one `jj log` command. The adapter retains jj's graph prefixes and connector rows. Word wrapping is disabled for the metadata protocol. Each node and description row references its parsed revision.
 
@@ -61,7 +73,7 @@ Run `bun run check:architecture` to verify that imports resolve, the source grap
 
 ## Current limits
 
-Revision lists and destination pickers load at most 200 revisions. Operation history starts with 50 entries and can load more. Refresh is manual. Diffs are buffered in memory. Inputs are single-line; squash can preserve an existing multiline description without flattening it. The split flow preserves the second description rather than editing it.
+Initial revision lists and destination pickers load at most 200 revisions. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Refresh is manual. Diffs are buffered in memory. Inputs are single-line; squash can preserve an existing multiline description without flattening it. The split flow preserves the second description rather than editing it.
 
 A broader destination search and an integrated conflict editor are not implemented. Conflict resolution continues through the jj CLI.
 
@@ -70,11 +82,12 @@ A broader destination search and an integrated conflict editor are not implement
 Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 
 - `bun run typecheck` and `bun run check:architecture` pass.
-- `bun test` passes 97 tests with 566 assertions and 6 snapshots.
+- `bun test` passes, including renderer snapshots.
 - Repository tests verify bookmark targets, edit/abandon behavior, operation inspection without writes, undo/restore, and rebase parent relationships in both move modes.
 - File-level split and squash tests compare the final repository contents with the original. Literal filenames include spaces and wildcard characters. Partial squash verifies that unselected files remain in the source.
 - Graph tests compare branches, merges, filtered ancestry, and empty results with native jj output. Renderer tests verify commit selection, narrow layout, and scrolling through long graphs.
 - Tests cover rebase-created conflicts, immutable targets, external operations and file edits invalidating confirmations, and stale asynchronous diffs.
+- Absorb tests verify two recipients, source leftovers, source abandonment, immutable ancestors, no-op results, and stale selections. Evolution tests cover description and content rewrites, combined predecessors, fixed-operation pagination, user word wrapping, and unsnapshotted edits. Renderer tests keep operation notes visible after diffs and reject outdated evolution previews.
 - Overlay tests cover 80-column input placement, graph visibility, correcting duplicate bookmark names, and preserving rebase fields after stale-confirmation failures.
 - Keyboard tests drive bookmark creation/rename/undo, operation history, cancellation, stale confirmation, and a complete split-then-squash flow through the actual OpenTUI renderer.
 - `bun run demo` starts in a real PTY. The action menu renders and Ctrl-C restores the terminal and exits successfully.
