@@ -44,10 +44,14 @@ export class ChangePreview extends BoxRenderable {
       const header = section.slice(0, headerEnd);
       this.add(new TextRenderable(this.ctx, { id: `${id}-header`, width: "100%", content: header.trimEnd(), fg: getTheme(this.ctx).muted, wrapMode: "word", flexShrink: 0 }));
       for (const [hunkIndex, hunk] of section.slice(headerEnd).split(/(?=^@@ )/m).entries()) {
-        const heading = hunk.split("\n")[0] ?? "";
+        const lines = hunk.split("\n");
+        const end = lines.findIndex((line, index) => index > 0 && !/^(?:[ +\-]|\\ No newline at end of file)/.test(line));
+        const patch = end < 0 ? hunk : lines.slice(0, end).join("\n") + "\n";
+        const trailing = end < 0 ? "" : lines.slice(end).join("\n").trim();
+        const heading = lines[0] ?? "";
         this.add(new TextRenderable(this.ctx, { id: `${id}-hunk-${hunkIndex}`, width: "100%", content: heading, fg: getTheme(this.ctx).hunk, wrapMode: "word", flexShrink: 0 }));
         this.add(new DiffRenderable(this.ctx, {
-          id: `${id}-diff-${hunkIndex}`, width: "100%", diff: header + hunk, filetype: pathToFiletype(path ?? ""), syntaxStyle: this.syntax,
+          id: `${id}-diff-${hunkIndex}`, width: "100%", diff: header + patch, filetype: pathToFiletype(path ?? ""), syntaxStyle: this.syntax,
           lineNumberFg: getTheme(this.ctx).muted, lineNumberBg: getTheme(this.ctx).bg,
           addedLineNumberBg: getTheme(this.ctx).addedBg, removedLineNumberBg: getTheme(this.ctx).removedBg,
           view: "unified", showLineNumbers: true, wrapMode: "word", flexShrink: 0,
@@ -55,8 +59,11 @@ export class ChangePreview extends BoxRenderable {
           addedContentBg: getTheme(this.ctx).addedBg, removedContentBg: getTheme(this.ctx).removedBg, contextContentBg: getTheme(this.ctx).bg,
           addedSignColor: getTheme(this.ctx).added, removedSignColor: getTheme(this.ctx).conflict,
         }));
-        if (hunk.includes("\\ No newline at end of file")) {
+        if (patch.includes("\\ No newline at end of file")) {
           this.add(new TextRenderable(this.ctx, { id: `${id}-newline-${hunkIndex}`, content: "\\ No newline at end of file", fg: getTheme(this.ctx).muted, flexShrink: 0 }));
+        }
+        if (trailing) {
+          this.add(new TextRenderable(this.ctx, { id: `${id}-after-${hunkIndex}`, width: "100%", content: highlightJjText(trailing, this.prefixes, getTheme(this.ctx)), fg: getTheme(this.ctx).text, wrapMode: "word", flexShrink: 0 }));
         }
       }
     }

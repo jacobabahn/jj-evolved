@@ -7,7 +7,7 @@ import { TreeComparisonView } from "./tree-comparison";
 import { ActionOverlay } from "../ui/action-overlay";
 import { Repository } from "../repository/repository";
 import { terminalText } from "../terminal-text";
-import { shortChangeId, type ChangedFile, type Mutation, type Revision } from "../repository/model";
+import { shortChangeId, rebaseScopeSummary, type ChangedFile, type Mutation, type Revision } from "../repository/model";
 
 type Draft =
   | { kind: "rebase"; descendants: boolean }
@@ -30,9 +30,13 @@ export class HistoryForm extends ActionOverlay {
   private disposed = false;
   private loadingField = false;
   private fieldRequest = 0;
+  private scope: Revision[] | null = null;
+  private scopeRequest = 0;
+  private previewRequest = 0;
 
   constructor(ctx: RenderContext, private readonly repository: Repository, private readonly source: Revision,
-    private readonly draft: Draft, private readonly review: MutationReview, private readonly apply: () => Promise<void>) {
+    private readonly draft: Draft, private readonly review: MutationReview, private readonly apply: () => Promise<void>,
+    private readonly scopeChanged: (revisions: Revision[]) => void = () => {}) {
     super(ctx, "history-form");
     this.title = draft.kind === "rebase" ? " Rebase change " : " Squash changes ";
     this.context.content = highlightJjText(`Source ${shortChangeId(source)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([source]), getTheme(this.ctx));
@@ -49,6 +53,26 @@ export class HistoryForm extends ActionOverlay {
     this.body.add(this.choices);
     this.body.add(this.preview);
     this.renderFields();
+    if (draft.kind === "rebase") void this.loadScope().catch(error => {
+      if (!this.disposed) this.report(error instanceof Error ? error.message : String(error), true);
+    });
+  }
+
+  private scopeText() {
+    return this.draft.kind === "rebase" && this.draft.descendants
+      ? this.scope ? rebaseScopeSummary(this.scope) : "Loading descendants…"
+      : "Choose a destination to preview the result.";
+  }
+
+  private async loadScope() {
+    if (this.draft.kind !== "rebase") return;
+    const request = ++this.scopeRequest;
+    const scope = await this.repository.rebaseScope(this.source);
+    if (this.disposed || request !== this.scopeRequest) return;
+    this.scope = scope;
+    this.scopeChanged(this.draft.descendants ? scope : [this.source]);
+    if (this.mode.kind === "fields") this.renderFields();
+    if (!this.destination) this.text.content = this.scopeText();
   }
 
   private renderFields() {
@@ -56,7 +80,7 @@ export class HistoryForm extends ActionOverlay {
     const index = this.controls.getSelectedIndex();
     const destination = this.destination ? `${this.destination.changeId.slice(0, 8)} ${this.destination.description.split("\n")[0] || "(no description)"}` : "Choose a revision";
     const labels = [`Destination: ${destination}`];
-    if (this.draft.kind === "rebase") labels.push(`Scope: ${this.draft.descendants ? "Change and descendants" : "Only this change"}`);
+    if (this.draft.kind === "rebase") labels.push(`Scope: ${this.draft.descendants ? `Change and descendants (${this.scope ? this.scope.length + " changes" : "loading…"})` : "Only this change"}`);
     else labels.push(`Files: ${this.draft.files.length ? `${this.draft.files.length} selected` : "All changed files"}`, `Description: ${this.draft.keepDescription ? "Keep destination description" : this.draft.description || "(empty)"}`);
     labels.push(`Apply ${this.draft.kind}`);
     this.controls.options = labels.map(name => ({ name: terminalText(name), description: "" }));
@@ -73,13 +97,17 @@ export class HistoryForm extends ActionOverlay {
   }
 
   private async updatePreview() {
+    const request = ++this.previewRequest;
+    this.review.cancel();
     this.comparison.setTrees(null);
-    this.text.content = "Choose a destination to preview the result.";
-    const action = this.mutation();
-    if (!action) { this.review.cancel(); this.report("Choose a destination first.", true); return; }
+    this.text.content = this.scopeText();
     this.report("Preparing preview…");
-    this.text.content = "Preparing tree comparison…";
     try {
+      await this.loadScope();
+      if (this.disposed || request !== this.previewRequest) return;
+      const action = this.mutation();
+      if (!action) { this.review.cancel(); this.text.content = this.scopeText(); this.report("Choose a destination first."); return; }
+      this.text.content = "Preparing tree comparison…";
       const prepared = await this.review.prepare(action);
       if (!prepared) return;
       this.comparison.setTrees(prepared.trees, this.draft.kind);

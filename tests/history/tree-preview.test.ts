@@ -19,16 +19,45 @@ for (const descendants of [false, true]) {
       const snapshot = await repo.snapshot("all()");
       const beforeTree = await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template);
       const prepared = await repo.prepare({ kind: "rebase", revision: source, destination, descendants });
-      expect(prepared.trees?.before).toBe(beforeTree);
+      expect(prepared.trees?.before.replaceAll("● ", "")).toBe(beforeTree);
       expect(await repo.operationId()).toBe(before);
       expect((await repo.snapshot("all()")).revisions).toEqual(snapshot.revisions);
       expect(prepared.trees?.after).toContain("Child left behind or moved");
+      if (descendants) {
+        expect(prepared.summary).toContain("Will rebase 2 changes");
+        expect(prepared.trees?.before.match(/● /g)).toHaveLength(2);
+        expect(prepared.trees?.after.match(/● /g)).toHaveLength(2);
+        expect(prepared.trees?.after).toContain(`● ${source.changeId.slice(0, 8)}`);
+        expect(prepared.trees?.after).not.toContain(`● ${destination.changeId.slice(0, 8)}`);
+      } else expect(prepared.trees?.before).not.toContain("● ");
       await repo.apply(prepared);
       const actual = await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template);
-      expect(prepared.trees?.after).toBe(actual);
+      expect(prepared.trees?.after.replaceAll("● ", "")).toBe(actual);
     } finally { await f.cleanup(); }
   });
 }
+
+test("rebase scope and its confirmation include descendants beyond the graph limit", async () => {
+  const f = await fixture();
+  try {
+    const repo = await Repository.open(f.path);
+    const source = (await repo.snapshot("feature")).revisions[0];
+    const destination = (await repo.snapshot("root()")).revisions[0];
+    if (!source || !destination) throw new Error("Missing source or destination");
+    for (let index = 0; index < 201; index++) await f.jj("new", "-m", `Descendant ${index}`);
+    const before = await repo.operationId();
+    expect((await repo.snapshot("all()")).revisions).toHaveLength(200);
+    const scope = await repo.rebaseScope(source);
+    expect(scope).toHaveLength(203);
+    expect(scope.some(revision => revision.commitId === source.commitId)).toBe(true);
+    const prepared = await repo.prepare({ kind: "rebase", revision: source, destination, descendants: true });
+    expect(prepared.summary).toContain("Will rebase 203 changes");
+    expect(prepared.summary).toContain("Descendant 0\n");
+    expect(prepared.summary).toContain("Descendant 200\n");
+    expect(prepared.summary).toContain("Initial feature");
+    expect(await repo.operationId()).toBe(before);
+  } finally { await f.cleanup(); }
+}, 30_000);
 
 for (const partial of [false, true]) {
   test(`projected squash tree matches jj and preview preserves files, partial=${partial}`, async () => {

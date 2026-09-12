@@ -8,6 +8,7 @@ export function mutationArgs(action: Mutation): string[] {
     case "describe": args = ["describe", action.revision.commitId, "--message", action.description]; break;
     case "new": args = ["new", action.parent.commitId]; break;
     case "edit": args = ["edit", action.revision.commitId]; break;
+    case "absorb": args = ["absorb", "--from", action.revision.commitId]; break;
     case "abandon": args = ["abandon", action.revision.commitId]; break;
     case "rebase":
     case "squash": args = action.kind === "rebase"

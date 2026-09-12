@@ -18,8 +18,17 @@ export class RevisionLog extends ScrollBoxRenderable {
   onDragHint = (_text: string) => {};
   private snapshot: { data: Snapshot; bookmarks: Bookmark[] } | null = null;
   private selectedIndex = 0;
+  private searchMatches: ReadonlySet<string> = new Set();
+  private outsideFilter: ReadonlySet<string> = new Set();
+
+  markNavigation(matches: ReadonlySet<string>, outside: ReadonlySet<string>) {
+    this.searchMatches = matches;
+    this.outsideFilter = outside;
+    this.paintSelection();
+  }
   private revisions: Revision[] = [];
   private sourceIndex: number | null = null;
+  private movingCommits: ReadonlySet<string> = new Set();
   private rows: Row[] = [];
   private bookmarkSources = new Map<Renderable, BookmarkSource>();
   private revisionSources = new Map<Renderable, Revision>();
@@ -156,7 +165,11 @@ export class RevisionLog extends ScrollBoxRenderable {
   }
 
   getSelectedIndex() { return this.selectedIndex; }
-  markSource(index: number | null) { this.sourceIndex = index; this.paintSelection(); }
+  markSource(index: number | null, movingCommits: ReadonlySet<string> = new Set()) {
+    this.sourceIndex = index;
+    this.movingCommits = movingCommits;
+    this.paintSelection();
+  }
   moveUp() { this.setSelectedIndex(this.selectedIndex - 1); }
   moveDown() { this.setSelectedIndex(this.selectedIndex + 1); }
 
@@ -174,10 +187,14 @@ export class RevisionLog extends ScrollBoxRenderable {
       const selected = row.revisionIndex === this.selectedIndex;
       const draggingSource = this.drag?.kind === "dragging" && this.drag.action === "rebase" &&
         row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.drag.revision.commitId;
-      const source = (row.revisionIndex === this.sourceIndex || draggingSource) && row.heading;
+      const moving = row.revisionIndex !== null && this.movingCommits.has(this.revisions[row.revisionIndex]?.commitId ?? "");
+      const source = (row.revisionIndex === this.sourceIndex || draggingSource || moving) && row.heading;
       const drop = this.dropIndex !== null && row.revisionIndex === this.dropIndex;
       const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : getTheme(this.ctx).panel;
-      row.label.content = new StyledText([bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks]);
+      const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
+      const match = this.searchMatches.has(id);
+      const outside = this.outsideFilter.has(id);
+      row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
       row.node.backgroundColor = background;
       row.label.bg = background;
       if (row.bookmarkPreview) {

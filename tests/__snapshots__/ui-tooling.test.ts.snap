@@ -31,19 +31,19 @@ s                 Working-copy status        │
 r                 Refresh history            │
 /                 Enter a revset; empty      │
 restores all()                               │
+Ctrl-F            Search descriptions,       │
+bookmarks and ID prefixes in revset          │
+Ctrl-N / Ctrl-P   Next / previous search     │
+match, wrapping                              │
+@ / [ / ]         Jump to working copy /     │
+parent / child                               │
+Ctrl-O            Return from temporary revea│
+Escape            Clear accepted search      │
+* / +             Search match / revision    │
+outside active revset                        │
 d                 Describe selected change,  │
 single line                                  │
 e                 Make selection the working │
-copy immediately                             │
-R / S             Choose rebase / squash     │
-destination in the graph                     │
-Drag change       Drop onto another change to│
-preview rebase                               │
-n                 Create an empty child of   │
-selection                                    │
-Space             Action menu: edit, rebase, │
-squash, split, abandon                       │
-b                 Local and remote bookmarks │
 ─────────────────────────────────────────────┘"
 `;
 
@@ -53,8 +53,8 @@ exports[`styled selection and help layout at 80 columns: footer styles 80 1`] = 
     "attributes": 0,
     "bg": "#101820",
     "fg": "#6ed6bd",
-    "text": "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh",
-    "width": 76,
+    "text": "j/k move  / filter  ^F search  ^N/^P match  @ work  [/] ancestry",
+    "width": 64,
   },
 ]
 `;
@@ -88,21 +88,21 @@ Page Up / Down    Scroll preview                                     │
 s                 Working-copy status                                │
 r                 Refresh history                                    │
 /                 Enter a revset; empty restores all()               │
+Ctrl-F            Search descriptions, bookmarks and ID prefixes in  │
+revset                                                               │
+Ctrl-N / Ctrl-P   Next / previous search match, wrapping             │
+@ / [ / ]         Jump to working copy / parent / child              │
+Ctrl-O            Return from temporary reveal                       │
+Escape            Clear accepted search                              │
+* / +             Search match / revision outside active revset      │
 d                 Describe selected change, single line              │
 e                 Make selection the working copy immediately        │
 R / S             Choose rebase / squash destination in the graph    │
+a                 Preview absorb into mutable ancestors              │
+v                 Browse selected change's evolution                 │
 Drag change       Drop onto another change to preview rebase         │
 n                 Create an empty child of selection                 │
 Space             Action menu: edit, rebase, squash, split, abandon  │
-b                 Local and remote bookmarks                         │
-o                 Operation history, inspection and restore          │
-u                 Preview undo of the latest operation               │
-f                 Browse files changed in selected revision          │
-Enter             Return to the selected revision preview            │
-t                 Choose a theme, preview and save                   │
-?                 Show this help                                     │
-q / Ctrl-C        Quit                                               │
-                                                                     │
 ─────────────────────────────────────────────────────────────────────┘"
 `;
 
@@ -112,8 +112,8 @@ exports[`styled selection and help layout at 120 columns: footer styles 120 1`] 
     "attributes": 0,
     "bg": "#101820",
     "fg": "#6ed6bd",
-    "text": "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh",
-    "width": 76,
+    "text": "j/k move  / filter  ^F search  ^N/^P match  @ work  [/] ancestry",
+    "width": 64,
   },
 ]
 `;

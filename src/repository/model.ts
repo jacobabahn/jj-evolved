@@ -23,7 +23,7 @@ export interface Snapshot {
 export type Mutation =
   | { kind: "describe"; revision: Revision; description: string }
   | { kind: "new"; parent: Revision }
-  | { kind: "edit" | "abandon"; revision: Revision }
+  | { kind: "edit" | "abandon" | "absorb"; revision: Revision }
   | { kind: "rebase"; revision: Revision; destination: Revision; descendants: boolean }
   | { kind: "squash"; revision: Revision; destination: Revision; description: string; files: string[] }
   | { kind: "split"; revision: Revision; files: string[]; description: string }
@@ -44,4 +44,15 @@ export interface PreparedMutation { action: Mutation; operationId: string; summa
 
 export function shortChangeId(revision: Pick<Revision, "changeId" | "changePrefix">): string {
   return revision.changeId.slice(0, Math.max(8, revision.changePrefix.length));
+}
+
+export interface EvolutionEntry { commitId: string; description: string; operationDescription: string; time: string }
+export interface EvolutionPage { operationId: string; entries: EvolutionEntry[]; hasMore: boolean }
+
+export function label(revision: Revision): string {
+  return `${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)} ${revision.description.trim() || "(no description)"}`;
+}
+
+export function rebaseScopeSummary(revisions: Revision[]): string {
+  return `● Will rebase ${revisions.length} changes, including the source:\n${revisions.map(revision => "● " + label(revision)).join("\n")}`;
 }

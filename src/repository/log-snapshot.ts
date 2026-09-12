@@ -2,7 +2,7 @@ import type { Revision, Snapshot, GraphRow } from "./model";
 import { run } from "./jj-process";
 import { terminalText } from "../terminal-text";
 
-const LOG_TEMPLATE = `'{'
+const REVISION_TEMPLATE = `'{'
   ++ '"commitId":' ++ json(commit_id)
   ++ ',"changeId":' ++ json(change_id)
   ++ ',"changePrefix":' ++ json(change_id.shortest().prefix())
@@ -12,7 +12,8 @@ const LOG_TEMPLATE = `'{'
   ++ ',"parents":' ++ json(parents.map(|p| p.commit_id()))
   ++ ',"workingCopy":' ++ json(current_working_copy)
   ++ ',"conflict":' ++ json(conflict)
-  ++ '}\n' ++ '::jj-evolved-description::\n'`;
+  ++ '}\n'`;
+const LOG_TEMPLATE = REVISION_TEMPLATE + ` ++ '::jj-evolved-description::\n'`;
 
 function parseRevision(value: unknown): Revision {
   if (
@@ -42,8 +43,8 @@ function parseRevision(value: unknown): Revision {
   };
 }
 
-export async function logSnapshot(root: string, revset: string): Promise<Snapshot> {
-  const output = await run(root, ["log", "--config", "ui.log-word-wrap=false", "--limit", "200", "--revisions", revset, "--template", LOG_TEMPLATE]);
+export async function logSnapshot(root: string, revset: string, readOnly = false): Promise<Snapshot> {
+  const output = await run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", "200", "--revisions", revset, "--template", LOG_TEMPLATE]);
   const revisions: Revision[] = [];
   const graph: GraphRow[] = [];
   for (const line of output.split("\n").filter(Boolean)) {
@@ -74,4 +75,9 @@ export function parsePrefixes(output: string): ReadonlyMap<string, string> {
     prefixes.set(row[0], row[1]);
   }
   return prefixes;
+}
+
+export async function logRevisions(root: string, revset: string, operationId = "@"): Promise<Revision[]> {
+  const output = await run(root, ["--ignore-working-copy", "--at-op", operationId, "log", "--no-graph", "-r", revset, "-T", REVISION_TEMPLATE]);
+  return output.split("\n").filter(Boolean).map(line => parseRevision(JSON.parse(line)));
 }

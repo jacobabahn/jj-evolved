@@ -1,7 +1,8 @@
-import { shortChangeId, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { label, rebaseScopeSummary, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
 import { run } from "./jj-process";
-import { logSnapshot } from "./log-snapshot";
+import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
+import { projectedAbsorb } from "./projected-absorb";
 import { projectedTree } from "./projected-tree";
 import { runInteractive, openHunk } from "./external-tools";
 import { terminalText } from "../terminal-text";
@@ -21,11 +22,6 @@ function array(value: unknown): unknown[] {
 function tuples(output: string): unknown[][] {
   return output.split("\n").filter(Boolean).map(line => array(JSON.parse(line)));
 }
-function label(revision: Revision): string {
-  return `${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)} ${revision.description.trim() || "(no description)"}`;
-}
-
-
 export class Repository {
   private constructor(readonly root: string) {}
 
@@ -33,12 +29,20 @@ export class Repository {
     return new Repository((await run(path, ["root"])).trim());
   }
 
-  async snapshot(revset: string): Promise<Snapshot> {
-    return logSnapshot(this.root, revset);
+  async snapshot(revset: string, readOnly = false): Promise<Snapshot> {
+    return logSnapshot(this.root, revset, readOnly);
+  }
+
+  async navigationRevisions(revset: string): Promise<Revision[]> {
+    return logRevisions(this.root, revset);
+  }
+
+  async rebaseScope(revision: Revision, operationId = "@"): Promise<Revision[]> {
+    return logRevisions(this.root, `${revision.commitId}::`, operationId);
   }
 
   async diff(revision: Revision, files: string[] = []): Promise<string> {
-    return terminalText(await run(this.root, ["--ignore-working-copy", "diff", "--revision", revision.commitId, "--git", "--", ...files.map(literalPath)]));
+    return terminalText(await run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...files.map(literalPath)]));
   }
 
   async status(): Promise<string> {
@@ -57,6 +61,26 @@ export class Repository {
 
   async operationDiff(operation: Operation): Promise<string> {
     return terminalText(await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "show", operation.id, "--no-graph", "--git", "-p"]));
+  }
+
+  async evolution(revision: Revision, options: { limit?: number; operationId?: string } = {}): Promise<EvolutionPage> {
+    const limit = options.limit ?? 50;
+    const operationId = options.operationId ?? await this.operationId();
+    const output = await run(this.root, ["--at-op", operationId, "evolog", "--config", "ui.log-word-wrap=false", "--no-graph", "-r", revision.commitId,
+      "--limit", String(limit + 1), "-T",
+      `'[' ++ json(commit.commit_id()) ++ ',' ++ json(commit.description()) ++ ',' ++ json(operation.description()) ++ ',' ++ json(stringify(operation.time())) ++ ']\n'`]);
+    const entries = tuples(output).map(([id, description, operationDescription, time]) => {
+      const commitId = string(id);
+      if (!/^[0-9a-f]{40,64}$/.test(commitId)) throw new Error("Unexpected commit ID in jj evolution output.");
+      return { commitId, description: string(description), operationDescription: string(operationDescription), time: string(time) };
+    });
+    return { operationId, entries: entries.slice(0, limit), hasMore: entries.length > limit };
+  }
+
+  async evolutionDiff(operationId: string, entry: EvolutionEntry): Promise<string> {
+    const patch = await run(this.root, ["--at-op", operationId, "evolog", "--no-graph", "-r", entry.commitId,
+      "--limit", "1", "--git", "--patch", "-T", '""']);
+    return terminalText(`${entry.description.trimEnd() || "(no description)"}\n\nCommit ${entry.commitId}\n${entry.operationDescription}\n${entry.time}\n\nChanges introduced in this version:\n${patch.trim() || "No content or description changes in this version."}`);
   }
 
   async bookmarks(): Promise<Bookmark[]> {
@@ -92,20 +116,30 @@ export class Repository {
     const targets = "revision" in action ? [action.revision] : action.kind === "new" ? [action.parent] : [];
     if ("destination" in action) targets.push(action.destination);
     for (const revision of targets) {
-      const visible = await this.snapshot(`${revision.commitId} & all()`);
-      if (!visible.revisions.length) throw new Error("The selected revision has changed. Refresh and select it again.");
+      const visible = await this.snapshot(`present(${revision.changeId})`);
+      if (!visible.revisions.some(current => current.commitId === revision.commitId)) {
+        throw new Error("The selected revision has changed. Refresh and select it again.");
+      }
     }
     let summary: string;
+    let rebasing: Revision[] = [];
     switch (action.kind) {
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
       case "new": summary = `Create an empty child of ${label(action.parent)}`; break;
       case "edit": summary = `Make this change the working copy:\n${label(action.revision)}`; break;
+      case "absorb": summary = await projectedAbsorb(this.root, action.revision, operationId); break;
       case "abandon":
       case "rebase": {
-        const affected = await this.snapshot(`${action.revision.commitId}::`);
         summary = `${action.kind === "abandon" ? "Abandon" : "Rebase"} ${label(action.revision)}\n`;
         if (action.kind === "rebase") summary += `Onto ${label(action.destination)}\nMode: ${action.descendants ? "selected revision and descendants" : "selected revision only; descendants fill the gap"}\n`;
-        summary += `\nAffected revision/descendant context (up to 200):\n${affected.revisions.map(label).join("\n")}\n\nDescendants may be rewritten and conflicts may result.`;
+        if (action.kind === "rebase" && action.descendants) {
+          rebasing = await this.rebaseScope(action.revision, operationId);
+          summary += `\n${rebaseScopeSummary(rebasing)}\n\nTrees show up to 40 revisions; the list above includes the full rebase scope.`;
+        } else {
+          const affected = await this.snapshot(`${action.revision.commitId}::`);
+          summary += `\nAffected revision/descendant context (up to 200):\n${affected.revisions.map(label).join("\n")}`;
+        }
+        summary += "\n\nDescendants may be rewritten and conflicts may result.";
         break;
       }
       case "squash":
@@ -137,7 +171,7 @@ export class Repository {
       default: { const exhaustive: never = action; throw new Error(`Unknown action ${exhaustive}`); }
     }
     const trees = action.kind === "rebase" || action.kind === "squash"
-      ? await projectedTree(this.root, action, operationId) : null;
+      ? await projectedTree(this.root, action, operationId, rebasing) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
     return { action, operationId, summary: terminalText(summary), trees };
   }

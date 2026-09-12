@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { SelectRenderable } from "@opentui/core";
+import { SelectRenderable, TextRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createApp } from "../src/app";
 import { Repository } from "../src/repository/repository";
@@ -38,6 +38,152 @@ async function setup() {
   }
   return { f, screen, repo, app, until, prompt, choose, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
+
+test("absorb menu preview cancels, rejects stale state, refreshes and applies", async () => {
+  const t = await setup();
+  try {
+    await Bun.write(`${t.f.path}/hello.txt`, "absorbed through the UI\n");
+    await Bun.write(`${t.f.path}/leftover.txt`, "keep this edit\n");
+    t.screen.mockInput.pressKey("r");
+    await t.until("+ absorbed through the UI");
+    const operation = await t.repo.operationId();
+    t.screen.mockInput.pressKey(" ");
+    t.choose("Absorb into ancestors");
+    await t.until("Absorb from");
+    expect(await t.repo.operationId()).toBe(operation);
+    let sawRemainder = false;
+    for (let page = 0; page < 20; page++) {
+      await t.screen.waitForVisualIdle();
+      if (t.screen.captureCharFrame().includes("Remaining in source:")) { sawRemainder = true; break; }
+      t.screen.mockInput.pressKey("\x1b[6~");
+    }
+    expect(sawRemainder).toBe(true);
+    t.screen.mockInput.pressEscape();
+    await t.until("Change preview");
+    expect(await t.repo.operationId()).toBe(operation);
+    t.screen.mockInput.pressKey("a");
+    await t.until("Absorb from");
+    await t.f.jj("bookmark", "create", "external");
+    t.screen.mockInput.pressEnter();
+    await t.until("Repository changed since this preview");
+    t.screen.mockInput.pressKey("p");
+    await t.until("Ready.");
+    t.screen.mockInput.pressEnter();
+    await t.until("absorb completed");
+    expect(await t.f.jj("file", "show", "-r", "feature", "hello.txt")).toBe("absorbed through the UI\n");
+    const current = (await t.repo.snapshot("@")).revisions[0];
+    if (!current) throw new Error("Missing working copy");
+    expect(await t.repo.diff(current)).toContain("+keep this edit");
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("absorb follows the working copy when an unnamed filtered source disappears", async () => {
+  const t = await setup();
+  try {
+    await t.f.jj("describe", "-m", "");
+    await Bun.write(`${t.f.path}/hello.txt`, "all absorbed\n");
+    t.screen.mockInput.pressKey("/");
+    await t.prompt("@");
+    t.screen.resize(80, 24);
+    t.screen.mockInput.pressKey("a");
+    await t.until("Absorb from");
+    t.screen.mockInput.pressEnter();
+    await t.until("absorb completed");
+    const current = (await t.repo.snapshot("@")).revisions[0];
+    if (!current) throw new Error("Missing working copy");
+    await t.until(current.changeId.slice(0, 8));
+    expect(t.screen.captureCharFrame()).toContain("revset: all()");
+    expect(await t.repo.diff(current)).toBe("");
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("evolution menu and shortcut browse description patches without changing repository state", async () => {
+  const t = await setup();
+  try {
+    await t.f.jj("describe", "-m", "Evolution rename");
+    t.screen.mockInput.pressKey("r");
+    await t.until("Evolution rename");
+    await t.until("Ready.");
+    const operation = await t.repo.operationId();
+    t.screen.mockInput.pressKey(" ");
+    t.choose("Change evolution");
+    await t.until("Changes introduced in this version:");
+    await t.screen.waitForVisualIdle();
+    t.screen.mockInput.pressKey("\x1b[6~");
+    await t.until("+ Evolution rename");
+    t.screen.mockInput.pressKey("j");
+    await t.until("new empty commit");
+    expect(await t.repo.operationId()).toBe(operation);
+    t.screen.mockInput.pressEscape();
+    await t.until("Change preview");
+    t.screen.resize(80, 24);
+    t.screen.mockInput.pressKey("v");
+    await t.until("Change evolution");
+    expect(t.screen.captureCharFrame()).toContain("Esc close");
+    t.screen.mockInput.pressEscape();
+    expect(await t.repo.operationId()).toBe(operation);
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+for (const close of [false, true]) test(`late evolution previews are ignored, overlay closed=${close}`, async () => {
+  const t = await setup();
+  const started = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
+  const original = t.repo.evolutionDiff.bind(t.repo);
+  let blockedCommit = "";
+  t.repo.evolutionDiff = async (operation, entry) => {
+    if (entry.commitId === blockedCommit) {
+      started.resolve();
+      await gate.promise;
+      return "OUTDATED EVOLUTION PREVIEW";
+    }
+    return original(operation, entry);
+  };
+  try {
+    await t.f.jj("describe", "-m", "Newest evolution version");
+    t.screen.mockInput.pressKey("r");
+    await t.until("Newest evolution version");
+    await t.until("Ready.");
+    const current = (await t.repo.snapshot("@")).revisions[0];
+    if (!current) throw new Error("Missing working copy");
+    blockedCommit = current.commitId;
+    t.screen.mockInput.pressKey("v");
+    await started.promise;
+    await t.until("Ready.");
+    t.screen.mockInput.pressKey("j");
+    await t.until("Selection preview");
+    if (close) t.screen.mockInput.pressEscape();
+    gate.resolve();
+    await t.until(close ? "Change preview" : "Selection preview");
+    await t.screen.waitForVisualIdle();
+    expect(t.screen.captureCharFrame()).not.toContain("OUTDATED EVOLUTION PREVIEW");
+    if (close) expect(t.screen.captureCharFrame()).not.toContain("Change evolution");
+  } finally { gate.resolve(); await t.cleanup(); }
+}, 15_000);
+
+test("evolution loads older versions through the picker after an external rewrite", async () => {
+  const t = await setup();
+  try {
+    for (let version = 0; version < 51; version++) await t.f.jj("describe", "-m", `History version ${version}`);
+    t.screen.mockInput.pressKey("r");
+    await t.until("History version 50");
+    await t.until("Ready.");
+    t.screen.mockInput.pressKey("v");
+    await t.until("Change evolution");
+    await t.until("Ready.");
+    await t.f.jj("describe", "-m", "Later external version");
+    const operation = await t.repo.operationId();
+    t.choose("Load older versions");
+    await t.until("Ready.");
+    const chooser = t.screen.renderer.root.findDescendantById("action-choices");
+    if (!(chooser instanceof SelectRenderable)) throw new Error("Missing version picker");
+    expect(chooser.options).toHaveLength(52);
+    expect(chooser.getSelectedOption()?.name).toContain("History version 0");
+    expect(chooser.options.some(option => option.name.includes("Later external version"))).toBe(false);
+    expect(chooser.options.some(option => option.name === "Load older versions")).toBe(false);
+    expect(await t.repo.operationId()).toBe(operation);
+  } finally { await t.cleanup(); }
+}, 15_000);
 
 test("keyboard browsing, status, help, revsets and empty state at 80x24", async () => {
   const t = await setup();
@@ -433,6 +579,72 @@ test("inline squash reviews a graph destination before applying", async () => {
   } finally { await t.cleanup(); }
 }, 15_000);
 
+test("rebase scope marks branches and merges, updates on toggle, and reports filtered descendants", async () => {
+  const t = await setup();
+  try {
+    const source = (await t.repo.snapshot("@")).revisions[0];
+    if (!source) throw new Error("Missing source");
+    await t.f.jj("new", "-m", "Left descendant");
+    const left = (await t.repo.snapshot("@")).revisions[0];
+    await t.f.jj("new", source.commitId, "-m", "Right descendant");
+    const right = (await t.repo.snapshot("@")).revisions[0];
+    if (!left || !right) throw new Error("Missing branches");
+    await t.f.jj("new", left.commitId, right.commitId, "-m", "Merged descendant");
+    const merge = (await t.repo.snapshot("@")).revisions[0];
+    await t.f.jj("new", "root()", "-m", "Unrelated destination");
+    const destination = (await t.repo.snapshot("@")).revisions[0];
+    if (!merge || !destination) throw new Error("Missing merge or destination");
+    t.screen.mockInput.pressKey("r");
+    await t.until("Ready.");
+    const snapshot = await t.repo.snapshot("all()");
+    const marked = (commitId: string) => {
+      const index = snapshot.graph.findIndex(row => row.kind === "revision" && row.revision.commitId === commitId);
+      const label = t.screen.renderer.root.findDescendantById(`revision-label-${index}`);
+      if (!(label instanceof TextRenderable)) throw new Error("Missing revision label");
+      return label.content.chunks.map(chunk => chunk.text).join("").startsWith("● ");
+    };
+    const before = await t.repo.operationId();
+    t.screen.mockInput.pressKey("R");
+    await t.until("Selected change only");
+    expect(marked(source.commitId)).toBe(true);
+    expect(marked(left.commitId)).toBe(false);
+    t.screen.mockInput.pressTab();
+    await t.until("Change and descendants: 4 changes");
+    for (const item of [source, left, right, merge]) expect(marked(item.commitId)).toBe(true);
+    expect(marked(destination.commitId)).toBe(false);
+    t.screen.mockInput.pressTab();
+    await t.until("Selected change only");
+    for (const item of [left, right, merge]) expect(marked(item.commitId)).toBe(false);
+    t.screen.mockInput.pressEscape();
+    await t.until("Cancelled.");
+    expect(marked(source.commitId)).toBe(false);
+
+    t.screen.mockInput.pressKey(" ");
+    t.choose("Rebase change and descendants");
+    await t.until("Will rebase 4 changes");
+    for (const item of [source, left, right, merge]) expect(marked(item.commitId)).toBe(true);
+    t.screen.mockInput.pressKey("j");
+    t.screen.mockInput.pressEnter();
+    await t.until("Only this change");
+    await t.until("Choose a destination first.");
+    for (const item of [left, right, merge]) expect(marked(item.commitId)).toBe(false);
+    t.screen.mockInput.pressEscape();
+    await t.until("Change preview");
+
+    t.screen.mockInput.pressKey("/");
+    await t.prompt(source.changeId);
+    t.screen.resize(80, 24);
+    t.screen.mockInput.pressKey("R");
+    await t.until("Selected change only");
+    t.screen.mockInput.pressTab();
+    await t.until("3 outside view");
+    expect(t.screen.captureCharFrame()).toContain("4 changes");
+    t.screen.mockInput.pressEscape();
+    await t.until("Cancelled.");
+    expect(await t.repo.operationId()).toBe(before);
+  } finally { await t.cleanup(); }
+}, 15_000);
+
 test("inline rebase cancels without writes, retains a failed destination, and retries", async () => {
   const t = await setup();
   try {
@@ -680,3 +892,41 @@ for (const flow of ["confirmation", "form"] as const) {
     } finally { reload?.mockRestore(); await t.cleanup(); }
   }, 15_000);
 }
+
+test("rebase form cannot apply its previous review while scope is reloading", async () => {
+  const t = await setup();
+  const gate = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const originalScope = t.repo.rebaseScope.bind(t.repo);
+  const apply = spyOn(t.repo, "apply");
+  try {
+    t.screen.mockInput.pressKey(" ");
+    t.choose("Rebase change");
+    await t.until("Destination: Choose a revision");
+    t.screen.mockInput.pressEnter();
+    await t.until("j/k choose");
+    const choices = t.screen.renderer.root.findDescendantById("history-choices");
+    const fields = t.screen.renderer.root.findDescendantById("history-fields");
+    if (!(choices instanceof SelectRenderable) || !(fields instanceof SelectRenderable)) throw new Error("Missing rebase fields");
+    choices.setSelectedIndex(choices.options.length - 1);
+    t.screen.mockInput.pressEnter();
+    await t.until("Preview ready");
+    t.repo.rebaseScope = async (revision, operationId) => {
+      started.resolve();
+      await gate.promise;
+      return originalScope(revision, operationId);
+    };
+    t.screen.mockInput.pressKey("p");
+    await started.promise;
+    fields.setSelectedIndex(2);
+    t.screen.mockInput.pressEnter();
+    await Bun.sleep(100);
+    expect(apply).not.toHaveBeenCalled();
+    gate.resolve();
+    await t.until("Preview ready");
+  } finally {
+    gate.resolve();
+    apply.mockRestore();
+    await t.cleanup();
+  }
+}, 15_000);

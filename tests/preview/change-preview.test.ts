@@ -16,6 +16,21 @@ const patch = `diff --git a/hello.ts b/hello.ts
 +const end = true;
 `;
 
+test("operation notes and source leftovers remain visible after a diff", async () => {
+  const screen = await createTestRenderer({ width: 100, height: 35 });
+  const preview = new ChangePreview(screen.renderer, "absorb-summary",
+    `${patch}\nChanged working copy:\nA rewritten change\n\nRemaining in source:\nEmpty change. No file differences remain.`);
+  screen.renderer.root.add(preview);
+  try {
+    await screen.waitForVisualIdle();
+    const frame = screen.captureCharFrame();
+    expect(frame).toContain("Changed working copy:");
+    expect(frame).toContain("Remaining in source:");
+    expect(frame).toContain("No file differences remain.");
+    expect(frame).toContain('+ const end = true;');
+  } finally { preview.destroyRecursively(); screen.renderer.destroy(); }
+});
+
 test("previews highlight code, keep source blank lines and render every file and hunk", async () => {
   const screen = await createTestRenderer({ width: 90, height: 35 });
   const preview = new ChangePreview(screen.renderer, "test-preview", `A change\n\n${patch}${patch.replaceAll("hello.ts", "other.ts")}`);

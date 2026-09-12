@@ -13,21 +13,25 @@ import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
-import { shortChangeId, type InteractiveAction, type Mutation, type Revision } from "./repository/model";
+import { shortChangeId, type InteractiveAction, type Mutation, type Revision, type Snapshot, type Bookmark } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string> };
 
 type Prompt =
   | { kind: "browse" }
   | { kind: "theme"; original: Theme }
-  | { kind: "inline"; source: Revision; action: { kind: "rebase"; descendants: boolean } | { kind: "squash" } }
+  | { kind: "inline"; source: Revision; action: { kind: "rebase"; descendants: boolean; scope: Revision[] } | { kind: "squash" } }
   | { kind: "form"; form: HistoryForm }
+  | { kind: "search"; view: NavigationView; previous: Search; returnPoint: NavigationView | null }
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision }
   | { kind: "new"; parent: Revision }
   | { kind: "picker"; choices: Choice[] }
   | { kind: "text"; accept: (value: string) => void }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
+
+type Search = { query: string; matches: Revision[] };
+type NavigationView = { snapshot: Snapshot; bookmarks: Bookmark[]; index: number; top: number; outside: ReadonlySet<string> };
 
 const HELP = `Keyboard reference
 
@@ -37,9 +41,17 @@ Page Up / Down    Scroll preview
 s                 Working-copy status
 r                 Refresh history
 /                 Enter a revset; empty restores all()
+Ctrl-F            Search descriptions, bookmarks and ID prefixes in revset
+Ctrl-N / Ctrl-P   Next / previous search match, wrapping
+@ / [ / ]         Jump to working copy / parent / child
+Ctrl-O            Return from temporary reveal
+Escape            Clear accepted search
+* / +             Search match / revision outside active revset
 d                 Describe selected change, single line
 e                 Make selection the working copy immediately
 R / S             Choose rebase / squash destination in the graph
+a                 Preview absorb into mutable ancestors
+v                 Browse selected change's evolution
 Drag change       Drop onto another change to preview rebase
 n                 Create an empty child of selection
 Space             Action menu: edit, rebase, squash, split, abandon
@@ -79,9 +91,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
   const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text, placeholderColor: colors.muted });
+  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+  const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
+  const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) | + outside filter | ^O return" });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: "j/k move  e edit  d describe  n new  R rebase  S squash  / filter  r refresh\nSpace actions  b bookmarks  o op log  u undo  t theme  ? help  q quit" });
+  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: "j/k move  / filter  ^F search  ^N/^P match  @ work  [/] ancestry\n^O return  Esc clear  Space actions  r refresh  ? help  q quit" });
   const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
@@ -100,12 +115,21 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   preview.add(detail);
   body.add(listBox);
   body.add(preview);
-  for (const child of [header, filter, message, inlineHint, body, shortcuts, overlay]) app.add(child);
+  for (const child of [header, filter, message, navigationStatus, searchInput, searchStatus, inlineHint, body, shortcuts, overlay]) app.add(child);
   renderer.root.add(app);
 
   let resultTimer: ReturnType<typeof setTimeout> | undefined;
   let revisions: Revision[] = [];
   let revset = "all()";
+  let currentSnapshot: Snapshot = { root: repository.root, revisions: [], graph: [] };
+  let currentBookmarks: Bookmark[] = [];
+  let outsideFilter: ReadonlySet<string> = new Set();
+  let returnPoint: NavigationView | null = null;
+  let search: Search = { query: "", matches: [] };
+  let searchCandidates: Revision[] = [];
+  let searchBookmarks: Bookmark[] = [];
+  let searchRequest = 0;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let prompt: Prompt = { kind: "browse" };
   let busy = false;
   let stopped = false;
@@ -177,7 +201,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const snapshot = await repository.snapshot(nextRevset);
     const bookmarks = await repository.bookmarks();
     if (stopped) return;
+    ++searchRequest;
+    clearTimeout(searchTimer);
+    search = { query: "", matches: [] };
+    returnPoint = null;
+    outsideFilter = new Set();
+    currentSnapshot = snapshot;
+    currentBookmarks = bookmarks;
     revisions = snapshot.revisions;
+    updateSearchStatus();
     detail.prefixes = overlayText.prefixes = revisionPrefixes(revisions);
     revset = nextRevset;
     filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions (limit 200)`);
@@ -192,6 +224,130 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (revisions.length) list.setSelectedIndex(Math.max(0, index));
     replacing = false;
     await loadPreview();
+  }
+  function captureView(): NavigationView {
+    return { snapshot: currentSnapshot, bookmarks: currentBookmarks, index: list.getSelectedIndex(), top: list.scrollTop, outside: outsideFilter };
+  }
+  function displayView(view: NavigationView) {
+    currentSnapshot = view.snapshot;
+    currentBookmarks = view.bookmarks;
+    outsideFilter = view.outside;
+    revisions = currentSnapshot.revisions;
+    detail.prefixes = overlayText.prefixes = revisionPrefixes(revisions);
+    replacing = true;
+    list.setSnapshot(currentSnapshot, currentBookmarks);
+    list.setSelectedIndex(view.index);
+    list.scrollTop = view.top;
+    replacing = false;
+    filter.content = terminalText(`revset: ${revset}`);
+    updateSearchStatus();
+  }
+  function updateSearchStatus() {
+    navigationStatus.visible = returnPoint !== null;
+    searchStatus.visible = search.query.length > 0 || prompt.kind === "search";
+    const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
+    const position = search.matches.length ? (index < 0 ? `${search.matches.length} matches` : `${index + 1}/${search.matches.length}`) : search.query ? "No matches" : "Type to search";
+    const hints = prompt.kind === "search" ? "Enter keep  Esc cancel" : "^N/^P next/prev";
+    searchStatus.content = terminalText(`Search in revset: ${position} | ${hints} | ${search.query}`);
+    list.markNavigation(new Set(search.matches.map(item => item.commitId)), outsideFilter);
+  }
+  async function navigate(target: Revision, request?: number) {
+    let index = revisions.findIndex(item => item.commitId === target.commitId);
+    if (index < 0) {
+      const context = `${target.commitId} | latest(parents(${target.commitId}) | children(${target.commitId}), 39)`;
+      const [snapshot, included, bookmarks] = await Promise.all([
+        repository.snapshot(context, true), repository.navigationRevisions(`(${context}) & (${revset})`), repository.bookmarks(),
+      ]);
+      if (stopped || (request !== undefined && request !== searchRequest)) return;
+      index = snapshot.revisions.findIndex(item => item.commitId === target.commitId);
+      if (index < 0) throw new Error("Target no longer exists. Refresh history.");
+      returnPoint ??= captureView();
+      const ids = new Set(included.map(item => item.commitId));
+      displayView({ snapshot, bookmarks, index, top: 0, outside: new Set(snapshot.revisions.filter(item => !ids.has(item.commitId)).map(item => item.commitId)) });
+    }
+    replacing = true;
+    list.setSelectedIndex(index);
+    replacing = false;
+    updateSearchStatus();
+    await loadPreview();
+  }
+  async function updateSearch() {
+    const request = ++searchRequest;
+    const query = searchInput.value;
+    const needle = query.toLowerCase();
+    const bookmarkIds = new Set(searchBookmarks.filter(item => `${item.name}${item.remote ? `@${item.remote}` : ""}`.toLowerCase().includes(needle)).flatMap(item => item.targets));
+    search = { query, matches: query ? searchCandidates.filter(item => item.description.toLowerCase().includes(needle) || item.changeId.startsWith(needle) || item.commitId.startsWith(needle) || bookmarkIds.has(item.commitId)) : [] };
+    updateSearchStatus();
+    const first = search.matches[0];
+    if (first) await navigate(first, request);
+  }
+  function queueSearch() {
+    if (prompt.kind !== "search") return;
+    ++searchRequest;
+    clearTimeout(searchTimer);
+    searchStatus.content = "Searching active revset…";
+    searchTimer = setTimeout(() => {
+      void updateSearch().catch(error => report(errorText(error), true));
+    }, 100);
+  }
+  function beginSearch() {
+    void run("Loading search scope…", async () => {
+      const [candidates, bookmarks] = await Promise.all([repository.navigationRevisions(revset), repository.bookmarks()]);
+      if (stopped) return;
+      searchCandidates = candidates;
+      searchBookmarks = bookmarks;
+      prompt = { kind: "search", view: captureView(), previous: search, returnPoint };
+      searchInput.value = search.query;
+      searchInput.visible = true;
+      list.mouseSelectionEnabled = false;
+      list.blur(); preview.blur(); searchInput.focus();
+      updateSearchStatus();
+    });
+  }
+  async function finishSearch(cancel: boolean) {
+    const state = prompt;
+    if (state.kind !== "search") return;
+    clearTimeout(searchTimer);
+    ++searchRequest;
+    if (cancel) {
+      search = state.previous;
+      returnPoint = state.returnPoint;
+      displayView(state.view);
+    } else {
+      await updateSearch();
+      if (stopped || prompt !== state) return;
+    }
+    searchInput.blur(); searchInput.visible = false;
+    closePrompt();
+    updateSearchStatus();
+    await loadPreview();
+  }
+  function nextMatch(direction: number) {
+    void run("Finding match…", async () => {
+      const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
+      const next = index < 0 ? (direction > 0 ? 0 : search.matches.length - 1) : (index + direction + search.matches.length) % search.matches.length;
+      const target = search.matches[next];
+      if (target) await navigate(target);
+    });
+  }
+  function jump(direction: "parent" | "child" | "working copy") {
+    const source = selected();
+    if (!source && direction !== "working copy") { report(`No ${direction}.`); return; }
+    void run("Finding revision…", async () => {
+      const expression = direction === "working copy" ? "@" : `${direction === "parent" ? "parents" : "children"}(${source?.commitId})`;
+      const [targets, included] = await Promise.all([repository.navigationRevisions(expression), repository.navigationRevisions(`(${expression}) & (${revset})`)]);
+      if (stopped) return;
+      const target = targets[0];
+      if (!target) { show(`No ${direction}.`, "Navigation"); return; }
+      if (targets.length === 1) { await navigate(target); return; }
+      const ids = new Set(included.map(item => item.commitId));
+      pick(`Choose ${direction}`, targets.map(item => ({
+        name: `${shortChangeId(item)} ${item.description.split("\n")[0] || "(no description)"}`,
+        description: `${item.commitId.slice(0, 12)} ${ids.has(item.commitId) ? "" : "+ outside filter"}`,
+        preview: async () => `${item.description}\n\n${await repository.diff(item)}`,
+        choose: () => { closePrompt(); void run("Navigating…", () => navigate(item)); },
+      })));
+    });
   }
   async function run(label: string, action: () => Promise<void>) {
     if (isBusy() || stopped) return;
@@ -260,7 +416,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (stopped) return;
     const target = action.kind === "squash" ? action.destination : "revision" in action ? action.revision : null;
     if (!followWorkingCopy && target) {
-      const index = revisions.findIndex(revision => revision.changeId === target.changeId);
+      let index = revisions.findIndex(revision => revision.changeId === target.changeId);
+      if (index < 0 && action.kind === "absorb") {
+        await refresh("all()");
+        if (stopped) return;
+        index = revisions.findIndex(revision => revision.changeId === target.changeId);
+        if (index < 0) index = revisions.findIndex(revision => revision.workingCopy);
+      }
       if (index >= 0) { list.setSelectedIndex(index); await loadPreview(); }
     }
   }
@@ -290,7 +452,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (back) {
         inlineHint.visible = false;
         if (action.kind === "rebase" || action.kind === "squash") {
-          overlay.context.content = highlightJjText(`Source ${shortChangeId(action.revision)} / ${action.revision.commitId.slice(0, 12)}\n${action.revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([action.revision]), colors);
+          const context = action.kind === "rebase" && action.descendants
+            ? "● source and descendants will rebase; scroll for full list"
+            : action.revision.description.split("\n")[0] || "(no description)";
+          overlay.context.content = highlightJjText(`Source ${shortChangeId(action.revision)} / ${action.revision.commitId.slice(0, 12)}\n${context}`, revisionPrefixes([action.revision]), colors);
         }
         overlay.hints.content = "Enter apply  Esc choose destination  p refresh preview  PgUp/Dn scroll";
       }
@@ -303,7 +468,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     colors = theme;
     setTheme(renderer, theme);
     app.backgroundColor = colors.bg;
-    header.fg = promptLabel.fg = inlineHint.fg = shortcuts.fg = result.fg = colors.accent;
+    header.fg = navigationStatus.fg = searchStatus.fg = promptLabel.fg = inlineHint.fg = shortcuts.fg = result.fg = colors.accent;
     filter.fg = message.fg = colors.muted;
     listBox.backgroundColor = colors.panel;
     listBox.borderColor = focus === "list" ? colors.accent : colors.border;
@@ -312,6 +477,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     input.backgroundColor = input.focusedBackgroundColor = colors.panel;
     input.textColor = input.focusedTextColor = colors.text;
     input.placeholderColor = colors.muted;
+    searchInput.backgroundColor = searchInput.focusedBackgroundColor = colors.panel;
+    searchInput.textColor = searchInput.focusedTextColor = colors.text;
+    searchInput.placeholderColor = colors.muted;
     chooser.backgroundColor = chooser.focusedBackgroundColor = colors.panel;
     chooser.textColor = chooser.focusedTextColor = colors.text;
     chooser.descriptionColor = colors.muted;
@@ -476,6 +644,26 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       pick("Operation history", choices);
     });
   }
+  function showEvolution(revision: Revision, limit = 50, operationId?: string, selectedIndex = 0) {
+    void run("Loading change evolution…", async () => {
+      const page = await repository.evolution(revision, { limit, operationId });
+      if (stopped) return;
+      const choices: Choice[] = page.entries.map(entry => ({
+        name: `${entry.commitId === revision.commitId ? "Selected · " : ""}${entry.commitId.slice(0, 12)} ${entry.description.split("\n")[0] || "(no description)"}`,
+        description: `${entry.operationDescription} · ${entry.time}`,
+        preview: () => repository.evolutionDiff(page.operationId, entry),
+        choose: () => previewChoice(),
+      }));
+      if (page.hasMore) choices.push({
+        name: "Load older versions", description: `Show up to ${limit + 50} versions`,
+        choose: () => showEvolution(revision, limit + 50, page.operationId, page.entries.length),
+      });
+      pick("Change evolution", choices);
+      chooser.setSelectedIndex(selectedIndex);
+      overlay.hints.content = "j/k version  Enter preview  Esc close  PgUp/Dn scroll";
+      if (!page.entries.length) showOverlay("No evolution history is available for this revision.", "Change evolution");
+    });
+  }
   function undo() {
     void run("Loading latest operation…", async () => {
       const operation = (await repository.operations(1))[0];
@@ -494,7 +682,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       review, async () => {
         try { await applyReviewed(); report("Ready. ? shows all controls."); }
         catch (error) { if (prompt.kind === "browse") report(errorText(error), true); throw error; }
-      });
+      }, moving => list.markSource(revisions.findIndex(item => item.commitId === revision.commitId), new Set(moving.map(item => item.commitId))));
     app.add(form);
     prompt = { kind: "form", form };
     message.content = "";
@@ -538,18 +726,29 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       { name: "Abandon change", description: "Remove selection and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
       { name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
+      { name: "Absorb into ancestors", description: "Preview automatic fixups into mutable ancestors (a)", choose: () => confirm({ kind: "absorb", revision }) },
+      { name: "Change evolution", description: "Browse previous versions and their rewrite diffs (v)", choose: () => showEvolution(revision) },
     ]);
   }
   function updateInlineHint() {
     if (prompt.kind !== "inline") return;
+    const source = prompt.source;
     const destination = selected();
+    const moving = prompt.action.kind === "rebase" && prompt.action.descendants ? prompt.action.scope : [prompt.source];
+    const visible = new Set(revisions.map(revision => revision.commitId));
+    const outside = moving.filter(revision => !visible.has(revision.commitId)).length;
+    list.markSource(revisions.findIndex(revision => revision.commitId === source.commitId), new Set(moving.map(revision => revision.commitId)));
     const scope = prompt.action.kind === "rebase"
-      ? `${prompt.action.descendants ? "Change and descendants" : "Selected change only"} · Tab toggles scope`
+      ? `${prompt.action.descendants ? `Change and descendants: ${moving.length} changes` : "Selected change only"}${outside ? ` · ${outside} outside view` : ""} · Tab scope`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\nj/k choose destination · Enter preview · Esc cancel`);
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · Enter preview · Esc cancel`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
-    resumeInline({ kind: "inline", source, action: kind === "rebase" ? { kind, descendants: false } : { kind } });
+    if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
+    void run("Loading rebase scope…", async () => {
+      const scope = await repository.rebaseScope(source);
+      if (!stopped) resumeInline({ kind: "inline", source, action: { kind, descendants: false, scope } });
+    });
   }
   function resumeInline(state: Extract<Prompt, { kind: "inline" }>) {
     closePrompt();
@@ -564,6 +763,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function onSelection() {
     if (!replacing && (prompt.kind === "browse" || prompt.kind === "inline")) {
       updateInlineHint();
+      updateSearchStatus();
       void loadPreview();
     }
   }
@@ -571,6 +771,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (stopped) return;
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (prompt.kind === "search") {
+      if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
+      else if (key.name === "return") { key.preventDefault(); void finishSearch(false).catch(error => report(errorText(error), true)); }
+      return;
+    }
     if (prompt.kind === "theme") {
       key.preventDefault();
       if (isBusy()) return;
@@ -640,6 +845,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (isBusy()) return;
+    if (key.ctrl && name === "f") { key.preventDefault(); beginSearch(); return; }
+    if (key.ctrl && (name === "n" || name === "p")) { key.preventDefault(); nextMatch(name === "n" ? 1 : -1); return; }
+    if (key.ctrl && name === "o") {
+      key.preventDefault();
+      if (returnPoint) { const view = returnPoint; returnPoint = null; displayView(view); void loadPreview(); }
+      return;
+    }
+    if (name === "escape") { key.preventDefault(); search = { query: "", matches: [] }; updateSearchStatus(); return; }
+    if (["@", "[", "]"].includes(key.sequence)) {
+      key.preventDefault(); jump(key.sequence === "@" ? "working copy" : key.sequence === "[" ? "parent" : "child"); return;
+    }
     if (name === "t") { key.preventDefault(); pickTheme(); return; }
     if (key.sequence === "R" || key.sequence === "S" || (key.shift && (name === "r" || name === "s"))) {
       key.preventDefault();
@@ -652,6 +868,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (name === "o") { key.preventDefault(); showOperations(); return; }
     if (name === "u") { key.preventDefault(); undo(); return; }
     if (name === "f") { key.preventDefault(); const revision = selected(); if (revision) browseFiles(revision); return; }
+    if (name === "a" || name === "v") {
+      key.preventDefault();
+      const revision = selected();
+      if (revision) {
+        if (name === "a") confirm({ kind: "absorb", revision });
+        else showEvolution(revision);
+      }
+      return;
+    }
     if (name === "return") { key.preventDefault(); void loadPreview(); return; }
     if (name === "r") { key.preventDefault(); void run("Refreshing history…", () => refresh()); }
     else if (name === "/" || key.sequence === "/") { key.preventDefault(); openPrompt({ kind: "revset" }, "Revset", revset); }
@@ -670,6 +895,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (stopped) return;
     stopped = true;
     clearTimeout(resultTimer);
+    clearTimeout(searchTimer);
+    ++searchRequest;
     if (prompt.kind === "form") prompt.form.dispose();
     previews.dispose();
     review.dispose();
@@ -678,6 +905,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
+  searchInput.on("input", queueSearch);
   list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });
   list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });
