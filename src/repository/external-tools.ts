@@ -23,3 +23,9 @@ export async function openHunk(root: string, revision: Revision): Promise<void> 
   if (!executable) throw new Error("Hunk is not installed or is not on PATH. Install it with npm install -g hunkdiff, then try again.");
   await foreground(root, [executable, "show", revision.commitId], process.env, code => `Hunk exited with code ${code}.`);
 }
+
+export async function editDescription(root: string, revision: Revision): Promise<void> {
+  await foreground(root, ["jj", "--no-pager", "describe", "--editor", revision.commitId],
+    { ...process.env, JJ_INTERACTIVE: "1" },
+    code => `Description editor did not complete (exit code ${code}).`);
+}

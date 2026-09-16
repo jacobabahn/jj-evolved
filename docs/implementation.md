@@ -73,7 +73,7 @@ Run `bun run check:architecture` to verify that imports resolve, the source grap
 
 ## Current limits
 
-Initial revision lists and destination pickers load at most 200 revisions. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Refresh is manual. Diffs are buffered in memory. Inputs are single-line; squash can preserve an existing multiline description without flattening it. The split flow preserves the second description rather than editing it.
+Initial revision lists and destination pickers load at most 200 revisions. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Refresh is manual. Diffs are buffered in memory. Inline inputs are single-line; the Space menu can edit complete multiline descriptions in JJ’s configured external editor. Squash can preserve an existing multiline description without flattening it. The split flow preserves the second description rather than editing it.
 
 A broader destination search and an integrated conflict editor are not implemented. Conflict resolution continues through the jj CLI.
 
@@ -93,3 +93,9 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 - `bun run demo` starts in a real PTY. The action menu renders and Ctrl-C restores the terminal and exits successfully.
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
+
+### External description editing
+
+The Space menu exposes **Edit description in editor**, while `d` retains quick single-line editing. `Repository.editDescription` snapshots pending working-copy changes and rejects a stale selected commit before running `jj describe --editor <commit-id>` in the foreground. JJ owns editor configuration, description parsing, and the single description rewrite operation. The renderer suspends while the editor runs and resumes on success or failure. Refresh preserves the active revset and recovers the selected revision by its stable change ID. Editors that exit successfully without changes leave the description unchanged; nonzero exits report failure without applying the draft.
+
+Repository and renderer tests launch a real configured fake editor to verify multiline and Unicode preservation, unchanged exit, failed exit, stale selection rejection, selection/filter retention, and keyboard recovery. The `multiline-description` UI scenario records the action menu and saved multiline result.
