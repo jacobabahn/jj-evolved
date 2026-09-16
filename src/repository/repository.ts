@@ -4,7 +4,7 @@ import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
 import { projectedAbsorb } from "./projected-absorb";
 import { projectedTree } from "./projected-tree";
-import { runInteractive, openHunk } from "./external-tools";
+import { runInteractive, openHunk, editDescription } from "./external-tools";
 import { terminalText } from "../terminal-text";
 
 function string(value: unknown): string {
@@ -104,6 +104,14 @@ export class Repository {
       }
     }
     await runInteractive(this.root, action);
+  }
+
+  async editDescription(revision: Revision): Promise<void> {
+    await this.status();
+    if (!(await this.snapshot(`present(${revision.changeId})`)).revisions.some(current => current.commitId === revision.commitId)) {
+      throw new Error("The selected revision has changed. Refresh and select it again.");
+    }
+    await editDescription(this.root, revision);
   }
 
   async openHunk(revision: Revision): Promise<void> {

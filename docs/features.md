@@ -22,7 +22,7 @@ The graph preserves jj's native branch, merge, and omitted-history lines. Split 
 | View status | Show the actual `jj status` output. | `s` switches the preview to working-copy status. |
 | Filter history | Enter a Jujutsu revset with `/`. An empty input restores `all()`. | Invalid input shows jj's error, preserving the previous list and filter. No matches shows an empty state. |
 | Refresh | `r` reloads repository data after changes made in another terminal. | Keep the selected commit where possible, then its change ID, then the first row. |
-| Describe | `d` opens an input for a single-line description. Enter applies it, Escape cancels. | The description is passed literally, including quotes and shell metacharacters. Existing multiline descriptions are not silently flattened or overwritten. |
+| Describe | `d` opens an input for a single-line description. Enter applies it, Escape cancels. The Space menu also opens JJ’s configured editor for full multiline descriptions. | The description is passed literally, including quotes and shell metacharacters. Existing multiline descriptions are not silently flattened or overwritten. |
 | Create a change | `n` opens a confirmation to create an empty child of the selected revision. | Enter runs `jj new`, resets the filter to `all()`, and selects the new working-copy change. Escape leaves the repository unchanged. |
 | Navigate ancestry | Show a selectable revision graph with parent relationships, merges, bookmarks, and working-copy/conflict markers. | Each selectable node maps to a full commit ID. Filtering and omitted ancestors do not suggest relationships that do not exist. |
 | Browse changed files | List files changed in the selected revision and preview an individual file's diff. | Added, modified, deleted, renamed, binary, and conflicted files have readable states. Returning to the full diff preserves revision selection. |
@@ -63,7 +63,7 @@ Commands run through the installed `jj` executable with argument arrays, paging 
 - Fetch, push, remote authentication, and changing remote bookmarks.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
 - Revset completion, configurable keybindings, and custom themes.
-- Automatic filesystem watching and multiline description editing through an external editor.
+- Automatic filesystem watching.
 - Cross-platform and older-jj compatibility guarantees beyond the verified environment.
 
 ## Delivery checks
