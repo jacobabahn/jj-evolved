@@ -253,6 +253,15 @@ test("loading more history preserves a selection made while loading and resets o
     expect(t.list().getSelectedIndex()).toBe(index);
     expect(frame).not.toContain("L load 200 more");
     await t.until("Ready.");
+    await t.f.jj("bookmark", "create", "focus-expanded", "-r", "@");
+    const top = t.list().scrollTop;
+    t.screen.renderer.emit("focus");
+    await t.until("focus-expanded");
+    await t.until("Ready.");
+    expect(t.screen.captureCharFrame()).toContain("205 revisions");
+    expect(t.screen.captureCharFrame()).not.toContain("L load 200 more");
+    expect(t.list().getSelectedIndex()).toBe(index);
+    expect(t.list().scrollTop).toBe(top);
     await t.filter("feature");
     await t.until("1 revisions");
     await t.until("Ready.");

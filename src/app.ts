@@ -137,6 +137,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let busy = false;
   let stopped = false;
   let replacing = false;
+  let focusRefreshPending = false;
+  let restorePreviewScroll: (() => void) | undefined;
   const review = new MutationReview(repository, refreshAfterMutation);
   const previews = new PreviewSession(({ target, text, title }) => {
     if (target === "overlay") {
@@ -191,6 +193,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     previews.show({ target: "main", text, title });
   }
   async function loadPreview() {
+    if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
+    restorePreviewScroll = undefined;
     const revision = selected();
     if (!revision) { show("No revisions match this revset. Press / to change it.", "No revisions"); return; }
     const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? "CONFLICT\nUse jj resolve in another terminal, then r to refresh." : ""}`.trimEnd() + "\n\n");
@@ -198,18 +202,27 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences." });
   }
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
-  async function refresh(nextRevset = revset, workingCopy = false) {
+  async function refresh(nextRevset = revset, workingCopy = false, preserveView = false) {
+    focusRefreshPending = false;
     const request = ++refreshRequest;
     const limit = nextRevset === revset ? historyLimit : 200;
     const previous = selected();
+    const top = list.scrollTop;
+    const previewTop = preview.scrollTop;
+    const helpVisible = preserveView && String(preview.title).trim() === "Help";
+    const statusVisible = preserveView && String(preview.title).trim() === "Working-copy status";
+    const query = preserveView ? search.query : "";
     list.cancelDrag();
     const snapshot = await repository.snapshot(nextRevset, false, limit);
     const bookmarks = await repository.bookmarks();
+    const candidates = query ? await repository.navigationRevisions(nextRevset) : [];
     if (stopped || request !== refreshRequest) return;
     historyLimit = limit;
     ++searchRequest;
     clearTimeout(searchTimer);
-    search = { query: "", matches: [] };
+    const needle = query.toLowerCase();
+    const bookmarkIds = new Set(bookmarks.filter(item => `${item.name}${item.remote ? `@${item.remote}` : ""}`.toLowerCase().includes(needle)).flatMap(item => item.targets));
+    search = { query, matches: candidates.filter(item => item.description.toLowerCase().includes(needle) || item.changeId.startsWith(needle) || item.commitId.startsWith(needle) || bookmarkIds.has(item.commitId)) };
     returnPoint = null;
     outsideFilter = new Set();
     currentSnapshot = snapshot;
@@ -228,8 +241,42 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     replacing = true;
     list.setSnapshot(snapshot, bookmarks);
     if (revisions.length) list.setSelectedIndex(Math.max(0, index));
+    if (preserveView) list.scrollTop = top;
     replacing = false;
-    await loadPreview();
+    updateSearchStatus();
+    if (statusVisible) {
+      await previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error" });
+    } else if (!helpVisible) await loadPreview();
+    if (preserveView && !stopped) {
+      // New diff content gets its scroll extent during layout, after this read completes.
+      restorePreviewScroll = () => {
+        restorePreviewScroll = undefined;
+        if (!stopped) preview.scrollTo(previewTop);
+      };
+      renderer.once("frame", restorePreviewScroll);
+    }
+  }
+  function onTerminalFocus() {
+    if (stopped) return;
+    focusRefreshPending = true;
+    if (prompt.kind !== "browse" && !review.applying) {
+      review.cancel();
+      const warning = "Preview may be stale. Press p to review again.";
+      if (prompt.kind === "form") prompt.form.report(warning, true);
+      else report(prompt.kind === "confirm" ? warning : "Focus returned; refresh pending. Input preserved.", true);
+    }
+    scheduleFocusRefresh();
+  }
+  function scheduleFocusRefresh() {
+    // Wait for synchronous prompt transitions to finish before deciding whether to refresh.
+    queueMicrotask(() => {
+      if (stopped || !focusRefreshPending || isBusy() || prompt.kind !== "browse") return;
+      if (returnPoint) {
+        report("Focus refresh pending: Ctrl-O returns to the active revset and refreshes.");
+        return;
+      }
+      void run("Refreshing after terminal focus…", () => refresh(revset, false, true));
+    });
   }
   function updateFilter() {
     filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? " · L load 200 more" : ""}`);
@@ -382,7 +429,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (prompt.kind === "confirm" && prompt.edit) prompt.edit();
       report(errorText(error), true);
     }
-    finally { busy = false; }
+    finally { busy = false; scheduleFocusRefresh(); }
   }
   function closePrompt() {
     if (prompt.kind === "form") prompt.form.dispose();
@@ -401,6 +448,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     input.visible = false;
     promptLabel.visible = false;
     setFocus(focus);
+    scheduleFocusRefresh();
   }
   function openPrompt(next: Exclude<Prompt, { kind: "browse" }>, label: string, value = "") {
     activateOverlay(label);
@@ -936,7 +984,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (key.ctrl && (name === "n" || name === "p")) { key.preventDefault(); nextMatch(name === "n" ? 1 : -1); return; }
     if (key.ctrl && name === "o") {
       key.preventDefault();
-      if (returnPoint) { const view = returnPoint; returnPoint = null; displayView(view); void loadPreview(); }
+      if (returnPoint) { const view = returnPoint; returnPoint = null; displayView(view); void loadPreview(); scheduleFocusRefresh(); }
       return;
     }
     if (name === "escape") { key.preventDefault(); search = { query: "", matches: [] }; updateSearchStatus(); return; }
@@ -987,6 +1035,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind === "form") prompt.form.dispose();
     previews.dispose();
     review.dispose();
+    renderer.off("focus", onTerminalFocus);
+    if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
     renderer.keyInput.off("keypress", onKey);
     list.off("selectionChanged", onSelection);
     chooser.off("selectionChanged", previewChoice);
@@ -1008,6 +1058,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });
   list.onDragHint = text => report(text || "Ready. ? shows all controls.");
   app.onMouse = event => list.handleDragMouse(event);
+  renderer.on("focus", onTerminalFocus);
   renderer.keyInput.on("keypress", onKey);
   list.on("selectionChanged", onSelection);
   chooser.on("selectionChanged", previewChoice);
