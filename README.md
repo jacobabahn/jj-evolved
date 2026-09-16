@@ -122,3 +122,18 @@ bun run ui record rebase
 Open the printed HTML path to inspect frames, play a recording, or switch scenarios. Scenario failures save a replay under `artifacts/ui/failures/`. See [the UI tooling guide](docs/ui-tooling.md) to add scenarios and update snapshots.
 
 See the [feature specification](docs/features.md) for scope and acceptance criteria, and the [implementation record](docs/implementation.md) for the architecture decision.
+
+### Revset completion
+
+In `/`, type a bookmark or function prefix and press Tab to insert a suggestion.
+Tab cycles forward and Shift-Tab cycles backward; the visible list tracks the
+selection. Enter applies the expression, and Escape cancels the prompt. Invalid
+expressions leave the current history view intact so you can correct the input.
+Completion replaces only the token at the cursor, preserving the surrounding
+expression. Local and remote bookmark suggestions use the most recently loaded
+repository state; press `r` before opening `/` to refresh that state.
+
+Suggestions are computed locally without running commands or contacting remotes.
+Bookmark names are quoted when needed, and a small list of common built-in jj
+functions is included. This is token completion, not a full revset parser: custom
+aliases, argument-aware suggestions, and syntax validation remain jj's job.

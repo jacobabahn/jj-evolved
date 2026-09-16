@@ -62,7 +62,7 @@ Commands run through the installed `jj` executable with argument arrays, paging 
 
 - Fetch, push, remote authentication, and changing remote bookmarks.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
-- Revset completion, configurable keybindings, and custom themes.
+- Full revset language completion (custom aliases and argument-aware suggestions), configurable keybindings, and custom themes. Basic cursor-token completion for local/remote bookmarks and common built-in functions is implemented.
 - Automatic filesystem watching and multiline description editing through an external editor.
 - Cross-platform and older-jj compatibility guarantees beyond the verified environment.
 

@@ -5,6 +5,23 @@ type Scenario = { name: string; title: string; run: (ui: UiFixture) => Promise<v
 
 export const scenarios: Scenario[] = [
   {
+    name: "completion", title: "Revset bookmark completion",
+    async run(ui) {
+      await ui.resize(80, 24);
+      ui.key("/");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+      await ui.type("ancestors(fea");
+      await ui.until("feature@git");
+      await ui.capture("Revset suggestions at 80x24");
+      ui.key("TAB");
+      await ui.type(")");
+      ui.key("RETURN");
+      await ui.until("revset: ancestors(feature)");
+      await ui.until("Ready.");
+      await ui.capture("Completed expression applied");
+    },
+  },
+  {
     name: "browse", title: "Browse, diff, and narrow help",
     async run(ui) {
       await ui.until("Empty change.");

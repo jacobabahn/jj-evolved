@@ -1,3 +1,4 @@
+import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
 import { getTheme, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
@@ -107,6 +108,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlayPreview.add(overlayText);
   overlay.fields.add(promptLabel);
   overlay.fields.add(input);
+  const suggestions = new TextRenderable(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text, wrapMode: "none", truncate: true });
+  overlay.body.add(suggestions);
   overlay.body.add(chooser);
   overlay.body.add(overlayPreview);
   const result = new TextRenderable(renderer, { id: "action-result", height: 2, visible: false, fg: colors.accent });
@@ -131,6 +134,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let searchRequest = 0;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let prompt: Prompt = { kind: "browse" };
+  let completionItems: Completion[] = [];
+  let completionOriginal = "";
+  let completionIndex = -1;
+  let completing = false;
   let busy = false;
   let stopped = false;
   let replacing = false;
@@ -360,7 +367,30 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     finally { busy = false; }
   }
+  function updateCompletions() {
+    if (prompt.kind !== "revset" || completing) return;
+    completionOriginal = input.value;
+    completionIndex = -1;
+    completionItems = revsetCompletions(input.value, input.cursorOffset, currentBookmarks);
+    renderCompletions();
+  }
+  function renderCompletions() {
+    suggestions.visible = prompt.kind === "revset";
+    const first = Math.max(0, completionIndex - 3);
+    suggestions.content = completionItems.length ? terminalText(completionItems.slice(first, first + 4).map((item, index) => `${first + index === completionIndex ? ">" : " "} ${item.label}`).join("\n") + `\n${completionItems.length} suggestions · Tab / Shift-Tab cycle`) : "No suggestions · Enter applies your expression";
+  }
+  function completeRevset(backwards: boolean) {
+    if (!completionItems.length) return;
+    completionIndex = (completionIndex + (backwards ? (completionIndex < 0 ? 0 : -1) : 1) + completionItems.length) % completionItems.length;
+    const result = applyCompletion(completionOriginal, completionItems[completionIndex]!);
+    completing = true;
+    input.value = result.value;
+    input.cursorOffset = result.cursor;
+    completing = false;
+    renderCompletions();
+  }
   function closePrompt() {
+    suggestions.visible = false;
     if (prompt.kind === "form") prompt.form.dispose();
     prompt = { kind: "browse" };
     review.cancel();
@@ -382,6 +412,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     activateOverlay(label);
     chooser.visible = false;
     prompt = next;
+    suggestions.visible = false;
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") {
       overlay.height = 12;
       overlay.top = "20%";
@@ -393,6 +424,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     input.value = terminalText(value);
     input.visible = next.kind !== "new" && next.kind !== "confirm";
     if (!input.visible) { list.blur(); preview.blur(); } else input.focus();
+    if (next.kind === "revset") {
+      overlay.height = 15;
+      overlay.hints.content = "Tab complete/cycle  Enter apply  Esc cancel";
+      updateCompletions();
+    }
     if (next.kind === "confirm") overlay.hints.content = "Enter apply  p refresh preview  Esc cancel  PgUp/Dn scroll";
   }
   async function submit() {
@@ -468,6 +504,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     colors = theme;
     setTheme(renderer, theme);
     app.backgroundColor = colors.bg;
+    suggestions.fg = colors.text;
     header.fg = navigationStatus.fg = searchStatus.fg = promptLabel.fg = inlineHint.fg = shortcuts.fg = result.fg = colors.accent;
     filter.fg = message.fg = colors.muted;
     listBox.backgroundColor = colors.panel;
@@ -823,6 +860,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; choice?.choose(); }
       }
       else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.action); }
+      else if (prompt.kind === "revset" && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
       else if (key.name === "return") { key.preventDefault(); void submit(); }
       return;
     }
@@ -905,6 +943,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
+  input.on("input", updateCompletions);
+  input.onCursorChange = updateCompletions;
   searchInput.on("input", queueSearch);
   list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });
