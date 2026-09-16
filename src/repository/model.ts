@@ -26,7 +26,7 @@ export type Mutation =
   | { kind: "edit" | "abandon" | "absorb"; revision: Revision }
   | { kind: "rebase"; revision: Revision; destination: Revision; descendants: boolean }
   | { kind: "squash"; revision: Revision; destination: Revision; description: string; files: string[] }
-  | { kind: "split"; revision: Revision; files: string[]; description: string }
+  | { kind: "split"; revision: Revision; files: string[]; description: string; secondDescription: string }
   | { kind: "bookmark-create" | "bookmark-move"; name: string; revision: Revision }
   | { kind: "bookmark-rename"; name: string; newName: string }
   | { kind: "bookmark-delete"; name: string }

@@ -5,6 +5,7 @@ import { literalPath, mutationArgs } from "./mutation";
 import { projectedAbsorb } from "./projected-absorb";
 import { projectedTree } from "./projected-tree";
 import { runInteractive, openHunk } from "./external-tools";
+import { runSplit } from "./split";
 import { terminalText } from "../terminal-text";
 
 function string(value: unknown): string {
@@ -148,7 +149,7 @@ export class Repository {
       case "split": {
         const files = await this.files(action.revision);
         if (!action.files.length || action.files.length >= files.length || action.files.some(path => !files.some(file => file.path === path))) throw new Error("Select some, but not all, changed files to split.");
-        summary = `Split ${label(action.revision)}\n\nFirst change: ${action.description}\n${action.files.join("\n")}\n\nSecond change keeps the original description:\n${action.revision.description}\n${files.filter(file => !action.files.includes(file.path)).map(file => file.path).join("\n")}\n\nThe combined file contents are preserved.`;
+        summary = `Split ${label(action.revision)}\n\nFirst change: ${action.description}\n${action.files.join("\n")}\n\nSecond change: ${action.secondDescription}\n${files.filter(file => !action.files.includes(file.path)).map(file => file.path).join("\n")}\n\nThe combined file contents are preserved.`;
         break;
       }
       case "bookmark-create": summary = `Create local bookmark ${action.name} at\n${label(action.revision)}`; break;
@@ -179,6 +180,7 @@ export class Repository {
   async apply(prepared: PreparedMutation): Promise<void> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    await run(this.root, mutationArgs(prepared.action));
+    if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
+    else await run(this.root, mutationArgs(prepared.action));
   }
 }

@@ -721,7 +721,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       { name: "Squash changes", description: "Source, destination, files and description", choose: () => openHistory(revision, "squash") },
       { name: "Squash interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => destination("Squash interactively into", revision, destination => editInteractively({ kind: "squash", revision, destination })) },
       { name: "Split interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => editInteractively({ kind: "split", revision }) },
-      { name: "Split change", description: "Put selected files in a first change", choose: () => chooseFiles(revision, "Split files", files => ask("First change description", "", description => confirm({ kind: "split", revision, files, description }))) },
+      { name: "Split change", description: "Put selected files in a first change", choose: () => chooseFiles(revision, "Split files", files => ask("First change description", "", description => pick("Second change description", [
+        { name: "Keep original description", description: revision.description || "(no description)", choose: () => confirm({ kind: "split", revision, files, description, secondDescription: revision.description }) },
+        { name: "Edit second description", description: "Enter a replacement description", choose: () => ask("Second change description", revision.description.trim().includes("\n") ? "" : revision.description.trim(), secondDescription => confirm({ kind: "split", revision, files, description, secondDescription })) },
+      ]))) },
       { name: "Create bookmark", description: "Name the selected revision", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
       { name: "Abandon change", description: "Remove selection and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },

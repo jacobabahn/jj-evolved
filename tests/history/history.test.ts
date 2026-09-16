@@ -91,11 +91,11 @@ test("file-level split and squash preserve contents including literal filenames"
     await Bun.write(join(t.path, "second.txt"), "second file\n");
     const original = await t.revision("@");
     expect((await t.repo.files(original)).map(f => f.path).sort()).toEqual(["second.txt", odd].sort());
-    await t.apply({ kind: "split", revision: original, files: [odd], description: "First part" });
+    await t.apply({ kind: "split", revision: original, files: [odd], description: "First part", secondDescription: "Second part" });
     const first = await t.revision(original.changeId);
     const second = await t.revision(`${first.commitId}+`);
     expect(first.description.trim()).toBe("First part");
-    expect(second.description.trim()).toBe("Next change");
+    expect(second.description.trim()).toBe("Second part");
     expect((await t.repo.files(first)).map(f => f.path)).toEqual([odd]);
     expect((await t.repo.files(second)).map(f => f.path)).toEqual(["second.txt"]);
     expect(await t.jj("diff", "--from", original.commitId, "--to", second.commitId, "--git")).toBe("");
@@ -156,3 +156,33 @@ test("immutable edits fail without recording a successful operation", async () =
     expect(await t.repo.operationId()).toBe(before);
   } finally { await t.cleanup(); }
 });
+
+for (const originalDescription of ["", "Original subject\n\nOriginal body", "Clear me"]) {
+  test(`split reviews both descriptions and undoes in one operation: ${JSON.stringify(originalDescription)}`, async () => {
+    const t = await setup();
+    try {
+      await t.jj("describe", "-m", originalDescription);
+      await Bun.write(join(t.path, "first.txt"), "first\n");
+      await Bun.write(join(t.path, "second.txt"), "second\n");
+      const original = await t.revision("@");
+      const before = await t.repo.operationId();
+      const description = 'First "quoted" $(literal) `text`';
+      const secondDescription = originalDescription === "Clear me" ? "" : originalDescription || "Named second part";
+      const prepared = await t.repo.prepare({ kind: "split", revision: original, files: ["first.txt"], description, secondDescription });
+      expect(prepared.summary).toContain(`First change: ${description}`);
+      expect(prepared.summary).toContain(`Second change: ${secondDescription}`);
+      expect(await t.repo.operationId()).toBe(before);
+      await t.repo.apply(prepared);
+      const first = await t.revision(original.changeId);
+      const second = await t.revision(`${first.commitId}+`);
+      expect(first.description.trim()).toBe(description);
+      expect(second.description.trim()).toBe(secondDescription);
+      expect(second.parents).toEqual([first.commitId]);
+      expect(await t.jj("diff", "--from", original.commitId, "--to", second.commitId, "--git")).toBe("");
+      const operation = (await t.repo.operations(1))[0]!;
+      await t.apply({ kind: "undo", operation });
+      expect((await t.revision("@")).commitId).toBe(original.commitId);
+      expect((await t.repo.snapshot(`present(${second.changeId})`)).revisions).toHaveLength(0);
+    } finally { await t.cleanup(); }
+  });
+}

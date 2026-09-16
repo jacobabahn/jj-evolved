@@ -1,6 +1,6 @@
 # MVP implementation
 
-The current build implements the local history-management workflows in the [feature specification](features.md). Editing both split descriptions in one flow remains open.
+The current build implements the local history-management workflows in the [feature specification](features.md). The split flow accepts descriptions for both resulting changes.
 
 ## Implemented workflows
 
@@ -8,7 +8,7 @@ The current build implements the local history-management workflows in the [feat
 - Describing a change, creating a child, editing a change, and abandoning a change.
 - Rebasing one revision or a revision with its descendants onto a selected destination.
 - Squashing all files or a selected file group, with an explicit description choice.
-- Splitting selected whole files into a first change while preserving the original description on the second.
+- Splitting selected whole files with descriptions for both changes, optionally preserving the original description on the second.
 - Listing local and remote bookmarks and creating, moving, renaming, or deleting local bookmarks.
 - Operation-history browsing with incremental expansion, operation inspection, undo, and restore.
 - Absorb with a projected operation patch, remaining source edits, and confirmation.
@@ -20,6 +20,8 @@ The current build implements the local history-management workflows in the [feat
 The entry point opens `Repository`, creates an OpenTUI renderer, and starts `createApp(renderer, repository)`. Tests supply a real renderer and a repository in a temporary directory.
 
 The repository module owns subprocess arguments, JSON templates, validation, command timeouts, and operation previews. Callers import `repository/repository.ts` for operations and `repository/model.ts` for domain types. Internal modules own command execution, log parsing, mutation arguments, projected trees, and external tool lifetime. Projected previews and apply share command construction through `mutationArgs`.
+
+File-level split collects both descriptions before confirmation. When replacing the second description, a temporary noninteractive description editor supplies both reviewed messages to one `jj split --editor` transaction. Keeping the original uses JJ’s native preservation behavior. Temporary files are removed after execution, and undo reverses the complete split.
 
 `Mutation` is a discriminated union of supported actions. `prepare(action)` returns a `PreparedMutation` containing the action, the current operation ID, and review text. `apply(prepared)` checks that repository state still matches before running the command.
 
@@ -73,7 +75,7 @@ Run `bun run check:architecture` to verify that imports resolve, the source grap
 
 ## Current limits
 
-Initial revision lists and destination pickers load at most 200 revisions. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Refresh is manual. Diffs are buffered in memory. Inputs are single-line; squash can preserve an existing multiline description without flattening it. The split flow preserves the second description rather than editing it.
+Initial revision lists and destination pickers load at most 200 revisions. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Refresh is manual. Diffs are buffered in memory. Inputs are single-line; squash can preserve an existing multiline description without flattening it. Split can edit the second description or preserve its original multiline text.
 
 A broader destination search and an integrated conflict editor are not implemented. Conflict resolution continues through the jj CLI.
 

@@ -424,12 +424,18 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await t.until("First change description");
     await t.screen.mockInput.typeText("First group");
     t.screen.mockInput.pressEnter();
+    await t.until("Keep original description");
+    t.choose("Edit second description");
+    await t.until("Second change description  [Enter");
+    await t.prompt("Second group");
     await t.until("Confirm operation");
+    await t.until("Second change: Second group");
     t.screen.mockInput.pressEnter();
     await t.until("Ready.");
     const first = (await t.repo.snapshot(original.changeId)).revisions[0];
     if (!first) throw new Error("Missing first split change");
     expect(first.description.trim()).toBe("First group");
+    expect((await t.repo.snapshot(`${first.commitId}+`)).revisions[0]?.description.trim()).toBe("Second group");
     expect((await t.repo.files(first)).map(f => f.path)).toEqual(["one.txt"]);
     t.screen.mockInput.pressKey(" ");
     t.choose("Squash changes");
@@ -929,4 +935,45 @@ test("rebase form cannot apply its previous review while scope is reloading", as
     apply.mockRestore();
     await t.cleanup();
   }
+}, 15_000);
+
+test("split second-description choice cancels without writes and preserves multiline text", async () => {
+  const t = await setup();
+  try {
+    const description = "Original subject\n\nOriginal body";
+    await t.f.jj("describe", "-m", description);
+    await Bun.write(`${t.f.path}/one.txt`, "one\n");
+    await Bun.write(`${t.f.path}/two.txt`, "two\n");
+    t.screen.mockInput.pressKey("r");
+    await t.until("Ready.");
+    const original = (await t.repo.snapshot("@")).revisions[0]!;
+    const before = await t.repo.operationId();
+    for (const cancel of [true, false]) {
+      t.screen.mockInput.pressKey(" ");
+      t.choose("Split change");
+      await t.until("Continue with 0 files");
+      await t.until("Ready.");
+      t.choose("[ ] one.txt");
+      t.screen.mockInput.pressKey("k");
+      t.choose("Continue with 1 files");
+      await t.until("First change description");
+      await t.screen.mockInput.typeText("Selected files");
+      t.screen.mockInput.pressEnter();
+      await t.until("Keep original description");
+      if (cancel) {
+        t.screen.mockInput.pressEscape();
+        await t.until("Change preview");
+        expect(await t.repo.operationId()).toBe(before);
+      } else {
+        t.choose("Keep original description");
+        await t.until("Confirm operation");
+        await t.until("Original body");
+        t.screen.mockInput.pressEnter();
+        await t.until("Ready.");
+        const first = (await t.repo.snapshot(original.changeId)).revisions[0]!;
+        const second = (await t.repo.snapshot(`${first.commitId}+`)).revisions[0]!;
+        expect(second.description.trim()).toBe(description);
+      }
+    }
+  } finally { await t.cleanup(); }
 }, 15_000);

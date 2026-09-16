@@ -10,7 +10,7 @@ The application uses Bun, TypeScript, and OpenTUI.
 
 This table defines the target MVP. The current build includes repository opening, a selectable revision graph, file and diff browsing, status, revsets, descriptions, new/edit/abandon actions, rebase, squash, absorb, file-level split, change evolution, local bookmark management, and operation history with inspection, undo, and restore.
 
-The graph preserves jj's native branch, merge, and omitted-history lines. Split currently accepts a description for the first change and preserves the original description on the second; editing both descriptions in the split flow remains open. History and destination lists are capped at 200 revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
+The graph preserves jj's native branch, merge, and omitted-history lines. Split accepts descriptions for both resulting changes, with an option to preserve the original description on the second. History and destination lists are capped at 200 revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
 
 | Feature | Behavior | Acceptance condition |
 | --- | --- | --- |
@@ -80,7 +80,7 @@ The first verified environment is macOS with Bun and jj 0.45.1. Compatibility wi
 4. Add rebase, squash, file-level split, and abandon with previews and conflict inspection.
 5. Verify the complete workflow against disposable repositories and update the implementation record.
 
-The current build implements the action menu and the local history-management workflows. The richer split-description flow remains required to complete the expanded MVP.
+The current build implements the action menu and the local history-management workflows. The split flow reviews both descriptions and file groups before applying them in one operation.
 
 ## References
 
