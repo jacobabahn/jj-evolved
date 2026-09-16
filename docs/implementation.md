@@ -95,6 +95,14 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
 
+## Terminal focus refresh
+
+The app subscribes to the renderer's terminal `focus` event. Focus requests are coalesced and deferred while a prompt, operation, or repository load is active. Existing external-tool and mutation refreshes consume requests already queued, avoiding a duplicate reload on resume. A focus event during an ongoing read queues one follow-up read. Returning focus invalidates prepared reviews without changing the action draft; `p` prepares a fresh review.
+
+Automatic refresh retains the active revset, selected commit (falling back to a unique change ID after rewrites), graph scroll, preview scroll, and accepted search query with recalculated matches. It reloads an open working-copy status view and keeps keyboard help visible. Temporary navigation views retain their selection and return path by deferring refresh until Ctrl-O, with a visible notice. No filesystem watcher is installed; `r` remains the fallback for terminals that do not report focus. Stop removes the focus listener, and late reads cannot update a disposed app.
+
+The `automatic-refresh` UI scenario captures external CLI changes appearing on focus return and an open draft waiting for refresh. Renderer integration tests exercise external descriptions and files, retained filters and drafts, review invalidation, event coalescing, temporary navigation, help, and disposal.
+
 
 ### Expanded history and destination search
 

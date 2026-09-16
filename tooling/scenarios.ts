@@ -6,6 +6,30 @@ type Scenario = { name: string; title: string; run: (ui: UiFixture) => Promise<v
 
 export const scenarios: Scenario[] = [
   {
+    name: "automatic-refresh", title: "External changes refresh when terminal focus returns",
+    async run(ui) {
+      ui.key("/");
+      await ui.prompt("@ | feature");
+      ui.key("j");
+      await ui.until("+ hello from jj-evolved");
+      await ui.capture("Before returning from external CLI work");
+      await ui.f.jj("describe", "-r", "feature", "-m", "Description edited in another terminal");
+      await ui.f.jj("bookmark", "create", "external-review", "-r", "feature");
+      ui.screen.renderer.emit("focus");
+      await ui.until("Description edited in another terminal");
+      await ui.until("Ready.");
+      assert(ui.screen.captureCharFrame().includes("revset: @ | feature"));
+      await ui.capture("Focus return updates history and preserves selection and filter");
+      ui.key("d");
+      await ui.type(" draft");
+      ui.screen.renderer.emit("focus");
+      await ui.until("refresh pending");
+      await ui.capture("Open description draft is preserved while refresh waits");
+      ui.key("ESCAPE");
+      await ui.until("Ready.");
+    },
+  },
+  {
     name: "large-history", title: "Search destinations and load history beyond 200 revisions",
     async run(ui) {
       for (let i = 0; i < 202; i++) await ui.f.jj("new", "-m", `History change ${i + 1}`);
