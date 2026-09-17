@@ -5,6 +5,10 @@ export function literalPath(path: string): string { return `root-file:${JSON.str
 export function mutationArgs(action: Mutation): string[] {
   let args: string[];
   switch (action.kind) {
+    case "git-fetch": args = ["git", "fetch", "--remote", action.remote]; break;
+    case "git-push": args = ["git", "push", "--remote", action.remote, "--bookmark", `exact:${action.name}`]; break;
+    case "bookmark-track":
+    case "bookmark-untrack": args = ["bookmark", action.kind === "bookmark-track" ? "track" : "untrack", "--remote", `exact:${action.remote}`, "--", `exact:${action.name}`]; break;
     case "describe": args = ["describe", action.revision.commitId, "--message", action.description]; break;
     case "new": args = ["new", action.parent.commitId]; break;
     case "edit": args = ["edit", action.revision.commitId]; break;

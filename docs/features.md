@@ -8,7 +8,7 @@ The application uses Bun, TypeScript, and OpenTUI.
 
 ## MVP scope
 
-This table defines the target MVP. The current build includes repository opening, a selectable revision graph, file and diff browsing, status, revsets, descriptions, new/edit/abandon actions, rebase, squash, absorb, file-level split, change evolution, local bookmark management, and operation history with inspection, undo, and restore.
+This table defines the target MVP. The current build includes repository opening, a selectable revision graph, file and diff browsing, status, revsets, descriptions, new/edit/abandon actions, rebase, squash, absorb, file-level split, change evolution, local bookmark management, reviewed remote fetch/push and tracking, and operation history with inspection, undo, and restore.
 
 The graph preserves jj's native branch, merge, and omitted-history lines. Split currently accepts a description for the first change and preserves the original description on the second; editing both descriptions in the split flow remains open. History and destination lists are capped at 200 revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
 
@@ -33,7 +33,8 @@ The graph preserves jj's native branch, merge, and omitted-history lines. Split 
 | Browse change evolution | List historical versions of the selected change and preview their native evolution patches. | Use full commit IDs to distinguish versions. Include description changes and correct comparisons for multiple predecessors. Load beyond 50 versions without changing the captured operation. Reads leave pending working-copy edits and the live operation unchanged. |
 | Split | Divide a revision into two sequential changes by selecting whole files and supplying descriptions. | Preview both groups before applying. Each resulting change contains the intended files, and their combined result preserves the original tree. Hunk-level splitting is deferred. |
 | Abandon | Remove a selected mutable revision from visible history. | Show the target and affected descendants before confirmation. Refresh the graph and report conflicts after success. Escape performs no write. |
-| Manage bookmarks | List local and remote bookmarks; create, rename, move, and delete local bookmarks. | Select bookmark targets from revisions. Show the old and new targets before moving a bookmark. Remote entries remain read-only in this MVP. |
+| Manage bookmarks | List local and remote bookmarks; create, rename, move, and delete local bookmarks. | Select bookmark targets from revisions. Show the old and new targets before moving a bookmark. Remote entries expose tracking status and reviewed track/untrack actions; the synthetic `@git` entry remains informational. |
+| Fetch and push | Select a named remote; fetch or push one explicitly selected bookmark. | Preview the remote URL and exact old/new push targets with JJ dry-run output. Support tracked bookmark deletions. Reject stale operations, changed remote URLs, and unexpected remote targets; preserve diagnostics and explain authentication/retry steps. Local undo does not undo a push. |
 | Browse operation history | Show operation IDs, descriptions, timestamps, and the current operation, with inspection of an operation's repository changes. | Navigate beyond the first page. Inspection leaves the current repository operation unchanged. |
 | Undo and restore | Undo the latest operation or restore the repository to a selected operation. | Preview the exact operation and explain undo versus restore. Require confirmation and refresh revisions, bookmarks, and operation history after success. A newer external operation invalidates the preview and requires review again. |
 | Inspect conflicts | Identify conflicted revisions and files and display the available conflict detail. | Conflicts introduced by history edits remain visible after refresh. Explain how to continue resolution with the jj CLI. An integrated conflict editor is deferred. |
@@ -60,7 +61,7 @@ Commands run through the installed `jj` executable with argument arrays, paging 
 
 ## Outside the MVP
 
-- Fetch, push, remote authentication, and changing remote bookmarks.
+- Adding/removing remote configuration, an in-app credential manager, and bulk pushes. Configure authentication with Git credentials or SSH in the terminal.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
 - Revset completion, configurable keybindings, and custom themes.
 - Automatic filesystem watching.
