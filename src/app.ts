@@ -728,13 +728,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     preview.blur();
   }
   function describe(revision: Revision) {
-    if (revision.description.trimEnd().includes("\n")) report("This description has multiple lines. Use jj describe in your terminal.", true);
+    if (revision.description.trimEnd().includes("\n")) report("This description has multiple lines. Choose Edit description in editor from the Space menu.", true);
     else openPrompt({ kind: "describe", revision }, `Describe ${revision.changeId.slice(0, 8)}`, revision.description.trimEnd());
   }
   function editInteractively(action: InteractiveAction) {
     openExternal(`JJ's diff editor for ${action.kind}`, () => repository.interactive(action));
   }
-  function openExternal(name: string, launch: () => Promise<void>) {
+  function openExternal(name: string, launch: () => Promise<void>, preserveSelection = false) {
     void run(`Opening ${name}…`, async () => {
       closePrompt();
       try {
@@ -742,7 +742,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         await launch();
       } finally {
         renderer.resume();
-        await refresh("all()", true).catch(error => {
+        await refresh(preserveSelection ? revset : "all()", !preserveSelection).catch(error => {
           throw new Error(`Refreshing after ${name} failed. Press r to reload before repeating the action. ${errorText(error)}`);
         });
       }
@@ -753,6 +753,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pick("Actions", [
       { name: "Edit change", description: "Make selection the working copy", choose: () => confirm({ kind: "edit", revision }) },
       { name: "Describe change", description: "Edit the selected change's description (d)", choose: () => describe(revision) },
+      { name: "Edit description in editor", description: "Edit the full multiline description in JJ's configured editor", choose: () => openExternal("JJ's description editor", () => repository.editDescription(revision), true) },
       { name: "Rebase change", description: "Source, destination, scope and preview", choose: () => openHistory(revision, "rebase", false) },
       { name: "Rebase change and descendants", description: "Move the selected stack", choose: () => openHistory(revision, "rebase", true) },
       { name: "Squash changes", description: "Source, destination, files and description", choose: () => openHistory(revision, "squash") },

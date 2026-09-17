@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
 
 type Scenario = { name: string; title: string; run: (ui: UiFixture) => Promise<void> };
@@ -19,6 +20,23 @@ export const scenarios: Scenario[] = [
       await ui.until("revset: ancestors(feature)");
       await ui.until("Ready.");
       await ui.capture("Completed expression applied");
+    },
+  },
+  {
+    name: "multiline-description", title: "Edit a multiline description in the configured editor",
+    async run(ui) {
+      const description = "Explain the feature\n\nKeep context and implementation details together.\nPreserve Unicode: café 日本語.\n";
+      const editor = await descriptionEditor(ui.f, description);
+      try {
+        ui.key(" ");
+        await ui.until("Edit description in editor");
+        await ui.capture("Edit the full description from the action menu");
+        ui.choose("Edit description in editor");
+        await ui.until("Ready.");
+        assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description, description);
+        await ui.until("Keep context and implementation details together.");
+        await ui.capture("Saved multiline description after returning from the editor");
+      } finally { await editor.cleanup(); }
     },
   },
   {
