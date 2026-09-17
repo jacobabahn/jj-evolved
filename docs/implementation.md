@@ -10,6 +10,7 @@ The current build implements the local history-management workflows in the [feat
 - Squashing all files or a selected file group, with an explicit description choice.
 - Splitting selected whole files into a first change while preserving the original description on the second.
 - Listing local and remote bookmarks and creating, moving, renaming, or deleting local bookmarks.
+- Named-remote fetch, exact-bookmark push with full target IDs and JJ dry-run review, and remote bookmark tracking/untracking.
 - Operation-history browsing with incremental expansion, operation inspection, undo, and restore.
 - Absorb with a projected operation patch, remaining source edits, and confirmation.
 - Change evolution with incremental expansion and native patches for individual historical versions.
@@ -93,6 +94,12 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 - `bun run demo` starts in a real PTY. The action menu renders and Ctrl-C restores the terminal and exits successfully.
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
+
+## Remote workflows
+
+Remote actions use the existing mutation-review lifecycle. Push previews run `jj git push --bookmark exact:<name> --dry-run` at the captured operation, without publishing or changing tracking state. Apply checks the operation and remote URL, then pins that same operation so concurrent local edits cannot substitute different push targets. JJ checks remote leases at push time. Deleted tracked bookmarks remain selectable for explicit deletion reviews; conflicted bookmarks are rejected. Fetch and tracking changes are reviewed, and tracking status appears in the bookmark browser. Git's synthetic `@git` bookmark is informational.
+
+Network failures preserve JJ diagnostics and offer authentication, rejected-push, and interrupted-connection recovery instructions. Interactive Git credential prompting is disabled. Operations share the existing 30-second timeout. Remote configuration is currently managed through the JJ CLI. Repository tests use disposable local bare Git remotes to verify preview purity, exact push scope, deletion, tracking, stale local state, changed remote URLs, concurrent remote updates, and inaccessible remotes. The `remotes` UI scenario records remote selection, push review/cancellation, and tracking review/application.
 
 ### External description editing
 

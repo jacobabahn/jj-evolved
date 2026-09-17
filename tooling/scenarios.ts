@@ -6,6 +6,43 @@ type Scenario = { name: string; title: string; run: (ui: UiFixture) => Promise<v
 
 export const scenarios: Scenario[] = [
   {
+    name: "remotes", title: "Review a push and manage remote bookmark tracking",
+    async run(ui) {
+      const remote = `${ui.f.path}/.jj/demo-remote.git`;
+      const git = Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "pipe" });
+      assert.equal(await git.exited, 0);
+      await ui.f.jj("git", "remote", "add", "origin", remote);
+      ui.key("b");
+      await ui.until("Git remotes");
+      ui.choose("Git remotes");
+      await ui.until("origin");
+      ui.choose("origin");
+      await ui.until("Push bookmark");
+      await ui.capture("Choose fetch or push for a named remote");
+      ui.choose("Push bookmark");
+      await ui.until("Review before publishing");
+      ui.choose("feature");
+      await ui.until("Push only bookmark: feature");
+      await ui.capture("Review exact bookmark targets before publishing");
+      const before = await ui.repo.operationId();
+      ui.key("ESCAPE");
+      await ui.until("Empty change.");
+      assert.equal(await ui.repo.operationId(), before);
+      await ui.repo.apply(await ui.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+      ui.key("b");
+      await ui.until("feature@origin");
+      await ui.capture("Local and tracked remote bookmarks");
+      ui.choose("feature@origin");
+      await ui.until("Untrack bookmark");
+      ui.choose("Untrack bookmark");
+      await ui.until("Untrack feature@origin");
+      await ui.capture("Review remote bookmark tracking change");
+      ui.key("RETURN");
+      await ui.until("Bookmark untrack completed");
+      assert.equal((await ui.repo.bookmarks()).find(bookmark => bookmark.remote === "origin")?.tracked, false);
+    },
+  },
+  {
     name: "multiline-description", title: "Edit a multiline description in the configured editor",
     async run(ui) {
       const description = "Explain the feature\n\nKeep context and implementation details together.\nPreserve Unicode: café 日本語.\n";

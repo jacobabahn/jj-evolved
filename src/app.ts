@@ -70,7 +70,7 @@ Escape            Cancel
 
 @ marks the working copy. ! marks a conflict.
 Drag a local [bookmark] onto another change to preview a move.
-Escape or dropping outside the graph cancels. Remote bookmarks are read-only.
+Escape or dropping outside the graph cancels. Use b to manage remote bookmark tracking.
 Tree lines show ancestry; ~ marks omitted history.
 History shows at most 200 revisions.
 Select a revision to return from status or help.
@@ -606,15 +606,47 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (!files.length) showOverlay("Empty change. No changed files.", "Changed files");
     });
   }
+  function showRemotes() {
+    void run("Loading remotes…", async () => {
+      const remotes = await repository.remotes();
+      if (stopped) return;
+      if (!remotes.length) { showOverlay("No Git remotes configured. Add one with jj git remote add in your terminal.", "Remotes"); return; }
+      pick("Git remotes", remotes.map(remote => ({
+        name: remote.name, description: remote.url,
+        choose: () => pick(`Remote ${remote.name}`, [
+          { name: "Fetch", description: "Fetch bookmarks and commits from this remote", choose: () => confirm({ kind: "git-fetch", remote: remote.name }) },
+          { name: "Push bookmark", description: "Choose one bookmark and review its exact targets", choose: () => {
+            void run("Loading push bookmarks…", async () => {
+              const bookmarks = await repository.bookmarks();
+              if (stopped) return;
+              const names = [...new Set(bookmarks.filter(item => !item.remote || item.remote === remote.name && item.tracked).map(item => item.name))];
+              if (!names.length) { showOverlay("No local or tracked deleted bookmarks to push.", "Push bookmark"); return; }
+              pick(`Push to ${remote.name}`, names.map(name => ({ name,
+                description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Review before publishing" : "Review remote deletion",
+                choose: () => confirm({ kind: "git-push", remote: remote.name, name }),
+              })));
+            });
+          } },
+        ]),
+      })));
+    });
+  }
   function showBookmarks() {
     void run("Loading bookmarks…", async () => {
       const bookmarks = await repository.bookmarks();
       if (stopped) return;
-      pick("Bookmarks", bookmarks.map(bookmark => ({
+      pick("Bookmarks", [{ name: "Git remotes", description: "Fetch and push with a review", choose: showRemotes }, ...bookmarks.map(bookmark => ({
         name: `${bookmark.name}${bookmark.remote ? `@${bookmark.remote}` : ""}${bookmark.conflict ? " !" : ""}`,
-        description: `${bookmark.remote ? "Read-only remote" : "Local"} ${bookmark.targets.map(id => id.slice(0, 12)).join(", ") || "deleted"}`,
+        description: `${bookmark.remote ? bookmark.tracked ? "Tracked remote" : "Untracked remote" : "Local"} ${bookmark.targets.map(id => id.slice(0, 12)).join(", ") || "deleted"}`,
         choose: () => {
-          if (bookmark.remote) { showOverlay(`Remote bookmark ${bookmark.name}@${bookmark.remote}\n\nTargets: ${bookmark.targets.join(", ")}\n\nRemote bookmarks are read-only.`, "Remote bookmark"); return; }
+          if (bookmark.remote) {
+            if (bookmark.remote === "git") { showOverlay("The @git bookmark reflects the local Git repository. Manage it with Git.", "Local Git bookmark"); return; }
+            pick(`${bookmark.name}@${bookmark.remote}`, [{
+              name: bookmark.tracked ? "Untrack bookmark" : "Track bookmark",
+              description: bookmark.tracked ? "Keep the local bookmark; stop following remote updates" : "Create or merge a local bookmark and follow future updates",
+              choose: () => confirm({ kind: bookmark.tracked ? "bookmark-untrack" : "bookmark-track", name: bookmark.name, remote: bookmark.remote }),
+            }]); return;
+          }
           pick(bookmark.name, [
             { name: "Move bookmark", description: "Choose a new target revision", choose: () => {
               destination("Bookmark target", null, revision => confirm({ kind: "bookmark-move", name: bookmark.name, revision }));
@@ -623,8 +655,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             { name: "Delete bookmark", description: "Delete the local bookmark", choose: () => confirm({ kind: "bookmark-delete", name: bookmark.name }) },
           ]);
         },
-      })));
-      if (!bookmarks.length) showOverlay("No bookmarks. Select a revision and press Space to create one.", "Bookmarks");
+      }))]);
     });
   }
   function showOperations(limit = 50) {
@@ -723,6 +754,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       { name: "Squash interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => destination("Squash interactively into", revision, destination => editInteractively({ kind: "squash", revision, destination })) },
       { name: "Split interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => editInteractively({ kind: "split", revision }) },
       { name: "Split change", description: "Put selected files in a first change", choose: () => chooseFiles(revision, "Split files", files => ask("First change description", "", description => confirm({ kind: "split", revision, files, description }))) },
+      { name: "Git remotes", description: "Fetch, push and select a remote", choose: showRemotes },
       { name: "Create bookmark", description: "Name the selected revision", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
       { name: "Abandon change", description: "Remove selection and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
