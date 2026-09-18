@@ -18,6 +18,7 @@ export interface Snapshot {
   root: string;
   revisions: Revision[];
   graph: GraphRow[];
+  hasMore?: boolean;
 }
 
 export interface Remote { name: string; url: string }

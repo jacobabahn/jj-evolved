@@ -43,8 +43,9 @@ function parseRevision(value: unknown): Revision {
   };
 }
 
-export async function logSnapshot(root: string, revset: string, readOnly = false): Promise<Snapshot> {
-  const output = await run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", "200", "--revisions", revset, "--template", LOG_TEMPLATE]);
+export async function logSnapshot(root: string, revset: string, readOnly = false, limit = 200): Promise<Snapshot> {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("History limit must be a positive integer.");
+  const output = await run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", String(limit), "--revisions", revset, "--template", LOG_TEMPLATE]);
   const revisions: Revision[] = [];
   const graph: GraphRow[] = [];
   for (const line of output.split("\n").filter(Boolean)) {
@@ -62,7 +63,8 @@ export async function logSnapshot(root: string, revset: string, readOnly = false
       graph.push({ kind: "edge", text: terminalText(line) });
     }
   }
-  return { root, revisions, graph };
+  const more = revisions.length === limit && (await run(root, ["--ignore-working-copy", "--at-op=@", "log", "--no-graph", "--limit", String(limit + 1), "-r", revset, "-T", '"x"'])).length > limit;
+  return { root, revisions, graph, hasMore: more };
 }
 
 export function parsePrefixes(output: string): ReadonlyMap<string, string> {

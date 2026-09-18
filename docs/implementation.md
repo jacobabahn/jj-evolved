@@ -95,6 +95,15 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
 
+
+### Expanded history and destination search
+
+The graph initially loads 200 revisions; `L` increases the limit by 200 and rerenders JJ's native graph for that complete window. Keeping the native graph intact avoids splicing branch/merge lanes from separate pages. A bounded metadata probe reports whether older results remain. Expansion preserves selection, scroll, and accepted search markers; it discards a result if the view changed while loading. Normal refresh retains the expanded limit, while changing revsets resets it. Temporary ancestry/search context views retain their existing return point and require returning before expansion.
+
+Rebase/squash form destinations, interactive squash, and bookmark destinations read uncapped revision metadata, then filter locally by case-insensitive description, bookmark text, or change/commit ID. The source commit is excluded where appropriate. `/` enters search, arrows navigate results, Enter selects, and Escape clears the filter. Empty results cannot trigger an action. Inline rebase/squash expose the same picker with `/`.
+
+`bun run ui record large-history` records a 205-revision fixture, destination search beyond the first page, a cancelled preview, and an expanded graph. Repository and renderer tests exercise the page boundary, search cancellation/source exclusion, and selection changes during an in-flight expansion.
+
 ## Remote workflows
 
 Remote actions use the existing mutation-review lifecycle. Push previews run `jj git push --bookmark exact:<name> --dry-run` at the captured operation, without publishing or changing tracking state. Apply checks the operation and remote URL, then pins that same operation so concurrent local edits cannot substitute different push targets. JJ checks remote leases at push time. Deleted tracked bookmarks remain selectable for explicit deletion reviews; conflicted bookmarks are rejected. Fetch and tracking changes are reviewed, and tracking status appears in the bookmark browser. Git's synthetic `@git` bookmark is informational.
