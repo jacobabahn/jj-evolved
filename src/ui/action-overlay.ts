@@ -18,7 +18,7 @@ export class ActionOverlay extends BoxRenderable {
     this.context = new TextRenderable(ctx, { id: `${id}-source`, height: 2, flexShrink: 0, fg: getTheme(this.ctx).muted, truncate: true });
     this.fields = new BoxRenderable(ctx, { id: `${id}-fields`, flexDirection: "column", flexShrink: 0 });
     this.feedback = new TextRenderable(ctx, { id: `${id}-feedback`, height: 2, flexShrink: 0, fg: getTheme(this.ctx).muted, visible: false });
-    this.body = new BoxRenderable(ctx, { id: `${id}-body`, height: 0, flexGrow: 1, minHeight: 1, flexDirection: "column" });
+    this.body = new BoxRenderable(ctx, { id: `${id}-body`, marginBottom: 1, height: 0, flexGrow: 1, minHeight: 1, flexDirection: "column" });
     this.hints = new TextRenderable(ctx, { id: `${id}-hints`, height: 1, flexShrink: 0, fg: getTheme(this.ctx).accent, truncate: true });
     for (const child of [this.context, this.fields, this.feedback, this.body, this.hints]) this.add(child);
   }

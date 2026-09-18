@@ -30,8 +30,8 @@ export class Repository {
     return new Repository((await run(path, ["root"])).trim());
   }
 
-  async snapshot(revset: string, readOnly = false): Promise<Snapshot> {
-    return logSnapshot(this.root, revset, readOnly);
+  async snapshot(revset: string, readOnly = false, limit = 200): Promise<Snapshot> {
+    return logSnapshot(this.root, revset, readOnly, limit);
   }
 
   async navigationRevisions(revset: string): Promise<Revision[]> {

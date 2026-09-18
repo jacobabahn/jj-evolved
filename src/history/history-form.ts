@@ -14,7 +14,7 @@ type Draft =
   | { kind: "squash"; files: string[]; description: string; keepDescription: boolean };
 type Mode =
   | { kind: "fields" }
-  | { kind: "destination"; revisions: Revision[] }
+  | { kind: "destination"; revisions: Revision[]; all: Revision[]; searching: boolean }
   | { kind: "files"; files: ChangedFile[]; selected: Set<string> }
   | { kind: "description" };
 
@@ -41,8 +41,14 @@ export class HistoryForm extends ActionOverlay {
     this.title = draft.kind === "rebase" ? " Rebase change " : " Squash changes ";
     this.context.content = highlightJjText(`Source ${shortChangeId(source)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([source]), getTheme(this.ctx));
     this.controls = new SelectRenderable(ctx, { id: "history-fields", height: draft.kind === "rebase" ? 3 : 4, flexShrink: 0, showDescription: false, wrapSelection: true, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, selectedBackgroundColor: getTheme(this.ctx).selected, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
-    this.choices = new SelectRenderable(ctx, { id: "history-choices", flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedBackgroundColor: getTheme(this.ctx).selected, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
+    this.choices = new SelectRenderable(ctx, { id: "history-choices", height: 0, minHeight: 1, flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedBackgroundColor: getTheme(this.ctx).selected, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
     this.input = new InputRenderable(ctx, { id: "history-description", visible: false, textColor: getTheme(this.ctx).text, backgroundColor: getTheme(this.ctx).selected, focusedBackgroundColor: getTheme(this.ctx).panel, focusedTextColor: getTheme(this.ctx).text, placeholderColor: getTheme(this.ctx).muted });
+    this.input.on("input", () => {
+      if (this.mode.kind !== "destination" || !this.mode.searching) return;
+      const query = this.input.value.toLocaleLowerCase().trim();
+      this.mode.revisions = this.mode.all.filter(item => `${item.changeId} ${item.commitId} ${item.description} ${item.bookmarks}`.toLocaleLowerCase().includes(query));
+      this.renderDestinations();
+    });
     this.preview = new ScrollBoxRenderable(ctx, { id: "history-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, title: " Preview ", borderColor: getTheme(this.ctx).border });
     this.text = new ChangePreview(ctx, "history-preview-text", "Choose a destination to preview the result.");
     this.fields.add(this.controls);
@@ -136,11 +142,11 @@ export class HistoryForm extends ActionOverlay {
     if (index === this.controls.options.length - 1) { await this.submit(); return; }
     if (index === 0) {
       this.report("Loading destinations…");
-      const snapshot = await this.repository.snapshot("all()");
+      const candidates = await this.repository.navigationRevisions("all()");
       if (this.disposed || request !== this.fieldRequest) return;
-      const revisions = snapshot.revisions.filter(item => item.commitId !== this.source.commitId);
-      this.mode = { kind: "destination", revisions };
-      this.choices.options = revisions.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
+      const revisions = candidates.filter(item => item.commitId !== this.source.commitId);
+      this.mode = { kind: "destination", revisions, all: revisions, searching: false };
+      this.renderDestinations();
     } else if (this.draft.kind === "rebase") {
       this.draft.descendants = !this.draft.descendants;
       this.renderFields();
@@ -153,18 +159,28 @@ export class HistoryForm extends ActionOverlay {
       this.renderFiles();
     } else {
       this.mode = { kind: "description" };
+      this.input.placeholder = "Description";
       this.input.value = this.draft.keepDescription ? "" : this.draft.description;
       this.input.visible = true;
       this.input.focus();
       this.hints.content = "Enter save description  Ctrl-D keep destination text  Esc back";
       return;
     }
-    this.report("");
+    if (this.mode.kind !== "destination") this.report("");
     this.choices.setSelectedIndex(0);
     this.choices.visible = true;
     this.preview.visible = false;
     this.choices.focus();
-    this.hints.content = "j/k choose  Enter select  Esc back to form";
+    this.hints.content = this.mode.kind === "destination"
+      ? "j/k choose  Enter select  / search all destinations  Esc back"
+      : "j/k choose  Enter select  Esc back to form";
+  }
+
+  private renderDestinations() {
+    if (this.mode.kind !== "destination") return;
+    this.choices.options = this.mode.revisions.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
+    this.choices.setSelectedIndex(0);
+    this.report(`${this.mode.revisions.length} destinations${this.mode.revisions.length ? "" : " · No matching revisions"}`);
   }
 
   private renderFiles() {
@@ -212,6 +228,28 @@ export class HistoryForm extends ActionOverlay {
 
   handleKey(key: KeyEvent): "close" | "handled" {
     if (this.review.applying) { key.preventDefault(); return "handled"; }
+    if (this.mode.kind === "destination" && this.mode.searching) {
+      if (key.name === "escape") {
+        key.preventDefault();
+        this.mode.searching = false;
+        this.mode.revisions = this.mode.all;
+        this.input.visible = false; this.input.blur(); this.choices.focus();
+        this.hints.content = "j/k choose  Enter select  / search all destinations  Esc back";
+        this.renderDestinations();
+      } else if (key.name === "return") { key.preventDefault(); this.choose(); }
+      else if (key.name === "down") { key.preventDefault(); this.choices.moveDown(); }
+      else if (key.name === "up") { key.preventDefault(); this.choices.moveUp(); }
+      return "handled";
+    }
+    if (this.mode.kind === "destination" && key.sequence === "/") {
+      key.preventDefault();
+      this.mode.searching = true;
+      this.input.value = "";
+      this.input.placeholder = "Search descriptions, bookmarks or IDs";
+      this.input.visible = true; this.choices.blur(); this.input.focus();
+      this.hints.content = "Type to search all destinations  ↑/↓ choose  Enter select  Esc clear";
+      return "handled";
+    }
     if (key.name === "escape") {
       key.preventDefault();
       ++this.fieldRequest;

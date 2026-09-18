@@ -10,12 +10,12 @@ The application uses Bun, TypeScript, and OpenTUI.
 
 This table defines the target MVP. The current build includes repository opening, a selectable revision graph, file and diff browsing, status, revsets, descriptions, new/edit/abandon actions, rebase, squash, absorb, file-level split, change evolution, local bookmark management, reviewed remote fetch/push and tracking, and operation history with inspection, undo, and restore.
 
-The graph preserves jj's native branch, merge, and omitted-history lines. Split currently accepts a description for the first change and preserves the original description on the second; editing both descriptions in the split flow remains open. History and destination lists are capped at 200 revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
+The graph preserves jj's native branch, merge, and omitted-history lines. Split currently accepts a description for the first change and preserves the original description on the second; editing both descriptions in the split flow remains open. History loads 200 revisions initially and expands in batches with `L`; destination lists search all revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
 
 | Feature | Behavior | Acceptance condition |
 | --- | --- | --- |
 | Open a repository | Use the current directory or an explicit path. | A nested workspace directory resolves to its repository root. Missing `jj` and non-jj directories produce actionable errors. |
-| Browse revisions | Show up to 200 revisions in topological order, with descriptions, short change IDs, bookmarks, and working-copy/conflict markers. | Arrow keys and `j`/`k` change the selection and its preview. Full commit IDs distinguish divergent versions of one change. |
+| Browse revisions | Load revisions in batches of 200 in topological order, with descriptions, short change IDs, bookmarks, and working-copy/conflict markers. | Arrow keys and `j`/`k` change the selection and its preview. Full commit IDs distinguish divergent versions of one change. |
 | Search revisions | `Ctrl+F` searches every revision in the active revset by description, bookmark, or ID prefix. | Live previews, marked matches, wrapping next/previous controls, cancellation, and explicit empty results work at 80×24. Clearing search preserves the revset. |
 | Navigate ancestry | `@` selects the working copy; `[` and `]` select a parent or child. | Multiple relatives open a chooser, including filtered relatives. Distant targets appear in a temporary view with excluded context marked. `Ctrl+O` restores the original view. Navigation does not write repository state. |
 | Inspect a change | Show metadata and the selected revision's Git-format diff. | Empty changes have an explicit empty state. The preview scrolls independently. |

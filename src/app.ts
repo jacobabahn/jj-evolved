@@ -15,7 +15,7 @@ import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { shortChangeId, type InteractiveAction, type Mutation, type Revision, type Snapshot, type Bookmark } from "./repository/model";
 
-type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string> };
+type Choice = { searchText?: string; name: string; description: string; choose: () => void; preview?: () => Promise<string> };
 
 type Prompt =
   | { kind: "browse" }
@@ -26,7 +26,7 @@ type Prompt =
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision }
   | { kind: "new"; parent: Revision }
-  | { kind: "picker"; choices: Choice[] }
+  | { kind: "picker"; choices: Choice[]; allChoices?: Choice[]; searching?: boolean }
   | { kind: "text"; accept: (value: string) => void }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
@@ -72,7 +72,8 @@ Escape            Cancel
 Drag a local [bookmark] onto another change to preview a move.
 Escape or dropping outside the graph cancels. Use b to manage remote bookmark tracking.
 Tree lines show ancestry; ~ marks omitted history.
-History shows at most 200 revisions.
+L                 Load 200 more revisions (keeps selection)
+Destination lists: / searches all revisions, including older history.
 Select a revision to return from status or help.
 Commands use your installed jj and its repository rules.`;
 
@@ -120,6 +121,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
 
   let resultTimer: ReturnType<typeof setTimeout> | undefined;
   let revisions: Revision[] = [];
+  let historyLimit = 200;
+  let refreshRequest = 0;
   let revset = "all()";
   let currentSnapshot: Snapshot = { root: repository.root, revisions: [], graph: [] };
   let currentBookmarks: Bookmark[] = [];
@@ -196,11 +199,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
   async function refresh(nextRevset = revset, workingCopy = false) {
+    const request = ++refreshRequest;
+    const limit = nextRevset === revset ? historyLimit : 200;
     const previous = selected();
     list.cancelDrag();
-    const snapshot = await repository.snapshot(nextRevset);
+    const snapshot = await repository.snapshot(nextRevset, false, limit);
     const bookmarks = await repository.bookmarks();
-    if (stopped) return;
+    if (stopped || request !== refreshRequest) return;
+    historyLimit = limit;
     ++searchRequest;
     clearTimeout(searchTimer);
     search = { query: "", matches: [] };
@@ -212,7 +218,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     updateSearchStatus();
     detail.prefixes = overlayText.prefixes = revisionPrefixes(revisions);
     revset = nextRevset;
-    filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions (limit 200)`);
+    updateFilter();
     let index = workingCopy ? revisions.findIndex(item => item.workingCopy) : -1;
     if (index < 0 && previous) index = revisions.findIndex(item => item.commitId === previous.commitId);
     if (index < 0 && previous) {
@@ -224,6 +230,24 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (revisions.length) list.setSelectedIndex(Math.max(0, index));
     replacing = false;
     await loadPreview();
+  }
+  function updateFilter() {
+    filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? " · L load 200 more" : ""}`);
+  }
+  async function loadMoreHistory() {
+    if (returnPoint) { report("Press Ctrl-O to return to history before loading more."); return; }
+    if (!currentSnapshot.hasMore) { report("All revisions in this revset are loaded."); return; }
+    const view = captureView();
+    const request = ++refreshRequest;
+    const limit = historyLimit + 200;
+    const snapshot = await repository.snapshot(revset, false, limit);
+    if (stopped || request !== refreshRequest || currentSnapshot !== view.snapshot || returnPoint) return;
+    historyLimit = limit;
+    const current = captureView();
+    const selectedId = current.snapshot.revisions[current.index]?.commitId;
+    const index = snapshot.revisions.findIndex(item => item.commitId === selectedId);
+    displayView({ ...current, snapshot, index: Math.max(0, index) });
+    updateInlineHint();
   }
   function captureView(): NavigationView {
     return { snapshot: currentSnapshot, bookmarks: currentBookmarks, index: list.getSelectedIndex(), top: list.scrollTop, outside: outsideFilter };
@@ -239,7 +263,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     list.setSelectedIndex(view.index);
     list.scrollTop = view.top;
     replacing = false;
-    filter.content = terminalText(`revset: ${revset}`);
+    updateFilter();
     updateSearchStatus();
   }
   function updateSearchStatus() {
@@ -390,6 +414,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (next.kind === "describe" || next.kind === "new" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
     promptLabel.content = terminalText(`${label}  [Enter apply · Esc cancel]`);
     promptLabel.visible = true;
+    input.placeholder = "";
     input.value = terminalText(value);
     input.visible = next.kind !== "new" && next.kind !== "confirm";
     if (!input.visible) { list.blur(); preview.blur(); } else input.focus();
@@ -565,14 +590,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function destination(title: string, source: Revision | null, accept: (revision: Revision) => void) {
     void run("Loading destinations…", async () => {
-      const snapshot = await repository.snapshot("all()");
+      const candidates = await repository.navigationRevisions("all()");
       if (stopped) return;
-      overlayText.prefixes = revisionPrefixes(snapshot.revisions);
-      pick(title, snapshot.revisions.filter(item => item.commitId !== source?.commitId).map(item => ({
+      overlayText.prefixes = revisionPrefixes(candidates);
+      pick(title, candidates.filter(item => item.commitId !== source?.commitId).map(item => ({
+        searchText: `${item.changeId} ${item.commitId} ${item.description} ${item.bookmarks}`,
         name: `${item.changeId.slice(0, 8)} ${item.description.trim() || "(no description)"}`,
         description: `${item.commitId.slice(0, 12)} ${item.bookmarks}`,
         choose: () => accept(item), preview: () => repository.diff(item),
       })));
+      if (prompt.kind === "picker") prompt.allChoices = prompt.choices;
+      overlay.hints.content = "j/k choose  / search all destinations  Enter select  Esc cancel";
     });
   }
   function chooseFiles(revision: Revision, title: string, accept: (paths: string[]) => void) {
@@ -774,7 +802,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const scope = prompt.action.kind === "rebase"
       ? `${prompt.action.descendants ? `Change and descendants: ${moving.length} changes` : "Selected change only"}${outside ? ` · ${outside} outside view` : ""} · Tab scope`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · Enter preview · Esc cancel`);
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · / search · L load more · Enter preview · Esc cancel`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
@@ -824,6 +852,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       key.preventDefault();
       if (isBusy()) return;
       if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
+      else if (key.sequence === "L") void run("Loading more history…", loadMoreHistory);
+      else if (key.sequence === "/") {
+        const state = prompt;
+        destination("Choose destination", state.source, target => confirm(state.action.kind === "rebase"
+          ? { kind: "rebase", revision: state.source, destination: target, descendants: state.action.descendants }
+          : { kind: "squash", revision: state.source, destination: target, files: [], description: target.description }));
+      }
       else if (key.name === "j" || key.name === "down") list.moveDown();
       else if (key.name === "k" || key.name === "up") list.moveUp();
       else if (key.name === "pageup" || key.name === "pagedown") preview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, preview.height - 3));
@@ -844,6 +879,19 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (prompt.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); }
       return;
     }
+    if (prompt.kind === "picker" && prompt.searching) {
+      if (key.name === "escape") {
+        key.preventDefault(); prompt.searching = false;
+        prompt.choices = prompt.allChoices ?? prompt.choices;
+        chooser.options = prompt.choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
+        chooser.setSelectedIndex(0); input.visible = false; input.blur(); chooser.focus();
+        overlay.hints.content = "j/k choose  / search all destinations  Enter select  Esc cancel";
+        overlay.report(""); previewChoice();
+      } else if (key.name === "return") { key.preventDefault(); prompt.choices[chooser.getSelectedIndex()]?.choose(); }
+      else if (key.name === "down") { key.preventDefault(); chooser.moveDown(); }
+      else if (key.name === "up") { key.preventDefault(); chooser.moveUp(); }
+      return;
+    }
     if (prompt.kind !== "browse") {
       if (isBusy()) { key.preventDefault(); return; }
       if (key.name === "escape") { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
@@ -851,7 +899,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (prompt.kind === "picker") {
         key.preventDefault();
         if (isBusy()) return;
-        if (key.name === "j" || key.name === "down") chooser.moveDown();
+        if (key.sequence === "/" && prompt.allChoices) {
+          prompt.searching = true; input.value = "";
+          input.placeholder = "Search descriptions, bookmarks or IDs";
+          input.visible = true; chooser.blur(); input.focus();
+          overlay.hints.content = "Type to search all destinations  ↑/↓ choose  Enter select  Esc clear";
+        } else if (key.name === "j" || key.name === "down") chooser.moveDown();
         else if (key.name === "k" || key.name === "up") chooser.moveUp();
         else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; choice?.choose(); }
       }
@@ -878,6 +931,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (isBusy()) return;
+    if (key.sequence === "L" || key.shift && name === "l") { key.preventDefault(); void run("Loading more history…", loadMoreHistory); return; }
     if (key.ctrl && name === "f") { key.preventDefault(); beginSearch(); return; }
     if (key.ctrl && (name === "n" || name === "p")) { key.preventDefault(); nextMatch(name === "n" ? 1 : -1); return; }
     if (key.ctrl && name === "o") {
@@ -938,6 +992,16 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
+  input.on("input", () => {
+    if (prompt.kind !== "picker" || !prompt.searching || !prompt.allChoices) return;
+    const query = input.value.trim().toLocaleLowerCase();
+    prompt.choices = prompt.allChoices.filter(choice => (choice.searchText ?? `${choice.name} ${choice.description}`).toLocaleLowerCase().includes(query));
+    chooser.options = prompt.choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
+    chooser.setSelectedIndex(0);
+    overlay.report(`${prompt.choices.length} destinations${prompt.choices.length ? "" : " · No matching revisions"}`);
+    if (prompt.choices.length) previewChoice();
+    else showOverlay("No matching revisions. Edit the search to try again.", "Destination search");
+  });
   searchInput.on("input", queueSearch);
   list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });

@@ -6,6 +6,42 @@ type Scenario = { name: string; title: string; run: (ui: UiFixture) => Promise<v
 
 export const scenarios: Scenario[] = [
   {
+    name: "large-history", title: "Search destinations and load history beyond 200 revisions",
+    async run(ui) {
+      for (let i = 0; i < 202; i++) await ui.f.jj("new", "-m", `History change ${i + 1}`);
+      ui.key("r");
+      await ui.until("L load 200 more");
+      await ui.until("Ready.");
+      await ui.capture("First 200 revisions with load more available");
+      const first = await ui.repo.snapshot("all()", true);
+      assert.equal(first.revisions.length, 200);
+      assert(first.hasMore);
+      assert(!first.revisions.some(revision => revision.description.includes("Initial feature")));
+      const before = await ui.repo.operationId();
+      ui.key(" "); ui.choose("Rebase change");
+      await ui.until("Destination: Choose a revision");
+      ui.key("RETURN");
+      await ui.until("/ search all destinations");
+      ui.key("/"); await ui.type("Initial feature");
+      await ui.until("1 destinations");
+      await ui.capture("Destination search reaches beyond the graph page");
+      ui.key("RETURN");
+      await ui.until("Preview ready");
+      await ui.capture("Older destination selected and previewed");
+      ui.key("ESCAPE");
+      await ui.until("Working copy");
+      ui.key("L");
+      await ui.until("205 revisions");
+      await ui.until("Ready.");
+      await ui.capture("Expanded graph retains the selected revision");
+      assert.equal(await ui.repo.operationId(), before);
+      const expanded = await ui.repo.snapshot("all()", true, 400);
+      assert.equal(expanded.revisions.length, 205);
+      assert.equal(expanded.hasMore, false);
+      assert(expanded.revisions.some(revision => revision.description.includes("Initial feature")));
+    },
+  },
+  {
     name: "remotes", title: "Review a push and manage remote bookmark tracking",
     async run(ui) {
       const remote = `${ui.f.path}/.jj/demo-remote.git`;
