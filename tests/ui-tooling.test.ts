@@ -9,7 +9,7 @@ import { createUiFixture, withUiFixture, type UiFixture } from "../tooling/ui";
 import { recordScreen, writeRecording } from "../tooling/recording";
 
 for (const scenario of scenarios) {
-  test(`UI scenario: ${scenario.name}`, () => withUiFixture(scenario.name, scenario.run, { theme: "dark" }), 15_000);
+  test(`UI scenario: ${scenario.name}`, () => withUiFixture(scenario.name, scenario.run, { theme: "dark", bindings: scenario.bindings }), 15_000);
 }
 
 function matchingStyles(ui: UiFixture, text: string) {

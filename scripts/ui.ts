@@ -19,7 +19,7 @@ try {
       recordings.push(await withUiFixture(scenario.name, async ui => {
         await scenario.run(ui);
         return ui.recording.snapshot(scenario.title);
-      }, { theme: "dark" }));
+      }, { theme: "dark", bindings: scenario.bindings }));
       console.log(`Recorded ${scenario.name}`);
     }
     console.log(`Open ${await writeRecording(directory, recordings)}`);

@@ -1,3 +1,4 @@
+import { actionForKey, defaultBindings, keyLabel, type Keybindings, type Action } from "./ui/keybindings";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
 import { getTheme, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
@@ -33,51 +34,55 @@ type Prompt =
 type Search = { query: string; matches: Revision[] };
 type NavigationView = { snapshot: Snapshot; bookmarks: Bookmark[]; index: number; top: number; outside: ReadonlySet<string> };
 
-const HELP = `Keyboard reference
+function helpText(bindings: Keybindings) {
+  const row = (actions: Action[]) => actions.map(action => keyLabel(bindings, action)).join(" / ").padEnd(18);
+  return `Keyboard reference
 
-j / k or arrows   Move through revisions
-Tab               Switch revisions / preview focus
-Page Up / Down    Scroll preview
-s                 Working-copy status
-r                 Refresh history
-/                 Enter a revset; empty restores all()
-Ctrl-F            Search descriptions, bookmarks and ID prefixes in revset
-Ctrl-N / Ctrl-P   Next / previous search match, wrapping
-@ / [ / ]         Jump to working copy / parent / child
-Ctrl-O            Return from temporary reveal
-Escape            Clear accepted search
+${row(["down", "up"])} Move through revisions
+${row(["focus"])} Switch revisions / preview focus
+${row(["pageUp", "pageDown"])} Scroll preview
+${row(["status"])} Working-copy status
+${row(["refresh"])} Refresh history
+${row(["filter"])} Enter a revset; empty restores all()
+${row(["search"])} Search descriptions, bookmarks and ID prefixes in revset
+${row(["nextMatch", "previousMatch"])} Next / previous search match, wrapping
+${row(["workingCopy", "parent", "child"])} Jump to working copy / parent / child
+${row(["return"])} Return from temporary reveal
+${row(["clearSearch"])} Clear accepted search
 * / +             Search match / revision outside active revset
-d                 Describe selected change, single line
-e                 Make selection the working copy immediately
-R / S             Choose rebase / squash destination in the graph
-a                 Preview absorb into mutable ancestors
-v                 Browse selected change's evolution
+${row(["describe"])} Describe selected change, single line
+${row(["edit"])} Make selection the working copy immediately
+${row(["rebase", "squash"])} Choose rebase / squash destination in the graph
+${row(["absorb"])} Preview absorb into mutable ancestors
+${row(["evolution"])} Browse selected change's evolution
 Drag change       Drop onto another change to preview rebase
-n                 Create an empty child of selection
-Space             Action menu: edit, rebase, squash, split, abandon
-b                 Local and remote bookmarks
-o                 Operation history, inspection and restore
-u                 Preview undo of the latest operation
-f                 Browse files changed in selected revision
-Enter             Return to the selected revision preview
-t                 Choose a theme, preview and save
-?                 Show this help
-q / Ctrl-C        Quit
+${row(["new"])} Create an empty child of selection
+${row(["actions"])} Action menu: edit, rebase, squash, split, abandon
+${row(["bookmarks"])} Local and remote bookmarks
+${row(["operations"])} Operation history, inspection and restore
+${row(["undo"])} Preview undo of the latest operation
+${row(["files"])} Browse files changed in selected revision
+${row(["preview"])} Return to the selected revision preview
+${row(["theme"])} Choose a theme, preview and save
+${row(["help"])} Show this help
+${keyLabel(bindings, "quit")} / Ctrl-C  Quit
 
-In prompts
+In prompts (fixed keys; browse overrides do not apply)
+j/k or arrows     Choose an item
 Enter             Apply / confirm
 Escape            Cancel
 
 @ marks the working copy. ! marks a conflict.
 Drag a local [bookmark] onto another change to preview a move.
-Escape or dropping outside the graph cancels. Use b to manage remote bookmark tracking.
+Escape or dropping outside the graph cancels. Use ${keyLabel(bindings, "bookmarks")} to manage remote bookmark tracking.
 Tree lines show ancestry; ~ marks omitted history.
-L                 Load 200 more revisions (keeps selection)
+${row(["loadMore"])} Load 200 more revisions (keeps selection)
 Destination lists: / searches all revisions, including older history.
 Select a revision to return from status or help.
-Commands use your installed jj and its repository rules.`;
+Commands use your installed jj and its repository rules.`; }
 
-export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}) {
+export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, bindings: Keybindings = defaultBindings) {
+  const bindingLabel = (action: Action) => keyLabel(bindings, action);
   setTheme(renderer, theme);
   let colors = getTheme(renderer);
   const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg });
@@ -94,10 +99,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text, placeholderColor: colors.muted });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
   const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
-  const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) | + outside filter | ^O return" });
+  const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: "j/k move  / filter  ^F search  ^N/^P match  @ work  [/] ancestry\n^O return  Esc clear  Space actions  r refresh  ? help  q quit" });
+  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} move  ${bindingLabel("filter")} filter  ${bindingLabel("search")} search  ${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} match  ${bindingLabel("workingCopy")} work  ${bindingLabel("parent")}/${bindingLabel("child")} ancestry\n${bindingLabel("return")} return  ${bindingLabel("clearSearch")} clear  ${bindingLabel("actions")} actions  ${bindingLabel("refresh")} refresh  ${bindingLabel("help")} help  ${bindingLabel("quit")} quit` });
   const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
@@ -199,8 +204,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
     restorePreviewScroll = undefined;
     const revision = selected();
-    if (!revision) { show("No revisions match this revset. Press / to change it.", "No revisions"); return; }
-    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? "CONFLICT\nUse jj resolve in another terminal, then r to refresh." : ""}`.trimEnd() + "\n\n");
+    if (!revision) { show(`No revisions match this revset. Press ${bindingLabel("filter")} to change it.`, "No revisions"); return; }
+    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\nUse jj resolve in another terminal, then ${bindingLabel("refresh")} to refresh.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
       prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences." });
   }
@@ -279,17 +284,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     queueMicrotask(() => {
       if (stopped || !focusRefreshPending || isBusy() || prompt.kind !== "browse") return;
       if (returnPoint) {
-        report("Focus refresh pending: Ctrl-O returns to the active revset and refreshes.");
+        report(`Focus refresh pending: ${bindingLabel("return")} returns to the active revset and refreshes.`);
         return;
       }
       void run("Refreshing after terminal focus…", () => refresh(revset, false, true));
     });
   }
   function updateFilter() {
-    filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? " · L load 200 more" : ""}`);
+    filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? ` · ${bindingLabel("loadMore")} load 200 more` : ""}`);
   }
   async function loadMoreHistory() {
-    if (returnPoint) { report("Press Ctrl-O to return to history before loading more."); return; }
+    if (returnPoint) { report(`Press ${bindingLabel("return")} to return to history before loading more.`); return; }
     if (!currentSnapshot.hasMore) { report("All revisions in this revset are loaded."); return; }
     const view = captureView();
     const request = ++refreshRequest;
@@ -325,7 +330,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     searchStatus.visible = search.query.length > 0 || prompt.kind === "search";
     const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
     const position = search.matches.length ? (index < 0 ? `${search.matches.length} matches` : `${index + 1}/${search.matches.length}`) : search.query ? "No matches" : "Type to search";
-    const hints = prompt.kind === "search" ? "Enter keep  Esc cancel" : "^N/^P next/prev";
+    const hints = prompt.kind === "search" ? "Enter keep  Esc cancel" : `${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} next/prev`;
     searchStatus.content = terminalText(`Search in revset: ${position} | ${hints} | ${search.query}`);
     list.markNavigation(new Set(search.matches.map(item => item.commitId)), outsideFilter);
   }
@@ -431,7 +436,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (isBusy() || stopped) return;
     busy = true;
     report(label);
-    try { await action(); report("Ready. ? shows all controls."); }
+    try { await action(); report(`Ready. ${bindingLabel("help")} shows all controls.`); }
     catch (error) {
       if (prompt.kind === "confirm" && prompt.edit) prompt.edit();
       report(errorText(error), true);
@@ -794,7 +799,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const form = new HistoryForm(renderer, repository, revision,
       kind === "rebase" ? { kind, descendants } : { kind, files: [], description: "", keepDescription: true },
       review, async () => {
-        try { await applyReviewed(); report("Ready. ? shows all controls."); }
+        try { await applyReviewed(); report(`Ready. ${bindingLabel("help")} shows all controls.`); }
         catch (error) { if (prompt.kind === "browse") report(errorText(error), true); throw error; }
       }, moving => list.markSource(revisions.findIndex(item => item.commitId === revision.commitId), new Set(moving.map(item => item.commitId))));
     app.add(form);
@@ -805,7 +810,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     preview.blur();
   }
   function describe(revision: Revision) {
-    if (revision.description.trimEnd().includes("\n")) report("This description has multiple lines. Choose Edit description in editor from the Space menu.", true);
+    if (revision.description.trimEnd().includes("\n")) report(`This description has multiple lines. Choose Edit description in editor from the ${bindingLabel("actions")} menu.`, true);
     else openPrompt({ kind: "describe", revision }, `Describe ${revision.changeId.slice(0, 8)}`, revision.description.trimEnd());
   }
   function editInteractively(action: InteractiveAction) {
@@ -820,7 +825,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       } finally {
         renderer.resume();
         await refresh(preserveSelection ? revset : "all()", !preserveSelection).catch(error => {
-          throw new Error(`Refreshing after ${name} failed. Press r to reload before repeating the action. ${errorText(error)}`);
+          throw new Error(`Refreshing after ${name} failed. Press ${bindingLabel("refresh")} to reload before repeating the action. ${errorText(error)}`);
         });
       }
     });
@@ -829,7 +834,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function actions(revision: Revision) {
     pick("Actions", [
       { name: "Edit change", description: "Make selection the working copy", choose: () => confirm({ kind: "edit", revision }) },
-      { name: "Describe change", description: "Edit the selected change's description (d)", choose: () => describe(revision) },
+      { name: "Describe change", description: `Edit the selected change's description (${bindingLabel("describe")})`, choose: () => describe(revision) },
       { name: "Edit description in editor", description: "Edit the full multiline description in JJ's configured editor", choose: () => openExternal("JJ's description editor", () => repository.editDescription(revision), true) },
       { name: "Rebase change", description: "Source, destination, scope and preview", choose: () => openHistory(revision, "rebase", false) },
       { name: "Rebase change and descendants", description: "Move the selected stack", choose: () => openHistory(revision, "rebase", true) },
@@ -842,8 +847,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       { name: "Abandon change", description: "Remove selection and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
       { name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
-      { name: "Absorb into ancestors", description: "Preview automatic fixups into mutable ancestors (a)", choose: () => confirm({ kind: "absorb", revision }) },
-      { name: "Change evolution", description: "Browse previous versions and their rewrite diffs (v)", choose: () => showEvolution(revision) },
+      { name: "Absorb into ancestors", description: `Preview automatic fixups into mutable ancestors (${bindingLabel("absorb")})`, choose: () => confirm({ kind: "absorb", revision }) },
+      { name: "Change evolution", description: `Browse previous versions and their rewrite diffs (${bindingLabel("evolution")})`, choose: () => showEvolution(revision) },
     ]);
   }
   function updateInlineHint() {
@@ -967,19 +972,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (key.name === "return") { key.preventDefault(); void submit(); }
       return;
     }
-    const name = key.sequence === "?" ? "?" : key.name;
-    if (name === "q") { key.preventDefault(); stop(); renderer.destroy(); return; }
-    if (name === "tab") { key.preventDefault(); setFocus(focus === "list" ? "preview" : "list"); return; }
-    if (["j", "k", "up", "down", "pageup", "pagedown"].includes(name)) {
+    const action = actionForKey(bindings, key);
+    if (!action) return;
+    if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (action === "focus") { key.preventDefault(); setFocus(focus === "list" ? "preview" : "list"); return; }
+    if (["down", "up", "pageUp", "pageDown"].includes(action)) {
       key.preventDefault();
-      const direction = name === "k" || name === "up" || name === "pageup" ? -1 : 1;
-      if (name === "pageup" || name === "pagedown") { ++previewNavigation; preview.scrollBy(direction * Math.max(1, preview.height - 3)); }
+      const direction = action === "up" || action === "pageUp" ? -1 : 1;
+      if (action === "pageUp" || action === "pageDown") { ++previewNavigation; preview.scrollBy(direction * Math.max(1, preview.height - 3)); }
       else if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
       else if (direction < 0) list.moveUp(); else list.moveDown();
       return;
     }
-    if (name === "?") { key.preventDefault(); show(HELP, "Help"); return; }
-    if (name === "s" && !key.shift && key.sequence !== "S") {
+    if (action === "help") { key.preventDefault(); show(helpText(bindings), "Help"); return; }
+    if (action === "status") {
       key.preventDefault();
       ++previewNavigation;
       void previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…",
@@ -987,50 +993,50 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (isBusy()) return;
-    if (key.sequence === "L" || key.shift && name === "l") { key.preventDefault(); void run("Loading more history…", loadMoreHistory); return; }
-    if (key.ctrl && name === "f") { key.preventDefault(); beginSearch(); return; }
-    if (key.ctrl && (name === "n" || name === "p")) { key.preventDefault(); nextMatch(name === "n" ? 1 : -1); return; }
-    if (key.ctrl && name === "o") {
+    if (action === "loadMore") { key.preventDefault(); void run("Loading more history…", loadMoreHistory); return; }
+    if (action === "search") { key.preventDefault(); beginSearch(); return; }
+    if (action === "nextMatch" || action === "previousMatch") { key.preventDefault(); nextMatch(action === "nextMatch" ? 1 : -1); return; }
+    if (action === "return") {
       key.preventDefault();
       if (returnPoint) { const view = returnPoint; returnPoint = null; displayView(view); void loadPreview(); scheduleFocusRefresh(); }
       return;
     }
-    if (name === "escape") { key.preventDefault(); search = { query: "", matches: [] }; updateSearchStatus(); return; }
-    if (["@", "[", "]"].includes(key.sequence)) {
-      key.preventDefault(); jump(key.sequence === "@" ? "working copy" : key.sequence === "[" ? "parent" : "child"); return;
+    if (action === "clearSearch") { key.preventDefault(); search = { query: "", matches: [] }; updateSearchStatus(); return; }
+    if (["workingCopy", "parent", "child"].includes(action)) {
+      key.preventDefault(); jump(action === "workingCopy" ? "working copy" : action === "parent" ? "parent" : "child"); return;
     }
-    if (name === "t") { key.preventDefault(); pickTheme(); return; }
-    if (key.sequence === "R" || key.sequence === "S" || (key.shift && (name === "r" || name === "s"))) {
+    if (action === "theme") { key.preventDefault(); pickTheme(); return; }
+    if (action === "rebase" || action === "squash") {
       key.preventDefault();
       const revision = selected();
-      if (revision) startInline(revision, key.sequence === "R" || name === "r" ? "rebase" : "squash");
+      if (revision) startInline(revision, action === "rebase" ? "rebase" : "squash");
       return;
     }
-    if (name === "space" || key.sequence === " ") { key.preventDefault(); const revision = selected(); if (revision) actions(revision); return; }
-    if (name === "b") { key.preventDefault(); showBookmarks(); return; }
-    if (name === "o") { key.preventDefault(); showOperations(); return; }
-    if (name === "u") { key.preventDefault(); undo(); return; }
-    if (name === "f") { key.preventDefault(); const revision = selected(); if (revision) browseFiles(revision); return; }
-    if (name === "a" || name === "v") {
+    if (action === "actions") { key.preventDefault(); const revision = selected(); if (revision) actions(revision); return; }
+    if (action === "bookmarks") { key.preventDefault(); showBookmarks(); return; }
+    if (action === "operations") { key.preventDefault(); showOperations(); return; }
+    if (action === "undo") { key.preventDefault(); undo(); return; }
+    if (action === "files") { key.preventDefault(); const revision = selected(); if (revision) browseFiles(revision); return; }
+    if (action === "absorb" || action === "evolution") {
       key.preventDefault();
       const revision = selected();
       if (revision) {
-        if (name === "a") confirm({ kind: "absorb", revision });
+        if (action === "absorb") confirm({ kind: "absorb", revision });
         else showEvolution(revision);
       }
       return;
     }
-    if (name === "return") { key.preventDefault(); void loadPreview(); return; }
-    if (name === "r") { key.preventDefault(); void run("Refreshing history…", () => refresh()); }
-    else if (name === "/" || key.sequence === "/") { key.preventDefault(); openPrompt({ kind: "revset" }, "Revset", revset); }
-    else if (name === "d" || name === "n" || name === "e") {
+    if (action === "preview") { key.preventDefault(); void loadPreview(); return; }
+    if (action === "refresh") { key.preventDefault(); void run("Refreshing history…", () => refresh()); }
+    else if (action === "filter") { key.preventDefault(); openPrompt({ kind: "revset" }, "Revset", revset); }
+    else if (action === "describe" || action === "new" || action === "edit") {
       key.preventDefault();
       const revision = selected();
       if (!revision) { report("Select a revision first.", true); return; }
-      if (name === "e") void run("Switching working copy…", async () => {
+      if (action === "edit") void run("Switching working copy…", async () => {
         if (await review.prepare({ kind: "edit", revision })) await applyReviewed();
       });
-      else if (name === "n") openPrompt({ kind: "new", parent: revision }, `Create child of ${revision.changeId.slice(0, 8)}?`);
+      else if (action === "new") openPrompt({ kind: "new", parent: revision }, `Create child of ${revision.changeId.slice(0, 8)}?`);
       else describe(revision);
     }
   }
@@ -1064,7 +1070,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });
   list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });
-  list.onDragHint = text => report(text || "Ready. ? shows all controls.");
+  list.onDragHint = text => report(text || `Ready. ${bindingLabel("help")} shows all controls.`);
   app.onMouse = event => list.handleDragMouse(event);
   renderer.on("focus", onTerminalFocus);
   renderer.keyInput.on("keypress", onKey);
