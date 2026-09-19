@@ -95,6 +95,16 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
 
+### Configurable browse keys
+
+`ui/keybindings.ts` defines the browse action map, strict JSON configuration loader,
+key-event matching, and display labels. Startup loads the optional XDG
+`jj-evolved/keybindings.json` before creating the renderer. Configuration errors
+identify the file and conflicting actions. Browse routing resolves one action
+only after modal and text-input handling; Ctrl-C remains an emergency exit.
+Tests cover parsing, collisions, terminal aliases, missing and invalid files,
+and renderer behavior through the injected `keybindings` UI scenario.
+
 ## Terminal focus refresh
 
 The app subscribes to the renderer's terminal `focus` event. Focus requests are coalesced and deferred while a prompt, operation, or repository load is active. Existing external-tool and mutation refreshes consume requests already queued, avoiding a duplicate reload on resume. A focus event during an ongoing read queues one follow-up read. Returning focus invalidates prepared reviews without changing the action draft; `p` prepares a fresh review.

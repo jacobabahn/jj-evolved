@@ -1,10 +1,34 @@
+import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
 import { strict as assert } from "node:assert";
 import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
 
-type Scenario = { name: string; title: string; run: (ui: UiFixture) => Promise<void> };
+type Scenario = { bindings?: Keybindings; name: string; title: string; run: (ui: UiFixture) => Promise<void> };
 
 export const scenarios: Scenario[] = [
+  {
+    name: "keybindings", title: "Custom browse keys and unchanged text input",
+    bindings: parseKeybindings({ bindings: { down: ["x", "down"], help: ["h"], describe: ["D"] } }),
+    async run(ui) {
+      ui.key("h");
+      await ui.until("Keyboard reference");
+      assert(ui.screen.captureCharFrame().includes("x/down / k/up"));
+      await ui.capture("Custom movement and describe shortcuts in help");
+      ui.key("j");
+      await ui.until("Keyboard reference");
+      ui.key("x");
+      await ui.until("+ hello from jj-evolved");
+      await ui.capture("Remapped x selects the parent change");
+      ui.key("D");
+      await ui.until("Describe");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+      await ui.type("xhD stay text in prompts");
+      await ui.capture("Browse shortcuts remain text in the description prompt");
+      ui.key("RETURN");
+      await ui.until("Ready.");
+      assert.equal((await ui.repo.snapshot("@-")).revisions[0]?.description.trim(), "xhD stay text in prompts");
+    },
+  },
   {
     name: "automatic-refresh", title: "External changes refresh when terminal focus returns",
     async run(ui) {
@@ -31,10 +55,11 @@ export const scenarios: Scenario[] = [
   },
   {
     name: "large-history", title: "Search destinations and load history beyond 200 revisions",
+    bindings: parseKeybindings({ bindings: { loadMore: ["x"] } }),
     async run(ui) {
       for (let i = 0; i < 202; i++) await ui.f.jj("new", "-m", `History change ${i + 1}`);
       ui.key("r");
-      await ui.until("L load 200 more");
+      await ui.until("x load 200 more");
       await ui.until("Ready.");
       await ui.capture("First 200 revisions with load more available");
       const first = await ui.repo.snapshot("all()", true);
@@ -55,6 +80,9 @@ export const scenarios: Scenario[] = [
       ui.key("ESCAPE");
       await ui.until("Working copy");
       ui.key("L");
+      await ui.screen.renderOnce();
+      assert(ui.screen.captureCharFrame().includes("200 revisions"));
+      ui.key("x");
       await ui.until("205 revisions");
       await ui.until("Ready.");
       await ui.capture("Expanded graph retains the selected revision");

@@ -125,3 +125,54 @@ bun run ui record rebase
 Open the printed HTML path to inspect frames, play a recording, or switch scenarios. Scenario failures save a replay under `artifacts/ui/failures/`. See [the UI tooling guide](docs/ui-tooling.md) to add scenarios and update snapshots.
 
 See the [feature specification](docs/features.md) for scope and acceptance criteria, and the [implementation record](docs/implementation.md) for the architecture decision.
+
+### Custom keybindings
+
+Create `$XDG_CONFIG_HOME/jj-evolved/keybindings.json` (or
+`~/.config/jj-evolved/keybindings.json` when `XDG_CONFIG_HOME` is unset), then
+restart the app. The file is optional. For example:
+
+```json
+{
+  "bindings": {
+    "down": ["x", "down"],
+    "up": ["k", "up"],
+    "describe": ["D"],
+    "help": ["h"]
+  }
+}
+```
+
+Each supplied array replaces all keys for that action; omitted actions retain
+their defaults and `[]` disables an action. Help and the footer show the effective
+bindings. Unknown fields/actions, invalid keys, and duplicate keys fail startup
+with an error naming the file and conflict. To reuse an assigned key, override
+both actions in the same file.
+
+Keys are case-sensitive printable ASCII characters (`"r"` and `"R"` differ),
+`ctrl+a` through `ctrl+z`, or the names `up`, `down`, `left`, `right`, `tab`,
+`pageup`, `pagedown`, `home`, `end`, `space`, `escape`, `return`, `f1`–`f12`.
+Use named keys for terminal aliases: `ctrl+i`, `ctrl+j`, `ctrl+m`, and `ctrl+h`
+are rejected. `ctrl+z` is reserved by the terminal and `ctrl+c` always quits.
+Alt/Meta combinations and key sequences are not supported.
+
+Available actions and defaults:
+
+| Action | Default keys |
+| --- | --- |
+| `down`, `up` | `j`/`down`, `k`/`up` |
+| `focus`, `pageUp`, `pageDown` | `tab`, `pageup`, `pagedown` |
+| `status`, `refresh`, `filter`, `loadMore` | `s`, `r`, `/`, `L` |
+| `search`, `nextMatch`, `previousMatch` | `ctrl+f`, `ctrl+n`, `ctrl+p` |
+| `workingCopy`, `parent`, `child`, `return` | `@`, `[`, `]`, `ctrl+o` |
+| `clearSearch`, `preview` | `escape`, `return` |
+| `describe`, `edit`, `new` | `d`, `e`, `n` |
+| `rebase`, `squash`, `absorb`, `evolution` | `R`, `S`, `a`, `v` |
+| `actions`, `bookmarks`, `operations` | `space`, `b`, `o` |
+| `undo`, `files`, `theme`, `help`, `quit` | `u`, `f`, `t`, `?`, `q` |
+
+Overrides apply while browsing, including movement in the preview pane. Prompts,
+menus, destination selection, and history forms retain their displayed fixed
+controls: `j`/`k` or arrows to choose, Enter to submit, Escape to cancel, and their
+existing field/preview controls. Text inputs retain normal editing keys; typing a
+custom browse shortcut inserts text. Ctrl-C remains available everywhere.

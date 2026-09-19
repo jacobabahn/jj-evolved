@@ -55,7 +55,7 @@ Mutation targets are captured when the preview opens. If repository state change
 
 `a` previews absorb for the selected revision. Its confirmation shows the projected operation patch and the remaining source patch. After applying, selection follows the source if it survives; otherwise the app resets the filter and selects the working copy. `v` opens change evolution, where selecting a version previews its content and description changes. Both features are also available from Space. Evolution uses a fixed operation for all pages and previews until the view is closed.
 
-Space opens the action menu. `e` switches the working copy to the selected revision immediately, without a confirmation prompt. `b` opens bookmarks, `o` opens operation history, `u` previews undo, and `f` opens changed files. Menu items use arrow keys or `j`/`k` and Enter. The keyboard reference lists these bindings.
+Space opens the action menu. `e` switches the working copy to the selected revision immediately, without a confirmation prompt. `b` opens bookmarks, `o` opens operation history, `u` previews undo, and `f` opens changed files. Menu items use arrow keys or `j`/`k` and Enter. These are the default browse bindings. A validated `keybindings.json` file under the XDG configuration directory can replace or disable them; the keyboard reference, footer, and action hints show the effective mappings. Modal controls and text editing remain fixed. See the README for the schema and complete action list.
 
 Commands run through the installed `jj` executable with argument arrays, paging disabled, and color disabled. Repository data is parsed through an explicit JSON template, independent of a user's log template. Jujutsu remains responsible for immutable revisions and operation validation. Ordinary jj commands can snapshot working-copy files as part of their normal behavior.
 
@@ -63,7 +63,7 @@ Commands run through the installed `jj` executable with argument arrays, paging 
 
 - Adding/removing remote configuration, an in-app credential manager, and bulk pushes. Configure authentication with Git credentials or SSH in the terminal.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
-- Revset completion, configurable keybindings, and custom themes.
+- Revset completion and custom themes.
 - Automatic filesystem watching.
 - Cross-platform and older-jj compatibility guarantees beyond the verified environment.
 

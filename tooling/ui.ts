@@ -1,3 +1,4 @@
+import type { Keybindings } from "../src/ui/keybindings";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { SelectRenderable, type Renderable } from "@opentui/core";
@@ -10,6 +11,7 @@ import { recordScreen, styledFrame, writeRecording } from "./recording";
 
 type Target = { id: string; instance: number };
 type FixtureOptions = {
+  bindings?: Keybindings;
   width?: number;
   height?: number;
   theme?: ThemeName;
@@ -30,7 +32,7 @@ export async function createUiFixture(options: FixtureOptions = {}) {
     let app: ReturnType<typeof createApp> | undefined;
     try {
       const repo = await Repository.open(f.path);
-      app = createApp(screen.renderer, repo, themes[options.theme ?? "terminal"]);
+      app = createApp(screen.renderer, repo, themes[options.theme ?? "terminal"], undefined, options.bindings);
       await app.start();
       await screen.renderOnce();
       let disposed = false;
