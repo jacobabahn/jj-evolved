@@ -995,6 +995,30 @@ test("focus invalidates a reviewed operation until it is reviewed again", async 
   } finally { await t.cleanup(); }
 }, 15_000);
 
+for (const view of ["selection", "help", "status"] as const) {
+  test(`focus refresh retains ${view} navigation performed while loading`, async () => {
+    const t = await setup();
+    const started = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const original = t.repo.snapshot.bind(t.repo);
+    t.repo.snapshot = async (...args) => {
+      started.resolve();
+      await gate.promise;
+      return original(...args);
+    };
+    try {
+      t.screen.renderer.emit("focus");
+      await started.promise;
+      t.screen.mockInput.pressKey(view === "selection" ? "j" : view === "help" ? "?" : "s");
+      const text = view === "selection" ? "+ hello from jj-evolved" : view === "help" ? "Keyboard reference" : "Working-copy status";
+      await t.until(text);
+      gate.resolve();
+      await t.until("Ready.");
+      expect(t.screen.captureCharFrame()).toContain(text);
+    } finally { gate.resolve(); await t.cleanup(); }
+  }, 15_000);
+}
+
 test("focus events during refresh produce one follow-up", async () => {
   const t = await setup();
   const started = Promise.withResolvers<void>();
@@ -1072,6 +1096,8 @@ test("stopping while a focus refresh is reading discards its result", async () =
 
 test("focus refresh preserves accepted search and preview scroll", async () => {
   const t = await setup();
+  const started = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
   try {
     await Bun.write(`${t.f.path}/long.txt`, Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"));
     t.screen.mockInput.pressKey("r");
@@ -1084,16 +1110,51 @@ test("focus refresh preserves accepted search and preview scroll", async () => {
     await t.until("1/1");
     await t.until("+ line 0");
     await t.screen.waitForVisualIdle();
+    const original = t.repo.snapshot.bind(t.repo);
+    t.repo.snapshot = async (...args) => {
+      started.resolve();
+      await gate.promise;
+      return original(...args);
+    };
+    t.screen.renderer.emit("focus");
+    await started.promise;
     t.screen.mockInput.pressKey("\x1b[6~");
     await t.screen.renderOnce();
     const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
     const top = preview.scrollTop;
     expect(top).toBeGreaterThan(0);
-    t.screen.renderer.emit("focus");
-    await Promise.resolve();
+    gate.resolve();
     await t.until("Ready.");
     expect(preview.scrollTop).toBe(top);
     expect(t.screen.captureCharFrame()).toContain("1/1");
     expect(t.screen.captureCharFrame()).toContain("Next change");
-  } finally { await t.cleanup(); }
+  } finally { gate.resolve(); await t.cleanup(); }
+}, 15_000);
+
+test("focus refresh does not restore scroll over help opened during a pending diff", async () => {
+  const t = await setup();
+  const started = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
+  const original = t.repo.diff.bind(t.repo);
+  t.repo.diff = async (...args) => {
+    started.resolve();
+    await gate.promise;
+    return original(...args);
+  };
+  try {
+    t.screen.renderer.emit("focus");
+    await started.promise;
+    t.screen.mockInput.pressKey("?");
+    await t.until("Keyboard reference");
+    await t.screen.waitForVisualIdle();
+    t.screen.mockInput.pressKey("\x1b[6~");
+    await t.screen.renderOnce();
+    const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
+    const top = preview.scrollTop;
+    expect(top).toBeGreaterThan(0);
+    gate.resolve();
+    await t.until("Ready.");
+    expect(String(preview.title).trim()).toBe("Help");
+    expect(preview.scrollTop).toBe(top);
+  } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);

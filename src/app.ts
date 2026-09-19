@@ -138,6 +138,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let stopped = false;
   let replacing = false;
   let focusRefreshPending = false;
+  let previewNavigation = 0;
   let restorePreviewScroll: (() => void) | undefined;
   const review = new MutationReview(repository, refreshAfterMutation);
   const previews = new PreviewSession(({ target, text, title }) => {
@@ -190,9 +191,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     preview.blur();
   }
   function show(text: string, title: string) {
+    ++previewNavigation;
     previews.show({ target: "main", text, title });
   }
   async function loadPreview() {
+    ++previewNavigation;
     if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
     restorePreviewScroll = undefined;
     const revision = selected();
@@ -206,17 +209,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     focusRefreshPending = false;
     const request = ++refreshRequest;
     const limit = nextRevset === revset ? historyLimit : 200;
-    const previous = selected();
-    const top = list.scrollTop;
-    const previewTop = preview.scrollTop;
-    const helpVisible = preserveView && String(preview.title).trim() === "Help";
-    const statusVisible = preserveView && String(preview.title).trim() === "Working-copy status";
     const query = preserveView ? search.query : "";
     list.cancelDrag();
     const snapshot = await repository.snapshot(nextRevset, false, limit);
     const bookmarks = await repository.bookmarks();
     const candidates = query ? await repository.navigationRevisions(nextRevset) : [];
     if (stopped || request !== refreshRequest) return;
+    // Browsing stays available during reads; preserve the latest view when applying results.
+    const previous = selected();
+    const top = list.scrollTop;
+    const previewTop = preview.scrollTop;
+    const helpVisible = preserveView && String(preview.title).trim() === "Help";
+    const statusVisible = preserveView && String(preview.title).trim() === "Working-copy status";
     historyLimit = limit;
     ++searchRequest;
     clearTimeout(searchTimer);
@@ -244,18 +248,21 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (preserveView) list.scrollTop = top;
     replacing = false;
     updateSearchStatus();
-    if (statusVisible) {
-      await previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error" });
-    } else if (!helpVisible) await loadPreview();
-    if (preserveView && !stopped) {
+    const previewRead = statusVisible
+      ? previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error" })
+      : !helpVisible ? loadPreview() : undefined;
+    const navigation = previewNavigation;
+    await previewRead;
+    if (preserveView && !stopped && navigation === previewNavigation) {
       // New diff content gets its scroll extent during layout, after this read completes.
       restorePreviewScroll = () => {
         restorePreviewScroll = undefined;
-        if (!stopped) preview.scrollTo(previewTop);
+        if (!stopped && navigation === previewNavigation) preview.scrollTo(previewTop);
       };
       renderer.once("frame", restorePreviewScroll);
     }
   }
+
   function onTerminalFocus() {
     if (stopped) return;
     focusRefreshPending = true;
@@ -966,14 +973,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (["j", "k", "up", "down", "pageup", "pagedown"].includes(name)) {
       key.preventDefault();
       const direction = name === "k" || name === "up" || name === "pageup" ? -1 : 1;
-      if (name === "pageup" || name === "pagedown") preview.scrollBy(direction * Math.max(1, preview.height - 3));
-      else if (focus === "preview") preview.scrollBy(direction);
+      if (name === "pageup" || name === "pagedown") { ++previewNavigation; preview.scrollBy(direction * Math.max(1, preview.height - 3)); }
+      else if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
       else if (direction < 0) list.moveUp(); else list.moveDown();
       return;
     }
     if (name === "?") { key.preventDefault(); show(HELP, "Help"); return; }
     if (name === "s" && !key.shift && key.sequence !== "S") {
       key.preventDefault();
+      ++previewNavigation;
       void previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…",
         read: () => repository.status(), errorTitle: "Status error" });
       return;
