@@ -230,3 +230,42 @@ test("children include all branches and empty ancestry leaves selection unchange
     expect(await t.repo.operationId()).toBe(operation);
   } finally { await t.cleanup(); }
 }, 15_000);
+
+test("loading more history preserves a selection made while loading and resets on revset change", async () => {
+  const t = await setup(async f => {
+    for (let i = 0; i < 202; i++) await f.jj("new", "-m", `Page ${i}`);
+  });
+  const gate = Promise.withResolvers<void>();
+  try {
+    await t.until("L load 200 more");
+    const read = t.repo.snapshot.bind(t.repo);
+    const started = Promise.withResolvers<void>();
+    t.repo.snapshot = async (revset, readOnly, limit) => {
+      if (limit === 400) { started.resolve(); await gate.promise; }
+      return read(revset, readOnly, limit);
+    };
+    t.screen.mockInput.pressKey("L");
+    await started.promise;
+    t.screen.mockInput.pressKey("j");
+    const index = t.list().getSelectedIndex();
+    gate.resolve();
+    const frame = await t.until("205 revisions");
+    expect(t.list().getSelectedIndex()).toBe(index);
+    expect(frame).not.toContain("L load 200 more");
+    await t.until("Ready.");
+    await t.f.jj("bookmark", "create", "focus-expanded", "-r", "@");
+    const top = t.list().scrollTop;
+    t.screen.renderer.emit("focus");
+    await t.until("focus-expanded");
+    await t.until("Ready.");
+    expect(t.screen.captureCharFrame()).toContain("205 revisions");
+    expect(t.screen.captureCharFrame()).not.toContain("L load 200 more");
+    expect(t.list().getSelectedIndex()).toBe(index);
+    expect(t.list().scrollTop).toBe(top);
+    await t.filter("feature");
+    await t.until("1 revisions");
+    await t.until("Ready.");
+    await t.filter("all()");
+    await t.until("L load 200 more");
+  } finally { gate.resolve(); await t.cleanup(); }
+}, 15_000);

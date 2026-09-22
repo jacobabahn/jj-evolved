@@ -85,7 +85,7 @@ try {
     parents: ["@"],
     description: "Try multiline descriptions\n\nPress d on this change to edit its description in the app.\nPress Shift+Enter (or Alt+Enter) for newlines, then Enter to save.\n\nThis final paragraph lets you check that blank lines are preserved.",
     bookmarks: ["multiline-demo"],
-    files: { "docs/descriptions.md": "# Multiline descriptions\n\nPress d to edit a description. Shift+Enter or Alt+Enter adds a newline.\nEnter saves; Escape cancels. Space → Describe in editor opens an external editor.\n" },
+    files: { "docs/descriptions.md": "# Multiline descriptions\n\nPress d to edit a description. Shift+Enter or Alt+Enter adds a newline.\nEnter saves; Escape cancels. Space → Edit description in editor opens an external editor.\n" },
   });
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/index.ts"), directory], {
     stdin: "inherit", stdout: "inherit", stderr: "inherit",

@@ -10,6 +10,7 @@ The current build implements the local history-management workflows in the [feat
 - Squashing all files or a selected file group, with an explicit description choice.
 - Splitting selected whole files with descriptions for both changes, optionally preserving the original description on the second.
 - Listing local and remote bookmarks and creating, moving, renaming, or deleting local bookmarks.
+- Named-remote fetch, exact-bookmark push with full target IDs and JJ dry-run review, and remote bookmark tracking/untracking.
 - Operation-history browsing with incremental expansion, operation inspection, undo, and restore.
 - Absorb with a projected operation patch, remaining source edits, and confirmation.
 - Change evolution with incremental expansion and native patches for individual historical versions.
@@ -75,9 +76,9 @@ Run `bun run check:architecture` to verify that imports resolve, the source grap
 
 ## Current limits
 
-Initial revision graphs load at most 200 revisions. Destination pickers use uncapped metadata and share the `RevisionSearch` controller for filtering and keyboard handling. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Automatic refresh polls `jj status` and the operation ID every two seconds while browsing. It reads replacement views before applying them, checks the operation ID again, and discards results after intervening user activity. Updates preserve selection, searches, scroll positions, and temporary return views. Prompts, actions, external tools, and drags defer checks; disposal clears the timer. Diffs are buffered in memory. Descriptions use a scrolling OpenTUI text area with Shift/Alt+Enter for newlines and Enter to save; other quick inputs are single-line. Describe also supports JJ’s configured external editor, and conflicted revisions can launch JJ’s merge tool. Both use the interactive command target validation and foreground lifecycle, then refresh the current revset and retain selection. Squash can preserve an existing multiline description without flattening it. Split can edit the second description or preserve its original multiline text.
+Initial revision graphs load 200 revisions and expand with `L`. Destination pickers use uncapped metadata and share the `RevisionSearch` controller for filtering and keyboard handling. Search reads the entire active revset without that limit and buffers revision metadata in memory. Navigation reveals a target with up to 39 immediate relatives, preserving the original graph and scroll position for return. Operation history and change evolution start with 50 entries and can load more. Automatic refresh polls `jj status` and the operation ID every two seconds while browsing. It reads replacement views before applying them, checks the operation ID again, and discards results after intervening user activity. Updates preserve selection, searches, scroll positions, and temporary return views. Prompts, actions, external tools, and drags defer checks; disposal clears the timer. Diffs are buffered in memory. Descriptions use a scrolling OpenTUI text area with Shift/Alt+Enter for newlines and Enter to save; other quick inputs are single-line. Describe also supports JJ’s configured external editor, and conflicted revisions can launch JJ’s merge tool. Both use the interactive command target validation and foreground lifecycle, then refresh the current revset and retain selection. Squash can preserve an existing multiline description without flattening it. Split can edit the second description or preserve its original multiline text.
 
-A broader destination search and an integrated conflict editor are not implemented. Conflict resolution continues through the jj CLI.
+Destination search covers the full history. Conflict resolution uses JJ’s configured external merge tool.
 
 ## Verification
 
@@ -95,3 +96,42 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 - `bun run demo` starts in a real PTY. The action menu renders and Ctrl-C restores the terminal and exits successfully.
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
+
+### Configurable browse keys
+
+`ui/keybindings.ts` defines the browse action map, strict JSON configuration loader,
+key-event matching, and display labels. Startup loads the optional XDG
+`jj-evolved/keybindings.json` before creating the renderer. Configuration errors
+identify the file and conflicting actions. Browse routing resolves one action
+only after modal and text-input handling; Ctrl-C remains an emergency exit.
+Tests cover parsing, collisions, terminal aliases, missing and invalid files,
+and renderer behavior through the injected `keybindings` UI scenario.
+
+## Terminal focus refresh
+
+The app subscribes to the renderer's terminal `focus` event. Focus requests are coalesced and deferred while a prompt, operation, or repository load is active. Existing external-tool and mutation refreshes consume requests already queued, avoiding a duplicate reload on resume. A focus event during an ongoing read queues one follow-up read. Returning focus invalidates prepared reviews without changing the action draft; `p` prepares a fresh review.
+
+Automatic refresh retains the active revset, selected commit (falling back to a unique change ID after rewrites), graph scroll, preview scroll, and accepted search query with recalculated matches. It reloads an open working-copy status view and keeps keyboard help visible. Temporary navigation views retain their selection and return path by deferring refresh until Ctrl-O, with a visible notice. No filesystem watcher is installed; `r` remains the fallback for terminals that do not report focus. Stop removes the focus listener, and late reads cannot update a disposed app.
+
+The `automatic-refresh` UI scenario captures external CLI changes appearing on focus return and an open draft waiting for refresh. Renderer integration tests exercise external descriptions and files, retained filters and drafts, review invalidation, event coalescing, temporary navigation, help, and disposal.
+
+
+### Expanded history and destination search
+
+The graph initially loads 200 revisions; `L` increases the limit by 200 and rerenders JJ's native graph for that complete window. Keeping the native graph intact avoids splicing branch/merge lanes from separate pages. A bounded metadata probe reports whether older results remain. Expansion preserves selection, scroll, and accepted search markers; it discards a result if the view changed while loading. Normal refresh retains the expanded limit, while changing revsets resets it. Temporary ancestry/search context views retain their existing return point and require returning before expansion.
+
+Rebase/squash form destinations, interactive squash, and bookmark destinations read uncapped revision metadata, then filter locally by case-insensitive description, bookmark text, or change/commit ID. The source commit is excluded where appropriate. `/` enters search, arrows navigate results, Enter selects, and Escape clears the filter. Empty results cannot trigger an action. Inline rebase/squash expose the same picker with `/`.
+
+`bun run ui record large-history` records a 205-revision fixture, destination search beyond the first page, a cancelled preview, and an expanded graph. Repository and renderer tests exercise the page boundary, search cancellation/source exclusion, and selection changes during an in-flight expansion.
+
+## Remote workflows
+
+Remote actions use the existing mutation-review lifecycle. Push previews run `jj git push --bookmark exact:<name> --dry-run` at the captured operation, without publishing or changing tracking state. Apply checks the operation and remote URL, then pins that same operation so concurrent local edits cannot substitute different push targets. JJ checks remote leases at push time. Deleted tracked bookmarks remain selectable for explicit deletion reviews; conflicted bookmarks are rejected. Fetch and tracking changes are reviewed, and tracking status appears in the bookmark browser. Git's synthetic `@git` bookmark is informational.
+
+Network failures preserve JJ diagnostics and offer authentication, rejected-push, and interrupted-connection recovery instructions. Interactive Git credential prompting is disabled. Operations share the existing 30-second timeout. Remote configuration is currently managed through the JJ CLI. Repository tests use disposable local bare Git remotes to verify preview purity, exact push scope, deletion, tracking, stale local state, changed remote URLs, concurrent remote updates, and inaccessible remotes. The `remotes` UI scenario records remote selection, push review/cancellation, and tracking review/application.
+
+### External description editing
+
+The Space menu exposes **Edit description in editor**, while `d` opens the in-app multiline editor. `Repository.editDescription` snapshots pending working-copy changes and rejects a stale selected commit before running `jj describe --editor <commit-id>` in the foreground. JJ owns editor configuration, description parsing, and the single description rewrite operation. The renderer suspends while the editor runs and resumes on success or failure. Refresh preserves the active revset and recovers the selected revision by its stable change ID. Editors that exit successfully without changes leave the description unchanged; nonzero exits report failure without applying the draft.
+
+Repository and renderer tests launch a real configured fake editor to verify multiline and Unicode preservation, unchanged exit, failed exit, stale selection rejection, selection/filter retention, and keyboard recovery. The `multiline-description` UI scenario records the action menu and saved multiline result.

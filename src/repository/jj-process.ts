@@ -4,7 +4,7 @@ export async function run(path: string, args: string[], diagnostics = false, env
   if (!Bun.which("jj")) throw new Error("jj is not installed. Install Jujutsu, then run jj-evolved again.");
   const proc = Bun.spawn(["jj", "--no-pager", "--color=never", ...args], {
     cwd: path, stdin: "ignore", stdout: "pipe", stderr: "pipe",
-    env: { ...process.env, JJ_INTERACTIVE: "0", ...env },
+    env: { ...process.env, JJ_INTERACTIVE: "0", GIT_TERMINAL_PROMPT: "0", ...env },
   });
   const timer = setTimeout(() => proc.kill(), 30_000);
   try {

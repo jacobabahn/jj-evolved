@@ -93,15 +93,17 @@ Rebase can move one change or its descendants. Squash accepts all files or a sel
 
 ## Bookmarks, undo, and restore
 
-Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Bookmark entries with a remote name are read-only. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
+Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Press `b` to track or untrack remote bookmarks. Select **Git remotes** from the bookmark browser or action menu to fetch or push. Choose a remote, then **Push bookmark** to select one local bookmark (or a tracked deleted bookmark). The confirmation shows the remote URL, full previous and proposed commit IDs, and JJ’s dry-run report. Enter publishes that exact bookmark; Escape cancels. Fetches and tracking changes also require review. JJ retains its push safety checks; after a rejected push, fetch and review again. Configure authentication through Git credentials or SSH in your terminal. Remote operations time out after 30 seconds; after an interrupted push, fetch to check its outcome before retrying. Pushes cannot be reversed with local undo. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
 
 ## Search, navigation, and descriptions
 
-The initial revision graph shows at most 200 revisions. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `r` remains available for an immediate reload. Press `d` to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. **Describe in editor** in the Space menu still opens JJ’s configured external editor.
+The initial revision graph loads 200 revisions. Press `L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `r` remains available for an immediate reload. Press `d` to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. **Edit description in editor** in the Space menu still opens JJ’s configured external editor.
 
 Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
 
 ## Automatic refresh
+
+The app also refreshes when your terminal reports focus returning. Open prompts retain their drafts and defer that refresh until they close. Returning focus invalidates a pending operation review; press `p` to prepare it again.
 
 While browsing, the app checks for changes every two seconds. It runs `jj status` to snapshot pending working-copy edits and checks the operation ID before reloading. Automatic updates preserve the active revset, accepted search, selection where possible, graph and preview scroll, temporary navigation views, and pane visibility. Checks pause during prompts, action reviews, drags, and external tools; stale in-flight results are discarded if you interact. Failed checks report an error and retry. No filesystem watcher is required.
 
@@ -109,5 +111,56 @@ While browsing, the app checks for changes every two seconds. It runs `jj status
 
 For a conflicted revision, choose **Resolve conflicts** from the Space menu to open JJ’s configured merge tool. The app resumes and refreshes after either editor exits, including after a failure or cancellation, and keeps the edited revision selected when it remains in the current view. JJ controls saving and cancellation; unsupported conflicts and editor failures are reported in the app.
 
-The log uses jj's native ancestry lines and node symbols. Remote operations and an in-app hunk editor are not implemented.
+The log uses jj's native ancestry lines and node symbols. An in-app hunk editor is not implemented.
 
+
+## Custom keybindings
+
+Create `$XDG_CONFIG_HOME/jj-evolved/keybindings.json` (or
+`~/.config/jj-evolved/keybindings.json` when `XDG_CONFIG_HOME` is unset), then
+restart the app. The file is optional. For example:
+
+```json
+{
+  "bindings": {
+    "down": ["x", "down"],
+    "up": ["k", "up"],
+    "describe": ["D"],
+    "help": ["h"]
+  }
+}
+```
+
+Each supplied array replaces all keys for that action; omitted actions retain
+their defaults and `[]` disables an action. Help and the footer show the effective
+bindings. Unknown fields/actions, invalid keys, and duplicate keys fail startup
+with an error naming the file and conflict. To reuse an assigned key, override
+both actions in the same file.
+
+Keys are case-sensitive printable ASCII characters (`"r"` and `"R"` differ),
+`ctrl+a` through `ctrl+z`, or the names `up`, `down`, `left`, `right`, `tab`,
+`pageup`, `pagedown`, `home`, `end`, `space`, `escape`, `return`, `f1`–`f12`.
+Use named keys for terminal aliases: `ctrl+i`, `ctrl+j`, `ctrl+m`, and `ctrl+h`
+are rejected. `ctrl+z` is reserved by the terminal and `ctrl+c` always quits.
+Alt/Meta combinations and key sequences are not supported.
+
+Available actions and defaults:
+
+| Action | Default keys |
+| --- | --- |
+| `down`, `up` | `j`/`down`, `k`/`up` |
+| `focus`, `pageUp`, `pageDown` | `tab`, `pageup`, `pagedown` |
+| `status`, `refresh`, `filter`, `loadMore` | `s`, `r`, `/`, `L` |
+| `search`, `nextMatch`, `previousMatch` | `ctrl+f`, `ctrl+n`, `ctrl+p` |
+| `workingCopy`, `parent`, `child`, `return` | `@`, `[`, `]`, `ctrl+o` |
+| `clearSearch`, `preview`, `togglePreview` | `escape`, `return`, `p` |
+| `describe`, `edit`, `new` | `d`, `e`, `n` |
+| `rebase`, `squash`, `absorb`, `evolution` | `R`, `S`, `a`, `v` |
+| `actions`, `bookmarks`, `operations` | `space`, `b`, `o` |
+| `undo`, `files`, `theme`, `help`, `quit` | `u`, `f`, `t`, `?`, `q` |
+
+Overrides apply while browsing, including movement in the preview pane. Prompts,
+menus, destination selection, and history forms retain their displayed fixed
+controls: `j`/`k` or arrows to choose, Enter to submit, Escape to cancel, and their
+existing field/preview controls. Text inputs retain normal editing keys; typing a
+custom browse shortcut inserts text. Ctrl-C remains available everywhere.

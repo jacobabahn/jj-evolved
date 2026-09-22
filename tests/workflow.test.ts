@@ -11,7 +11,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
   await prepare(f);
   const repo = await Repository.open(f.path);
   const screen = await createTestRenderer({ width: 110, height: 32 });
-  const app = createApp(screen.renderer, repo, undefined, undefined, { refreshIntervalMs: interval });
+  const app = createApp(screen.renderer, repo, undefined, undefined, undefined, { refreshIntervalMs: interval });
   await app.start();
   const node = <T>(id: string) => screen.renderer.root.findDescendantById(id) as T;
   async function until(predicate: () => boolean | Promise<boolean>) {

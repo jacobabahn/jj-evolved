@@ -8,14 +8,14 @@ The application uses Bun, TypeScript, and OpenTUI.
 
 ## MVP scope
 
-This table defines the target MVP. The current build includes repository opening, a selectable revision graph, file and diff browsing, status, revsets, descriptions, new/edit/abandon actions, rebase, squash, absorb, file-level split, change evolution, local bookmark management, and operation history with inspection, undo, and restore.
+This table defines the target MVP. The current build includes repository opening, a selectable revision graph, file and diff browsing, status, revsets, descriptions, new/edit/abandon actions, rebase, squash, absorb, file-level split, change evolution, local bookmark management, reviewed remote fetch/push and tracking, and operation history with inspection, undo, and restore.
 
-The graph preserves jj's native branch, merge, and omitted-history lines. Split accepts descriptions for both resulting changes, with an option to preserve the original description on the second. History and destination lists are capped at 200 revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
+The graph preserves jj's native branch, merge, and omitted-history lines. Split accepts descriptions for both resulting changes, with an option to preserve the original description on the second. History loads 200 revisions initially and expands with `L`; destination pickers search all revisions, while operation history can load beyond its initial 50 entries. The requirements below remain the completion criteria.
 
 | Feature | Behavior | Acceptance condition |
 | --- | --- | --- |
 | Open a repository | Use the current directory or an explicit path. | A nested workspace directory resolves to its repository root. Missing `jj` and non-jj directories produce actionable errors. |
-| Browse revisions | Show up to 200 revisions in topological order, with descriptions, short change IDs, bookmarks, and working-copy/conflict markers. | Arrow keys and `j`/`k` change the selection and its preview. Full commit IDs distinguish divergent versions of one change. |
+| Browse revisions | Load revisions in batches of 200 in topological order, with descriptions, short change IDs, bookmarks, and working-copy/conflict markers. | Arrow keys and `j`/`k` change the selection and its preview. Full commit IDs distinguish divergent versions of one change. |
 | Search revisions | `Ctrl+F` searches every revision in the active revset by description, bookmark, or ID prefix. | Live previews, marked matches, wrapping next/previous controls, cancellation, and explicit empty results work at 80×24. Clearing search preserves the revset. |
 | Navigate ancestry | `@` selects the working copy; `[` and `]` select a parent or child. | Multiple relatives open a chooser, including filtered relatives. Distant targets appear in a temporary view with excluded context marked. `Ctrl+O` restores the original view. Navigation does not write repository state. |
 | Inspect a change | Show metadata and the selected revision's Git-format diff. | Empty changes have an explicit empty state. The preview scrolls independently. |
@@ -23,7 +23,7 @@ The graph preserves jj's native branch, merge, and omitted-history lines. Split 
 | View status | Show the actual `jj status` output. | `s` switches the preview to working-copy status. |
 | Filter history | Enter a Jujutsu revset with `/`. An empty input restores `all()`. | Invalid input shows jj's error, preserving the previous list and filter. No matches shows an empty state. |
 | Refresh | Check every two seconds while browsing; `r` reloads immediately. | Detect external operations and working-copy edits. Preserve selection, accepted search, filter, scroll, and temporary views. Defer during prompts, drags, and actions; discard stale asynchronous reads and stop polling on disposal. |
-| Describe | `d` opens a multiline text area. Shift+Enter or Alt+Enter inserts a newline, Enter saves, and Escape cancels. **Describe in editor** opens JJ’s external editor. | The description is passed literally, including quotes and shell metacharacters. Existing paragraphs and pasted newlines are preserved. Saving, cancellation, and editor failure return to a refreshed app without switching the working copy. |
+| Describe | `d` opens a multiline text area. Shift+Enter or Alt+Enter inserts a newline, Enter saves, and Escape cancels. **Edit description in editor** opens JJ’s external editor. | The description is passed literally, including quotes and shell metacharacters. Existing paragraphs and pasted newlines are preserved. Saving, cancellation, and editor failure return to a refreshed app without switching the working copy. |
 | Resolve conflicts | The Space menu offers **Resolve conflicts** for conflicted revisions. | Launch JJ’s configured merge tool against the selected revision; refresh on exit while preserving the current filter and selection where possible. |
 | Create a change | `n` opens a confirmation to create an empty child of the selected revision. | Enter runs `jj new`, resets the filter to `all()`, and selects the new working-copy change. Escape leaves the repository unchanged. |
 | Navigate ancestry | Show a selectable revision graph with parent relationships, merges, bookmarks, and working-copy/conflict markers. | Each selectable node maps to a full commit ID. Filtering and omitted ancestors do not suggest relationships that do not exist. |
@@ -36,7 +36,8 @@ The graph preserves jj's native branch, merge, and omitted-history lines. Split 
 | Browse change evolution | List historical versions of the selected change and preview their native evolution patches. | Use full commit IDs to distinguish versions. Include description changes and correct comparisons for multiple predecessors. Load beyond 50 versions without changing the captured operation. Reads leave pending working-copy edits and the live operation unchanged. |
 | Split | Divide a revision into two sequential changes by selecting whole files and supplying descriptions. | Preview both groups before applying. Each resulting change contains the intended files, and their combined result preserves the original tree. Hunk-level splitting is deferred. |
 | Abandon | Remove a selected mutable revision from visible history. | Show the target and affected descendants before confirmation. Refresh the graph and report conflicts after success. Escape performs no write. |
-| Manage bookmarks | List local and remote bookmarks; create, rename, move, and delete local bookmarks. | Select bookmark targets from revisions. Show the old and new targets before moving a bookmark. Remote entries remain read-only in this MVP. |
+| Manage bookmarks | List local and remote bookmarks; create, rename, move, and delete local bookmarks. | Select bookmark targets from revisions. Show the old and new targets before moving a bookmark. Remote entries expose tracking status and reviewed track/untrack actions; the synthetic `@git` entry remains informational. |
+| Fetch and push | Select a named remote; fetch or push one explicitly selected bookmark. | Preview the remote URL and exact old/new push targets with JJ dry-run output. Support tracked bookmark deletions. Reject stale operations, changed remote URLs, and unexpected remote targets; preserve diagnostics and explain authentication/retry steps. Local undo does not undo a push. |
 | Browse operation history | Show operation IDs, descriptions, timestamps, and the current operation, with inspection of an operation's repository changes. | Navigate beyond the first page. Inspection leaves the current repository operation unchanged. |
 | Undo and restore | Undo the latest operation or restore the repository to a selected operation. | Preview the exact operation and explain undo versus restore. Require confirmation and refresh revisions, bookmarks, and operation history after success. A newer external operation invalidates the preview and requires review again. |
 | Inspect conflicts | Identify conflicted revisions and files and display the available conflict detail. | Conflicts introduced by history edits remain visible after refresh. Explain how to continue resolution with the jj CLI. An integrated conflict editor is deferred. |
@@ -57,15 +58,15 @@ Mutation targets are captured when the preview opens. If repository state change
 
 `a` previews absorb for the selected revision. Its confirmation shows the projected operation patch and the remaining source patch. After applying, selection follows the source if it survives; otherwise the app resets the filter and selects the working copy. `v` opens change evolution, where selecting a version previews its content and description changes. Both features are also available from Space. Evolution uses a fixed operation for all pages and previews until the view is closed.
 
-Space opens the action menu. `e` switches the working copy to the selected revision immediately, without a confirmation prompt. `b` opens bookmarks, `o` opens operation history, `u` previews undo, and `f` opens changed files. Menu items use arrow keys or `j`/`k` and Enter. The keyboard reference lists these bindings.
+Space opens the action menu. `e` switches the working copy to the selected revision immediately, without a confirmation prompt. `b` opens bookmarks, `o` opens operation history, `u` previews undo, and `f` opens changed files. Menu items use arrow keys or `j`/`k` and Enter. These are the default browse bindings. A validated `keybindings.json` file under the XDG configuration directory can replace or disable them; the keyboard reference, footer, and action hints show the effective mappings. Modal controls and text editing remain fixed. See the README for the schema and complete action list.
 
 Commands run through the installed `jj` executable with argument arrays, paging disabled, and color disabled. Repository data is parsed through an explicit JSON template, independent of a user's log template. Jujutsu remains responsible for immutable revisions and operation validation. Ordinary jj commands can snapshot working-copy files as part of their normal behavior.
 
 ## Outside the MVP
 
-- Fetch, push, remote authentication, and changing remote bookmarks.
+- Adding/removing remote configuration, an in-app credential manager, and bulk pushes. Configure authentication with Git credentials or SSH in the terminal.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
-- Revset completion, configurable keybindings, and custom themes.
+- Revset completion and custom themes.
 - Event-driven filesystem watching; automatic refresh uses polling.
 - Cross-platform and older-jj compatibility guarantees beyond the verified environment.
 

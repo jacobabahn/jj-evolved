@@ -1,3 +1,4 @@
+import { readKeybindings } from "./ui/keybindings";
 import { readThemePreference, saveThemePreference } from "./ui/theme-preference";
 import { parseArgs } from "node:util";
 import { parseThemeName, themes, themeNames } from "./ui/theme";
@@ -7,7 +8,7 @@ import { Repository } from "./repository/repository";
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
-  process.stdout.write(`Usage: bun start [--theme NAME] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nPress t to change themes or ? for keyboard help.\n`);
+  process.stdout.write(`Usage: bun start [--theme NAME] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nDefault keys: t changes themes; ? opens keyboard help.\nBrowse overrides: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config).\n`);
 } else {
   try {
     const { values, positionals } = parseArgs({
@@ -15,10 +16,11 @@ if (args.includes("--help") || args.includes("-h")) {
     });
     if (positionals.length > 1) throw new Error("Expected at most one repository path.");
     const theme = themes[parseThemeName(values.theme ?? process.env.JJ_EVOLVED_THEME ?? await readThemePreference())];
+    const bindings = await readKeybindings();
     const repository = await Repository.open(positionals[0] ?? process.cwd());
     const renderer = await createCliRenderer({ exitOnCtrlC: false });
     try {
-      const app = createApp(renderer, repository, theme, saveThemePreference);
+      const app = createApp(renderer, repository, theme, saveThemePreference, bindings);
       await app.start();
     } catch (error) {
       renderer.destroy();

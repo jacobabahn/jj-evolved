@@ -20,13 +20,14 @@ Both marked changes move together, preserving their order above `main`. Review t
 
 Recovery is part of that workflow: inspect earlier versions of a change, review an undo, or restore a repository operation from the same interface. For detailed file editing, the app hands off to your configured JJ tools.
 
-If your everyday work centers on reviewing and reshaping local stacks, that is the experience this project is built around. If you need in-app fetch and push, configurable keybindings, or scripted workflows, those are reasons to keep using another client today. See [current scope](#current-scope) for the remaining limits.
+If your everyday work centers on reviewing and reshaping local stacks, that is the experience this project is built around. It also supports reviewed fetch/push and configurable browse keys; scripted workflows and custom themes are still outside its scope. See [current scope](#current-scope) for the remaining limits.
 
 ## What you can do
 
 - **Explore your history.** Browse JJ’s native graph, inspect changed files and diffs, filter with revsets, and search descriptions, bookmarks, or IDs across the active revset.
 - **Edit a stack.** Create, describe, edit, rebase, squash, split, absorb, and abandon changes. Rebase and squash show the proposed and current graphs side by side before you apply.
 - **Manage local bookmarks.** Create, rename, delete, or move bookmarks, including by dragging a bookmark onto another revision.
+- **Sync with remotes.** Review fetches, push a selected bookmark, and manage bookmark tracking.
 - **Review and recover.** Browse a change’s evolution, inspect repository operations, undo the latest operation, or restore an earlier state.
 - **Use your existing editors.** Open JJ’s configured description, diff, and merge tools for external editing, interactive splits and squashes, and conflict resolution.
 
@@ -55,6 +56,8 @@ With no path, the app opens the current directory. It does not initialize a JJ r
 
 ## Getting around
 
+These are the default keys. See [custom keybindings](docs/usage.md#custom-keybindings) to change browse shortcuts.
+
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows | Select a revision |
@@ -62,6 +65,7 @@ With no path, the app opens the current directory. It does not initialize a JJ r
 | `p` | Hide or show the preview |
 | `f` | Browse changed files |
 | `/` | Filter the graph with a revset |
+| `L` | Load 200 more revisions |
 | `Ctrl+F` | Search revisions |
 | `@`, `[` / `]` | Jump to the working copy, a parent, or a child |
 | `Space` | Open actions for the selected revision |
@@ -82,10 +86,10 @@ See the [usage guide](docs/usage.md) for all controls, search and navigation beh
 
 jj-evolved is under active development and focuses on local repository work. It runs your installed `jj` executable and follows JJ’s configuration and repository rules.
 
-- **Remote operations:** use the CLI for fetch, push, and remote bookmark management. Remote bookmarks are visible but read-only in the app.
+- **Remote operations:** fetch, push, and bookmark tracking are available through **Git remotes** in the action menu or bookmark browser. Configure remotes and authentication through the CLI.
 - **Hunks and conflicts:** interactive hunk selection and conflict resolution use JJ’s configured external tools. There is no built-in hunk or merge editor.
-- **Customization:** keybindings are fixed. Revset completion and custom themes are not implemented.
-- **Large histories:** the initial graph displays up to 200 revisions. Search and destination pickers reach beyond that limit; diffs and search metadata are buffered in memory.
+- **Customization:** browse keybindings are configurable; prompts retain their displayed controls. Revset completion, scripted workflows, and custom themes are not implemented.
+- **Large histories:** the graph starts with 200 revisions; `L` loads more. Search and destination pickers cover the full history; diffs and search metadata are buffered in memory.
 - **Compatibility:** broader platform, terminal, and JJ-version coverage is still being established.
 
 While browsing, automatic refresh runs `jj status`, which can snapshot pending working-copy edits. Reviewed actions reject stale repository state if another command or file edit changes it before confirmation. JJ remains responsible for validating operations.

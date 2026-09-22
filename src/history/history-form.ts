@@ -43,7 +43,7 @@ export class HistoryForm extends ActionOverlay {
     this.title = draft.kind === "rebase" ? " Rebase change " : " Squash changes ";
     this.context.content = highlightJjText(`Source ${shortChangeId(source)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([source]), getTheme(this.ctx));
     this.controls = new SelectRenderable(ctx, { id: "history-fields", height: draft.kind === "rebase" ? 3 : 4, flexShrink: 0, showDescription: false, wrapSelection: true, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, selectedBackgroundColor: getTheme(this.ctx).selected, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
-    this.choices = new SelectRenderable(ctx, { id: "history-choices", flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedBackgroundColor: getTheme(this.ctx).selected, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
+    this.choices = new SelectRenderable(ctx, { id: "history-choices", height: 0, minHeight: 1, flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedBackgroundColor: getTheme(this.ctx).selected, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
     this.input = new InputRenderable(ctx, { id: "history-description", visible: false, textColor: getTheme(this.ctx).text, backgroundColor: getTheme(this.ctx).selected, focusedBackgroundColor: getTheme(this.ctx).panel, focusedTextColor: getTheme(this.ctx).text, placeholderColor: getTheme(this.ctx).muted });
     this.preview = new ScrollBoxRenderable(ctx, { id: "history-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, title: " Preview ", borderColor: getTheme(this.ctx).border });
     this.text = new ChangePreview(ctx, "history-preview-text", "Choose a destination to preview the result.");
@@ -148,7 +148,7 @@ export class HistoryForm extends ActionOverlay {
         this.mode = { kind: "destination", revisions: matches };
         this.choices.options = matches.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
         this.choices.setSelectedIndex(0);
-        this.report(matches.length ? "" : "No matching destinations. Edit the search or Escape to clear it.");
+        this.report(matches.length ? `${matches.length} destinations` : "No matching destinations. Edit the search or Escape to clear it.");
       };
       render(revisions);
       this.destinationSearch = new RevisionSearch(this.ctx, "history-destination-search", this.choices, revisions, bookmarks, render);
@@ -171,12 +171,12 @@ export class HistoryForm extends ActionOverlay {
       this.hints.content = "Enter save description  Ctrl-D keep destination text  Esc back";
       return;
     }
-    this.report("");
+    if (this.mode.kind !== "destination") this.report("");
     this.choices.setSelectedIndex(0);
     this.choices.visible = true;
     this.preview.visible = false;
     this.choices.focus();
-    this.hints.content = this.mode.kind === "destination" ? "j/k choose · / search · arrows move · Enter select · Esc back" : "j/k choose  Enter select  Esc back to form";
+    this.hints.content = this.mode.kind === "destination" ? "j/k choose · / search all destinations · Enter select · Esc back" : "j/k choose  Enter select  Esc back to form";
   }
 
   private renderFiles() {

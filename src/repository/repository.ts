@@ -1,10 +1,11 @@
-import { label, rebaseScopeSummary, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { remoteList, prepareRemote, applyRemote } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
 import { projectedAbsorb } from "./projected-absorb";
 import { projectedTree } from "./projected-tree";
-import { runInteractive, openHunk } from "./external-tools";
+import { runInteractive, openHunk, editDescription } from "./external-tools";
 import { runSplit } from "./split";
 import { terminalText } from "../terminal-text";
 
@@ -30,8 +31,8 @@ export class Repository {
     return new Repository((await run(path, ["root"])).trim());
   }
 
-  async snapshot(revset: string, readOnly = false): Promise<Snapshot> {
-    return logSnapshot(this.root, revset, readOnly);
+  async snapshot(revset: string, readOnly = false, limit = 200): Promise<Snapshot> {
+    return logSnapshot(this.root, revset, readOnly, limit);
   }
 
   async navigationRevisions(revset: string): Promise<Revision[]> {
@@ -86,9 +87,11 @@ export class Repository {
 
   async bookmarks(): Promise<Bookmark[]> {
     const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
-      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ']\n'`]);
-    return tuples(output).map(([name, remote, targets, conflict]) => ({ name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict) }));
+      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ ']\n'`]);
+    return tuples(output).map(([name, remote, targets, conflict, tracked]) => ({ tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict) }));
   }
+
+  async remotes(): Promise<Remote[]> { return remoteList(this.root); }
 
   async files(revision: Revision): Promise<ChangedFile[]> {
     const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
@@ -107,6 +110,14 @@ export class Repository {
     await runInteractive(this.root, action);
   }
 
+  async editDescription(revision: Revision): Promise<void> {
+    await this.status();
+    if (!(await this.snapshot(`present(${revision.changeId})`)).revisions.some(current => current.commitId === revision.commitId)) {
+      throw new Error("The selected revision has changed. Refresh and select it again.");
+    }
+    await editDescription(this.root, revision);
+  }
+
   async openHunk(revision: Revision): Promise<void> {
     await openHunk(this.root, revision);
   }
@@ -123,8 +134,17 @@ export class Repository {
       }
     }
     let summary: string;
+    let remoteUrl: string | undefined;
     let rebasing: Revision[] = [];
     switch (action.kind) {
+      case "git-fetch":
+      case "git-push":
+      case "bookmark-track":
+      case "bookmark-untrack": {
+        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId);
+        summary = preview.summary; remoteUrl = preview.remoteUrl;
+        break;
+      }
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
       case "new": summary = `Create an empty child of ${label(action.parent)}`; break;
       case "edit": summary = `Make this change the working copy:\n${label(action.revision)}`; break;
@@ -174,12 +194,13 @@ export class Repository {
     const trees = action.kind === "rebase" || action.kind === "squash"
       ? await projectedTree(this.root, action, operationId, rebasing) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
-    return { action, operationId, summary: terminalText(summary), trees };
+    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }) };
   }
 
   async apply(prepared: PreparedMutation): Promise<void> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
+    if (prepared.remoteUrl !== undefined) { await applyRemote(this.root, prepared); return; }
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
   }

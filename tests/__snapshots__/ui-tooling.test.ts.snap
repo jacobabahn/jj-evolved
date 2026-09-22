@@ -23,27 +23,27 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 "▀─ Help ─────────────────────────────────────┐
 Keyboard reference                           │
                                              │
-j / k or arrows   Move through revisions     │
-Tab               Switch revisions / preview │
+j/down / k/up      Move through revisions    │
+Tab                Switch revisions / preview│
 focus                                        │
-p                 Toggle preview pane        │
-Page Up / Down    Scroll preview             │
-s                 Working-copy status        │
-r                 Refresh history            │
-/                 Enter a revset; empty      │
+p                  Toggle preview pane       │
+PgUp / PgDn        Scroll preview            │
+s                  Working-copy status       │
+r                  Refresh history           │
+/                  Enter a revset; empty     │
 restores all()                               │
-Ctrl-F            Search descriptions,       │
+^F                 Search descriptions,      │
 bookmarks and ID prefixes in revset          │
-Ctrl-N / Ctrl-P   Next / previous search     │
+^N / ^P            Next / previous search    │
 match, wrapping                              │
-@ / [ / ]         Jump to working copy /     │
+@ / [ / ]          Jump to working copy /    │
 parent / child                               │
-Ctrl-O            Return from temporary revea│
-Escape            Clear accepted search      │
+^O                 Return from temporary     │
+reveal                                       │
+Esc                Clear accepted search     │
 * / +             Search match / revision    │
 outside active revset                        │
-d                 Describe selected change,  │
-including multiline                          │
+d                  Describe selected change, │
 ─────────────────────────────────────────────┘"
 `;
 
@@ -82,27 +82,27 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 "▀─ Help ─────────────────────────────────────────────────────────────┐
 Keyboard reference                                                   │
                                                                      │
-j / k or arrows   Move through revisions                             │
-Tab               Switch revisions / preview focus                   │
-p                 Toggle preview pane                                │
-Page Up / Down    Scroll preview                                     │
-s                 Working-copy status                                │
-r                 Refresh history                                    │
-/                 Enter a revset; empty restores all()               │
-Ctrl-F            Search descriptions, bookmarks and ID prefixes in  │
+j/down / k/up      Move through revisions                            │
+Tab                Switch revisions / preview focus                  │
+p                  Toggle preview pane                               │
+PgUp / PgDn        Scroll preview                                    │
+s                  Working-copy status                               │
+r                  Refresh history                                   │
+/                  Enter a revset; empty restores all()              │
+^F                 Search descriptions, bookmarks and ID prefixes in │
 revset                                                               │
-Ctrl-N / Ctrl-P   Next / previous search match, wrapping             │
-@ / [ / ]         Jump to working copy / parent / child              │
-Ctrl-O            Return from temporary reveal                       │
-Escape            Clear accepted search                              │
+^N / ^P            Next / previous search match, wrapping            │
+@ / [ / ]          Jump to working copy / parent / child             │
+^O                 Return from temporary reveal                      │
+Esc                Clear accepted search                             │
 * / +             Search match / revision outside active revset      │
-d                 Describe selected change, including multiline      │
-e                 Make selection the working copy immediately        │
-R / S             Choose rebase / squash destination in the graph    │
-a                 Preview absorb into mutable ancestors              │
-v                 Browse selected change's evolution                 │
+d                  Describe selected change, including multiline     │
+e                  Make selection the working copy immediately       │
+R / S              Choose rebase / squash destination in the graph   │
+a                  Preview absorb into mutable ancestors             │
+v                  Browse selected change's evolution                │
 Drag change       Drop onto another change to preview rebase         │
-n                 Create an empty child of selection                 │
+n                  Create an empty child of selection                │
 ─────────────────────────────────────────────────────────────────────┘"
 `;
 

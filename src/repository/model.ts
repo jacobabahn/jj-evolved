@@ -18,9 +18,17 @@ export interface Snapshot {
   root: string;
   revisions: Revision[];
   graph: GraphRow[];
+  hasMore?: boolean;
 }
 
+export interface Remote { name: string; url: string }
+export type RemoteMutation =
+  | { kind: "git-fetch"; remote: string }
+  | { kind: "git-push"; remote: string; name: string }
+  | { kind: "bookmark-track" | "bookmark-untrack"; remote: string; name: string };
+
 export type Mutation =
+  | RemoteMutation
   | { kind: "describe"; revision: Revision; description: string }
   | { kind: "new"; parent: Revision }
   | { kind: "edit" | "abandon" | "absorb"; revision: Revision }
@@ -37,10 +45,10 @@ export type InteractiveAction =
   | { kind: "split" | "describe" | "resolve"; revision: Revision };
 
 export interface Operation { id: string; description: string; time: string; current: boolean }
-export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean }
+export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean; tracked?: boolean }
 export interface ChangedFile { path: string; status: string }
 export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string> }
-export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null }
+export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null; remoteUrl?: string }
 
 export function shortChangeId(revision: Pick<Revision, "changeId" | "changePrefix">): string {
   return revision.changeId.slice(0, Math.max(8, revision.changePrefix.length));

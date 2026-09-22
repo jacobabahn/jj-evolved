@@ -69,3 +69,22 @@ test("short change prefixes come from JJ and resolve beyond the filtered graph",
     expect(filtered.revisions[0]?.changePrefix).toBe(collision.changePrefix);
   } finally { await f.cleanup(); }
 }, 15_000);
+
+test("expanded history includes older revisions and coherent native graph rows", async () => {
+  const f = await fixture();
+  try {
+    for (let i = 0; i < 202; i++) await f.jj("new", "-m", `Page ${i}`);
+    const repo = await Repository.open(f.path);
+    const page = await repo.snapshot("all()", true);
+    expect(page.revisions).toHaveLength(200);
+    expect(page.hasMore).toBe(true);
+    const expanded = await repo.snapshot("all()", true, 400);
+    expect(expanded.revisions).toHaveLength(205);
+    expect(expanded.hasMore).toBe(false);
+    expect(expanded.revisions.slice(0, 200)).toEqual(page.revisions);
+    expect(expanded.graph.filter(row => row.kind === "revision").map(row => row.kind === "revision" && row.revision.commitId)).toEqual(expanded.revisions.map(revision => revision.commitId));
+    expect(expanded.graph.filter(row => row.kind === "description")).toHaveLength(205);
+    expect(expanded.revisions.some(revision => revision.description.includes("Initial feature"))).toBe(true);
+    await expect(repo.snapshot("all()", true, 0)).rejects.toThrow("positive integer");
+  } finally { await f.cleanup(); }
+}, 15_000);

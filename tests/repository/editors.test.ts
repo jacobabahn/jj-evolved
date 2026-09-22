@@ -64,7 +64,7 @@ for (const kind of ["describe", "resolve"] as const) {
         {
           screen.mockInput.pressKey(" ");
           const choices = screen.renderer.root.findDescendantById("action-choices") as SelectRenderable;
-          const index = choices.options.findIndex(option => option.name === (kind === "describe" ? "Describe in editor" : "Resolve conflicts"));
+          const index = choices.options.findIndex(option => option.name === (kind === "describe" ? "Edit description in editor" : "Resolve conflicts"));
           expect(index).toBeGreaterThanOrEqual(0);
           choices.setSelectedIndex(index);
           screen.mockInput.pressEnter();
