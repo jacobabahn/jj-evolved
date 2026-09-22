@@ -1,116 +1,103 @@
 # jj-evolved
 
-A keyboard-driven terminal workspace for Jujutsu, built with Bun and OpenTUI. Browse a jj-style revision graph and changed files, edit history, manage local bookmarks, and inspect or restore repository operations.
+A keyboard-driven terminal UI for [Jujutsu](https://jj-vcs.dev/). Browse your revision graph, review diffs, and reshape a stack with previews of the resulting history.
 
-## Run
+Built with TypeScript, [Bun](https://bun.sh/), and [OpenTUI](https://github.com/anomalyco/opentui).
 
-Install [Bun](https://bun.sh/) 1.3 or later and [Jujutsu](https://docs.jj-vcs.dev/latest/install-and-setup/). The current build is tested with jj 0.45.1.
+## Why jj-evolved?
+
+Choosing a JJ client is largely about how you like to work with history. jj-evolved focuses on making the effects of an edit visible before you apply it, while keeping the revision graph at the center of the workflow.
+
+Select a change, choose where it should go, and compare the proposed graph with the current one. Rebase and squash previews include bookmarks and conflict markers. With descendant rebasing, the app marks the moving changes and shows the full scope, including revisions outside the visible graph. Menus and editing forms keep the graph visible behind them so you can retain your place.
+
+For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `R`, use Tab to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
+
+![Rebase preview showing Add login and Test login moving onto main, with the proposed tree on the left and current tree on the right.](docs/images/rebase-preview.png)
+
+*Captured from the app’s OpenTUI renderer using a disposable example repository.*
+
+Both marked changes move together, preserving their order above `main`. Review the new ancestry and any conflict markers before pressing Enter again to apply. Escape returns to destination selection; the preview itself leaves your working copy and live operation history unchanged.
+
+Recovery is part of that workflow: inspect earlier versions of a change, review an undo, or restore a repository operation from the same interface. For detailed file editing, the app hands off to your configured JJ tools.
+
+If your everyday work centers on reviewing and reshaping local stacks, that is the experience this project is built around. If you need in-app fetch and push, configurable keybindings, or scripted workflows, those are reasons to keep using another client today. See [current scope](#current-scope) for the remaining limits.
+
+## What you can do
+
+- **Explore your history.** Browse JJ’s native graph, inspect changed files and diffs, filter with revsets, and search descriptions, bookmarks, or IDs across the active revset.
+- **Edit a stack.** Create, describe, edit, rebase, squash, split, absorb, and abandon changes. Rebase and squash show the proposed and current graphs side by side before you apply.
+- **Manage local bookmarks.** Create, rename, delete, or move bookmarks, including by dragging a bookmark onto another revision.
+- **Review and recover.** Browse a change’s evolution, inspect repository operations, undo the latest operation, or restore an earlier state.
+- **Use your existing editors.** Open JJ’s configured description, diff, and merge tools for external editing, interactive splits and squashes, and conflict resolution.
+
+The app refreshes automatically as you work in other terminals. You can hide the preview to give the graph more room and choose from seven built-in themes, including one that uses your terminal’s colors.
+
+## Try it
+
+Run from source with **Bun 1.3+** and **`jj` on your PATH**. The verified toolchain is Bun 1.4.2 and jj 0.45.1; compatibility with other JJ versions is not yet guaranteed.
 
 ```bash
+git clone https://github.com/jacobabahn/jj-evolved.git
+cd jj-evolved
 bun install
 bun run demo
 ```
 
-The demo creates a temporary repository with example changes and deletes it when you quit. Edits inside the demo are disposable.
+The demo opens a temporary repository with example changes. Experiment freely: the repository and your demo edits are deleted when you quit.
 
-To work in an existing jj repository:
+To open your own existing JJ repository, run this from the source checkout:
 
 ```bash
 bun start /path/to/your/jj-repository
 ```
 
-With no path, the app opens the current directory. The source checkout is not automatically initialized as a jj repository. `bun dev /path/to/your/jj-repository` runs with source watching.
+With no path, the app opens the current directory. It does not initialize a JJ repository for you. Press `q` or `Ctrl+C` to quit.
 
-## Themes
-
-Press `t` to open the theme picker. Use `j`/`k` or the arrow keys to preview each theme across the app. Enter saves your choice; Escape restores the previous theme.
-
-Available themes are Terminal, Dark, Light, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, and Vesper. The default Terminal theme inherits your terminal's foreground, background, and ANSI palette. It marks the selected revision with an arrow and diff additions and deletions with colored signs, preserving the terminal background.
-
-Your selection is saved in `$XDG_CONFIG_HOME/jj-evolved/theme`, or `~/.config/jj-evolved/theme` when that variable is unset. It applies across repositories and to `bun run demo`.
-
-You can also choose a theme at startup:
-
-```bash
-bun start --theme gruvbox /path/to/repository
-bun start --theme tokyonight /path/to/repository
-bun start --theme catppuccin /path/to/repository
-bun start --theme vesper /path/to/repository
-```
-
-Startup precedence is `--theme`, then `JJ_EVOLVED_THEME`, then the saved choice, then `terminal`. The picker can change any startup choice for the current session. An explicit flag or environment variable still takes precedence on the next launch. Choose Terminal in the picker to save terminal colors as your preference.
-
-The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo Night](https://github.com/folke/tokyonight.nvim), [Catppuccin Mocha](https://github.com/catppuccin/palette), and [Vesper](https://github.com/raunofreiberg/vesper) to the app's graph and diff colors.
-
-## Keyboard controls
+## Getting around
 
 | Key | Action |
 | --- | --- |
-| `j` / `k`, arrows | Move through revisions |
-| Tab | Switch focus between revisions and preview |
-| `p` | Hide/show preview; the graph expands when hidden |
-| Page Up / Page Down | Scroll preview |
-| `/` | Enter a revset; empty restores `all()` |
-| `Ctrl+F` | Search descriptions, bookmarks, and ID prefixes throughout the active revset |
-| `Ctrl+N` / `Ctrl+P` | Next / previous accepted search match, wrapping at either end |
-| `@` | Select the working copy without editing it |
-| `[` / `]` | Jump to a parent / child; choose when there are several |
-| `Ctrl+O` | Return to the original view after revealing a distant or filtered target |
-| `Escape` | Cancel search editing, or clear an accepted search |
-| `s` | Show working-copy status |
-| `r` | Refresh repository data |
-| `d` | Edit a multiline description in the app |
-| `e` | Switch the working copy to the selected revision immediately |
-| `n` | Confirm creation of a child of the selected revision |
-| `R` / `S` | Start inline rebase / squash; choose a destination in the graph and Enter previews |
-| `a` | Preview absorbing the selected change's edits into mutable ancestors |
-| `v` | Browse the selected change's evolution and preview each version's rewrite diff |
-| Space | Open revision actions: edit, describe, rebase, squash, split, bookmark creation, abandon |
-| `b` | Browse bookmarks; move, rename, or delete a local bookmark |
-| `o` | Browse operation history, inspect an operation, or restore its state |
-| `u` | Preview undo of the latest operation |
-| `f` | Browse the selected revision's changed files |
-| Enter | Return to the revision preview |
-| `t` | Preview and save a theme |
-| `?` | Show help |
-| Escape | Cancel a prompt |
-| `q`, Ctrl-C | Quit |
+| `j` / `k`, arrows | Select a revision |
+| `Tab` | Switch between the graph and preview |
+| `p` | Hide or show the preview |
+| `f` | Browse changed files |
+| `/` | Filter the graph with a revset |
+| `Ctrl+F` | Search revisions |
+| `@`, `[` / `]` | Jump to the working copy, a parent, or a child |
+| `Space` | Open actions for the selected revision |
+| `d` | Edit a multiline description |
+| `e` | Immediately make the selected revision the working copy |
+| `n` | Create a child change after confirmation |
+| `R` / `S` | Choose a rebase / squash destination in the graph |
+| `a` / `v` | Preview absorb / browse change evolution |
+| `b` / `o` / `u` | Bookmarks / operation history / undo preview |
+| `t` | Choose a theme |
+| `?` | Show keyboard help |
 
-Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. Enter, `s`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
+For a first history edit, select a change, press `R`, and select its new parent. Press Enter to review the proposed graph, then Enter again to apply. Escape backs out before applying. Use `u` to review an undo afterward.
 
-Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
+See the [usage guide](docs/usage.md) for all controls, search and navigation behavior, editor integration, and theme settings.
 
-Press `a`, or choose **Absorb into ancestors** from the Space menu, to distribute fixes across a stack. JJ chooses the mutable ancestors that last changed the affected lines. The preview shows the actual proposed operation changes and the edits remaining in the source. Edits JJ cannot assign stay in the source. Enter applies the preview; Escape cancels; `p` refreshes a stale preview. An emptied source with no description is abandoned. The app keeps the source selected if it survives, otherwise selects the working copy.
+## Current scope
 
-Press `v`, or choose **Change evolution** from the Space menu, to browse previous versions of a change. Use `j` and `k` to select a version and Page Up or Page Down to scroll its patch. The patch shows what that version changed relative to its predecessors, including description edits. The earliest version shows its creation patch. **Load older versions** expands beyond the initial 50 entries. Browsing stays at the repository state captured when the view opened and does not snapshot pending edits or switch the working copy. Close the view to resume automatic refresh; reopen it to include newer work.
+jj-evolved is under active development and focuses on local repository work. It runs your installed `jj` executable and follows JJ’s configuration and repository rules.
 
-For inline rebase or squash, press `R` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. Tab toggles rebase between the selected change and its descendants. With descendants enabled, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
+- **Remote operations:** use the CLI for fetch, push, and remote bookmark management. Remote bookmarks are visible but read-only in the app.
+- **Hunks and conflicts:** interactive hunk selection and conflict resolution use JJ’s configured external tools. There is no built-in hunk or merge editor.
+- **Customization:** keybindings are fixed. Revset completion and custom themes are not implemented.
+- **Large histories:** the initial graph displays up to 200 revisions. Search and destination pickers reach beyond that limit; diffs and search metadata are buffered in memory.
+- **Compatibility:** broader platform, terminal, and JJ-version coverage is still being established.
 
-Rebase and squash previews show the proposed tree on the left and the current tree on the right with native graph lines, local bookmarks, and conflict markers. Both columns scroll together; long labels are clipped to preserve tree alignment. The view includes relevant descendants and parents, up to 40 revisions. Previewing does not change the working copy or live operation log.
+While browsing, automatic refresh runs `jj status`, which can snapshot pending working-copy edits. Reviewed actions reject stale repository state if another command or file edit changes it before confirmation. JJ remains responsible for validating operations.
 
-The rebase and squash menu forms show the source, destination, options, and preview in one form. Enter edits the selected field. Choose **Apply** after reviewing the preview. You can change a field without restarting the action. Press `p` to refresh a stale preview. With descendant scope enabled, the rebase form shows the number of moving changes and their full list before you choose a destination. Rebase previews mark moving changes in both trees and include the full list below them, even when the graph limits omit some descendants.
+## Development
 
-For individual files or hunks, open the Space menu and choose **Squash interactively** or **Split interactively**. Squash asks you to choose a destination change first. The app pauses while JJ opens your configured diff editor, followed by your description editor when needed. Save and close the editor to let JJ apply your selection. Cancel using the editor's controls or Ctrl-C. The app resumes and refreshes the graph when JJ exits.
+```bash
+bun install
+bun dev /path/to/your/jj-repository
+```
 
-To review a change in [Hunk](https://github.com/modem-dev/hunk/), install its CLI with `npm install -g hunkdiff`, then select the change and choose **Open in Hunk** from the Space menu. The app runs `hunk show` with the selected commit in the repository directory. Close Hunk to return to the app and refresh the graph. Hunk is optional and must be on your PATH.
-
-Errors stay inside the overlay and preserve your input. Success closes it, selects the resulting revision when available, and briefly shows a confirmation above the graph. The footer contains keyboard hints. If another command or working-copy edit changes the repository before confirmation, the app rejects the stale action.
-
-Rebase can move one change or its descendants. Squash accepts all files or a selected group and lets you keep or replace the destination description. In its description field, Ctrl-D restores the choice to keep the destination text. Split selects whole files for the first change and asks for its description. Then choose **Keep original description** for the second change, or **Edit second description** to enter a replacement (which may be empty). Keeping the original preserves multiline text. Review both descriptions and file groups before applying; undo reverses the entire split in one operation. Enter toggles files in the file-selection menu; select **Continue** when the group is ready.
-
-Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Bookmark entries with a remote name are read-only. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
-
-The initial revision graph shows at most 200 revisions. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `r` remains available for an immediate reload. Press `d` to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. **Describe in editor** in the Space menu still opens JJ’s configured external editor.
-
-Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
-
-While browsing, the app checks for changes every two seconds. It runs `jj status` to snapshot pending working-copy edits and checks the operation ID before reloading. Automatic updates preserve the active revset, accepted search, selection where possible, graph and preview scroll, temporary navigation views, and pane visibility. Checks pause during prompts, action reviews, drags, and external tools; stale in-flight results are discarded if you interact. Failed checks report an error and retry. No filesystem watcher is required.
-
-For a conflicted revision, choose **Resolve conflicts** from the Space menu to open JJ’s configured merge tool. The app resumes and refreshes after either editor exits, including after a failure or cancellation, and keeps the edited revision selected when it remains in the current view. JJ controls saving and cancellation; unsupported conflicts and editor failures are reported in the app.
-
-The log uses jj's native ancestry lines and node symbols. Remote operations and an in-app hunk editor remain outside the MVP.
-
-## Verify
+Before submitting a change, run:
 
 ```bash
 bun run typecheck
@@ -118,16 +105,22 @@ bun run check:architecture
 bun test
 ```
 
-Tests require `jj` on PATH. They use temporary repositories and exercise real CLI operations and the OpenTUI renderer.
+Tests require `jj` on your PATH and use disposable repositories. They exercise real JJ operations and the OpenTUI renderer, including keyboard workflows and snapshots.
 
-For styled snapshots, recorded UI scenarios, and a browsable gallery:
+To inspect recorded UI scenarios:
 
 ```bash
-bun run test:ui
 bun run ui gallery
 bun run ui record rebase
 ```
 
-Open the printed HTML path to inspect frames, play a recording, or switch scenarios. Scenario failures save a replay under `artifacts/ui/failures/`. See [the UI tooling guide](docs/ui-tooling.md) to add scenarios and update snapshots.
+The commands print a path to a browsable HTML gallery or recording. See [UI tooling](docs/ui-tooling.md) for adding scenarios and updating snapshots.
 
-See the [feature specification](docs/features.md) for scope and acceptance criteria, and the [implementation record](docs/implementation.md) for the architecture decision.
+Bug reports and pull requests are welcome. For bugs, include your OS, terminal, Bun and JJ versions, and steps to reproduce with a small example repository when possible.
+
+## Documentation
+
+- [Usage guide](docs/usage.md) — controls, themes, and detailed workflows.
+- [Feature specification](docs/features.md) — scope and acceptance criteria.
+- [Implementation notes](docs/implementation.md) — architecture and repository operation handling.
+- [UI tooling](docs/ui-tooling.md) — renderer tests, snapshots, and recordings.
