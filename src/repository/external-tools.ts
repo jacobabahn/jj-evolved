@@ -13,7 +13,11 @@ async function foreground(root: string, args: string[], env: NodeJS.ProcessEnv, 
 export async function runInteractive(root: string, action: InteractiveAction): Promise<void> {
   const args = action.kind === "squash"
     ? ["squash", "--interactive", "--from", action.revision.commitId, "--into", action.destination.commitId]
-    : ["split", "--interactive", "--revision", action.revision.commitId];
+    : action.kind === "split"
+      ? ["split", "--interactive", "--revision", action.revision.commitId]
+      : action.kind === "describe"
+        ? ["describe", "--editor", action.revision.commitId]
+        : ["resolve", "--revision", action.revision.commitId];
   await foreground(root, ["jj", "--no-pager", ...args], { ...process.env, JJ_INTERACTIVE: "1" },
     code => `Interactive ${action.kind} did not complete (exit code ${code}).`);
 }

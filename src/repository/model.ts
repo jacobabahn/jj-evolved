@@ -34,7 +34,7 @@ export type Mutation =
 
 export type InteractiveAction =
   | { kind: "squash"; revision: Revision; destination: Revision }
-  | { kind: "split"; revision: Revision };
+  | { kind: "split" | "describe" | "resolve"; revision: Revision };
 
 export interface Operation { id: string; description: string; time: string; current: boolean }
 export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean }

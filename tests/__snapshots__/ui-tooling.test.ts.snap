@@ -26,6 +26,7 @@ Keyboard reference                           │
 j / k or arrows   Move through revisions     │
 Tab               Switch revisions / preview │
 focus                                        │
+p                 Toggle preview pane        │
 Page Up / Down    Scroll preview             │
 s                 Working-copy status        │
 r                 Refresh history            │
@@ -42,8 +43,7 @@ Escape            Clear accepted search      │
 * / +             Search match / revision    │
 outside active revset                        │
 d                 Describe selected change,  │
-single line                                  │
-e                 Make selection the working │
+including multiline                          │
 ─────────────────────────────────────────────┘"
 `;
 
@@ -84,6 +84,7 @@ Keyboard reference                                                   │
                                                                      │
 j / k or arrows   Move through revisions                             │
 Tab               Switch revisions / preview focus                   │
+p                 Toggle preview pane                                │
 Page Up / Down    Scroll preview                                     │
 s                 Working-copy status                                │
 r                 Refresh history                                    │
@@ -95,14 +96,13 @@ Ctrl-N / Ctrl-P   Next / previous search match, wrapping             │
 Ctrl-O            Return from temporary reveal                       │
 Escape            Clear accepted search                              │
 * / +             Search match / revision outside active revset      │
-d                 Describe selected change, single line              │
+d                 Describe selected change, including multiline      │
 e                 Make selection the working copy immediately        │
 R / S             Choose rebase / squash destination in the graph    │
 a                 Preview absorb into mutable ancestors              │
 v                 Browse selected change's evolution                 │
 Drag change       Drop onto another change to preview rebase         │
 n                 Create an empty child of selection                 │
-Space             Action menu: edit, rebase, squash, split, abandon  │
 ─────────────────────────────────────────────────────────────────────┘"
 `;
 

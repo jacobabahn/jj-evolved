@@ -33,6 +33,7 @@ export class RevisionLog extends ScrollBoxRenderable {
   private bookmarkSources = new Map<Renderable, BookmarkSource>();
   private revisionSources = new Map<Renderable, Revision>();
   private drag: Drag | null = null;
+  get dragActive() { return this.drag !== null; }
   private dropIndex: number | null = null;
 
   constructor(context: RenderContext) {

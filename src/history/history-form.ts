@@ -1,3 +1,4 @@
+import { RevisionSearch } from "../ui/revision-search";
 import { MutationReview } from "./mutation-review";
 import { getTheme } from "../ui/theme";
 import { highlightJjText, revisionPrefixes } from "../ui/jj-highlighting";
@@ -25,6 +26,7 @@ export class HistoryForm extends ActionOverlay {
   private readonly preview: ScrollBoxRenderable;
   private readonly text: ChangePreview;
   private readonly comparison: TreeComparisonView;
+  private destinationSearch: RevisionSearch | null = null;
   private destination: Revision | null = null;
   private mode: Mode = { kind: "fields" };
   private disposed = false;
@@ -121,6 +123,8 @@ export class HistoryForm extends ActionOverlay {
   }
 
   private returnToFields() {
+    this.destinationSearch?.dispose();
+    this.destinationSearch = null;
     this.mode = { kind: "fields" };
     this.choices.visible = false;
     this.input.visible = false;
@@ -136,11 +140,19 @@ export class HistoryForm extends ActionOverlay {
     if (index === this.controls.options.length - 1) { await this.submit(); return; }
     if (index === 0) {
       this.report("Loading destinations…");
-      const snapshot = await this.repository.snapshot("all()");
+      const [candidates, bookmarks] = await Promise.all([this.repository.navigationRevisions("all()"), this.repository.bookmarks()]);
       if (this.disposed || request !== this.fieldRequest) return;
-      const revisions = snapshot.revisions.filter(item => item.commitId !== this.source.commitId);
+      const revisions = candidates.filter(item => item.commitId !== this.source.commitId);
       this.mode = { kind: "destination", revisions };
-      this.choices.options = revisions.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
+      const render = (matches: Revision[]) => {
+        this.mode = { kind: "destination", revisions: matches };
+        this.choices.options = matches.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
+        this.choices.setSelectedIndex(0);
+        this.report(matches.length ? "" : "No matching destinations. Edit the search or Escape to clear it.");
+      };
+      render(revisions);
+      this.destinationSearch = new RevisionSearch(this.ctx, "history-destination-search", this.choices, revisions, bookmarks, render);
+      this.fields.add(this.destinationSearch.input);
     } else if (this.draft.kind === "rebase") {
       this.draft.descendants = !this.draft.descendants;
       this.renderFields();
@@ -164,7 +176,7 @@ export class HistoryForm extends ActionOverlay {
     this.choices.visible = true;
     this.preview.visible = false;
     this.choices.focus();
-    this.hints.content = "j/k choose  Enter select  Esc back to form";
+    this.hints.content = this.mode.kind === "destination" ? "j/k choose · / search · arrows move · Enter select · Esc back" : "j/k choose  Enter select  Esc back to form";
   }
 
   private renderFiles() {
@@ -212,6 +224,7 @@ export class HistoryForm extends ActionOverlay {
 
   handleKey(key: KeyEvent): "close" | "handled" {
     if (this.review.applying) { key.preventDefault(); return "handled"; }
+    if (!this.loadingField && this.destinationSearch?.handleKey(key)) return "handled";
     if (key.name === "escape") {
       key.preventDefault();
       ++this.fieldRequest;
@@ -248,5 +261,5 @@ export class HistoryForm extends ActionOverlay {
     return "handled";
   }
 
-  dispose() { if (this.disposed) return; this.disposed = true; this.review.cancel(); this.destroyRecursively(); }
+  dispose() { if (this.disposed) return; this.disposed = true; this.destinationSearch?.dispose(); this.review.cancel(); this.destroyRecursively(); }
 }

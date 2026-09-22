@@ -48,6 +48,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | --- | --- |
 | `j` / `k`, arrows | Move through revisions |
 | Tab | Switch focus between revisions and preview |
+| `p` | Hide/show preview; the graph expands when hidden |
 | Page Up / Page Down | Scroll preview |
 | `/` | Enter a revset; empty restores `all()` |
 | `Ctrl+F` | Search descriptions, bookmarks, and ID prefixes throughout the active revset |
@@ -58,7 +59,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `Escape` | Cancel search editing, or clear an accepted search |
 | `s` | Show working-copy status |
 | `r` | Refresh repository data |
-| `d` | Edit the selected revision's single-line description |
+| `d` | Edit a multiline description in the app |
 | `e` | Switch the working copy to the selected revision immediately |
 | `n` | Confirm creation of a child of the selected revision |
 | `R` / `S` | Start inline rebase / squash; choose a destination in the graph and Enter previews |
@@ -75,11 +76,13 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | Escape | Cancel a prompt |
 | `q`, Ctrl-C | Quit |
 
+Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. Enter, `s`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
+
 Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
 
 Press `a`, or choose **Absorb into ancestors** from the Space menu, to distribute fixes across a stack. JJ chooses the mutable ancestors that last changed the affected lines. The preview shows the actual proposed operation changes and the edits remaining in the source. Edits JJ cannot assign stay in the source. Enter applies the preview; Escape cancels; `p` refreshes a stale preview. An emptied source with no description is abandoned. The app keeps the source selected if it survives, otherwise selects the working copy.
 
-Press `v`, or choose **Change evolution** from the Space menu, to browse previous versions of a change. Use `j` and `k` to select a version and Page Up or Page Down to scroll its patch. The patch shows what that version changed relative to its predecessors, including description edits. The earliest version shows its creation patch. **Load older versions** expands beyond the initial 50 entries. Browsing stays at the repository state captured when the view opened and does not snapshot pending edits or switch the working copy. Close the view and refresh with `r` to include newer work.
+Press `v`, or choose **Change evolution** from the Space menu, to browse previous versions of a change. Use `j` and `k` to select a version and Page Up or Page Down to scroll its patch. The patch shows what that version changed relative to its predecessors, including description edits. The earliest version shows its creation patch. **Load older versions** expands beyond the initial 50 entries. Browsing stays at the repository state captured when the view opened and does not snapshot pending edits or switch the working copy. Close the view to resume automatic refresh; reopen it to include newer work.
 
 For inline rebase or squash, press `R` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. Tab toggles rebase between the selected change and its descendants. With descendants enabled, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
 
@@ -97,7 +100,13 @@ Rebase can move one change or its descendants. Squash accepts all files or a sel
 
 Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Bookmark entries with a remote name are read-only. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
 
-The initial revision list and destination pickers show at most 200 revisions. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. Refresh manually after commands in another terminal. Existing multiline descriptions can be preserved during squash but require the jj CLI for editing.
+The initial revision graph shows at most 200 revisions. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `r` remains available for an immediate reload. Press `d` to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. **Describe in editor** in the Space menu still opens JJ’s configured external editor.
+
+Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
+
+While browsing, the app checks for changes every two seconds. It runs `jj status` to snapshot pending working-copy edits and checks the operation ID before reloading. Automatic updates preserve the active revset, accepted search, selection where possible, graph and preview scroll, temporary navigation views, and pane visibility. Checks pause during prompts, action reviews, drags, and external tools; stale in-flight results are discarded if you interact. Failed checks report an error and retry. No filesystem watcher is required.
+
+For a conflicted revision, choose **Resolve conflicts** from the Space menu to open JJ’s configured merge tool. The app resumes and refreshes after either editor exits, including after a failure or cancellation, and keeps the edited revision selected when it remains in the current view. JJ controls saving and cancellation; unsupported conflicts and editor failures are reported in the app.
 
 The log uses jj's native ancestry lines and node symbols. Remote operations and an in-app hunk editor remain outside the MVP.
 
