@@ -66,7 +66,7 @@ Commands run through the installed `jj` executable with argument arrays, paging 
 
 - Adding/removing remote configuration, an in-app credential manager, and bulk pushes. Configure authentication with Git credentials or SSH in the terminal.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
-- Revset completion and custom themes.
+- Full revset language completion (custom aliases and argument-aware suggestions) and custom themes. Basic completion for bookmarks and common functions is implemented.
 - Event-driven filesystem watching; automatic refresh uses polling.
 - Cross-platform and older-jj compatibility guarantees beyond the verified environment.
 

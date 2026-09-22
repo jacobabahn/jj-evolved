@@ -139,6 +139,23 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "completion", title: "Revset bookmark completion",
+    async run(ui) {
+      await ui.resize(80, 24);
+      ui.key("/");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+      await ui.type("ancestors(fea");
+      await ui.until("feature@git");
+      await ui.capture("Revset suggestions at 80x24");
+      ui.key("TAB");
+      await ui.type(")");
+      ui.key("RETURN");
+      await ui.until("revset: ancestors(feature)");
+      await ui.until("Ready.");
+      await ui.capture("Completed expression applied");
+    },
+  },
+  {
     name: "multiline-description", title: "Edit a multiline description in the configured editor",
     async run(ui) {
       const description = "Explain the feature\n\nKeep context and implementation details together.\nPreserve Unicode: café 日本語.\n";

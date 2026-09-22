@@ -164,3 +164,18 @@ menus, destination selection, and history forms retain their displayed fixed
 controls: `j`/`k` or arrows to choose, Enter to submit, Escape to cancel, and their
 existing field/preview controls. Text inputs retain normal editing keys; typing a
 custom browse shortcut inserts text. Ctrl-C remains available everywhere.
+
+## Revset completion
+
+In `/`, type a bookmark or function prefix and press Tab to insert a suggestion.
+Tab cycles forward and Shift-Tab cycles backward; the visible list tracks the
+selection. Enter applies the expression, and Escape cancels the prompt. Invalid
+expressions leave the current history view intact so you can correct the input.
+Completion replaces only the token at the cursor, preserving the surrounding
+expression. Local and remote bookmark suggestions use the most recently loaded
+repository state; press `r` before opening `/` to refresh that state.
+
+Suggestions are computed locally without running commands or contacting remotes.
+Bookmark names are quoted when needed, and a small list of common built-in jj
+functions is included. This is token completion, not a full revset parser: custom
+aliases, argument-aware suggestions, and syntax validation remain jj's job.
