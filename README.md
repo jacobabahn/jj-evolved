@@ -8,7 +8,7 @@ Built with TypeScript, [Bun](https://bun.sh/), and [OpenTUI](https://github.com/
 
 Choosing a JJ client is largely about how you like to work with history. jj-evolved focuses on making the effects of an edit visible before you apply it, while keeping the revision graph at the center of the workflow.
 
-Select a change, choose where it should go, and compare the proposed graph with the current one. Rebase and squash previews include bookmarks and conflict markers. With descendant rebasing, the app marks the moving changes and shows the full scope, including revisions outside the visible graph. Menus and editing forms keep the graph visible behind them so you can retain your place.
+Select a change, choose where it should go, and compare the proposed graph with the current one. Rebase and squash previews include bookmarks and conflict markers. With descendant rebasing, the app marks the moving changes and shows the full scope, including revisions outside the visible graph. Menus and editing forms keep the graph visible behind them so you can retain your place. In nested menus, Escape steps back one level and restores the previous selection; at the top level it closes the menu.
 
 For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `r`, press `s` to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
 

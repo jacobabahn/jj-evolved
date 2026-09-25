@@ -61,14 +61,14 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Show help |
-| Escape | Cancel a prompt |
+| Escape | Go back one overlay level, or cancel the top-level prompt |
 | `q`, Ctrl-C | Quit |
 
 ## Preview and overlays
 
 Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
 
-Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
+Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview. Escape returns to the previous picker with its selection restored; `h` and Left do the same while choosing an item. Text prompts and confirmations opened from a picker also return one level on Escape. The hint shows **Esc back** when a parent exists and **Esc close** or **Esc cancel** at the top level. Applying an action closes the entire flow.
 
 ## Absorb
 
@@ -106,7 +106,7 @@ Drag a local `[bookmark]` label in the log onto another change to preview a move
 
 The initial revision graph loads 200 revisions. Press `Ctrl+L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `Ctrl+R` remains available for an immediate reload. Press Enter to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. `D`, or **Edit description in editor** in the Space menu, opens JJ’s configured external editor.
 
-Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
+Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then returns to the previous picker or closes a top-level picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
 
 ## Automatic refresh
 

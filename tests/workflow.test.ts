@@ -63,6 +63,15 @@ test("destination search reaches old revisions in bookmark, history form and inl
     t.screen.mockInput.pressEnter();
     await t.text("Confirm operation");
     await t.escape();
+    await t.text("Bookmark target");
+    expect(t.node<SelectRenderable>("action-choices").getSelectedOption()?.name).toContain("Initial feature");
+    await t.escape();
+    await t.text("Move bookmark");
+    await t.escape();
+    await t.text("Esc close");
+    expect(t.node<SelectRenderable>("action-choices").getSelectedOption()?.name).toBe("work");
+    await t.escape();
+    expect(t.node<any>("action-overlay").visible).toBe(false);
     for (const action of ["Rebase change", "Squash changes"]) {
       t.screen.mockInput.pressKey(" ");
       await t.choose(action);

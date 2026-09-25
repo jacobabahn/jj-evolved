@@ -2,6 +2,7 @@ import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
 import { strict as assert } from "node:assert";
 import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
+import type { SelectRenderable } from "@opentui/core";
 
 type Scenario = { bindings?: Keybindings; name: string; title: string; run: (ui: UiFixture) => Promise<void> };
 
@@ -121,6 +122,10 @@ export const scenarios: Scenario[] = [
       await ui.until("Push only bookmark: feature");
       await ui.capture("Review exact bookmark targets before publishing");
       const before = await ui.repo.operationId();
+      ui.key("ESCAPE");
+      await ui.until("Review before publishing");
+      await ui.capture("Escape returns to the push bookmark list");
+      for (const level of ["Push bookmark", "demo-remote.git", "Fetch and push with a review"]) { ui.key("ESCAPE"); await ui.until(level); }
       ui.key("ESCAPE");
       await ui.until("Empty change.");
       assert.equal(await ui.repo.operationId(), before);
@@ -365,6 +370,31 @@ export const scenarios: Scenario[] = [
           ui.repo.diff = originalDiff;
         }
       }
+    },
+  },
+  {
+    name: "picker-back", title: "Escape steps back one picker level at a time",
+    async run(ui) {
+      const selected = () => (ui.node("action-choices") as SelectRenderable).getSelectedOption()?.name;
+      ui.key("b");
+      await ui.until("Git remotes");
+      await ui.until("Ready.");
+      assert(ui.screen.captureCharFrame().includes("Esc close"));
+      await ui.capture("Bookmark list");
+      ui.choose("feature");
+      await ui.until("Move bookmark");
+      assert(ui.screen.captureCharFrame().includes("Esc back"));
+      ui.key("j");
+      await ui.capture("Actions for the feature bookmark");
+      ui.key("ESCAPE");
+      await ui.until("Esc close");
+      assert.equal(selected(), "feature");
+      assert(!ui.screen.captureCharFrame().includes("Move bookmark"));
+      await ui.capture("Escape returns to the bookmark list with feature still selected");
+      ui.key("ESCAPE");
+      await ui.until("Empty change.");
+      assert.equal(ui.screen.renderer.root.findDescendantById("action-overlay")?.visible, false);
+      await ui.capture("Second Escape closes the overlay");
     },
   },
 ];
