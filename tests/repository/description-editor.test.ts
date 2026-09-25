@@ -22,7 +22,7 @@ for (const mode of ["save", "unchanged", "fail"] as const) {
       expect(ui.screen.captureCharFrame()).toContain("revset: feature");
       if (mode !== "save") expect(await ui.repo.operationId()).toBe(before);
       ui.key("RETURN");
-      await ui.until("Shift/Alt+Enter newline");
+      await ui.until("Enter newline");
       expect((ui.node("description-input") as TextareaRenderable).plainText).toBe((mode === "save" ? replacement : original).trimEnd());
       ui.key("ESCAPE");
       await Bun.sleep(60);
@@ -48,11 +48,13 @@ test("inline describe opens with the cursor at the end of the existing descripti
   ui.key("L");
   await ui.prompt("feature");
   ui.key("RETURN");
-  await ui.until("Shift/Alt+Enter newline");
+  await ui.until("Enter newline");
   const input = ui.node("description-input") as TextareaRenderable;
   expect(input.cursorOffset).toBe("Initial feature".length);
   ui.key("!");
   await Bun.sleep(30);
   expect(input.plainText).toBe("Initial feature!");
+  ui.key("ESCAPE");
+  await ui.until("Unsaved changes");
   ui.key("ESCAPE");
 }), 15_000);
