@@ -24,9 +24,9 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
   }
   const text = (value: string) => until(() => screen.captureCharFrame().includes(value));
   async function choose(name: string, id = "action-choices") {
-    await until(() => node<SelectRenderable>(id)?.options.some(option => option.name === name));
+    await until(() => node<SelectRenderable>(id)?.options.some(option => (option.value ?? option.name) === name));
     const choices = node<SelectRenderable>(id);
-    choices.setSelectedIndex(choices.options.findIndex(option => option.name === name));
+    choices.setSelectedIndex(choices.options.findIndex(option => (option.value ?? option.name) === name));
     screen.mockInput.pressEnter();
   }
   async function escape() { screen.mockInput.pressEscape(); await Bun.sleep(60); }
@@ -72,7 +72,7 @@ test("destination search reaches old revisions in bookmark, history form and inl
     expect(t.node<SelectRenderable>("action-choices").getSelectedOption()?.name).toBe("work");
     await t.escape();
     expect(t.node<any>("action-overlay").visible).toBe(false);
-    for (const action of ["Rebase change", "Squash changes"]) {
+    for (const action of ["Rebase", "Squash"]) {
       t.screen.mockInput.pressKey(" ");
       await t.choose(action);
       t.screen.mockInput.pressEnter();

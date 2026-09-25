@@ -1,4 +1,4 @@
-import { RevisionSearch, matchingRevisions } from "./ui/revision-search";
+import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
 import { actionForKey, defaultBindings, keyLabel, type Keybindings, type Action } from "./ui/keybindings";
 import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { MutationReview } from "./history/mutation-review";
@@ -19,7 +19,7 @@ import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { shortChangeId, type InteractiveAction, type Mutation, type Revision, type Snapshot, type Bookmark, type ChangedFile } from "./repository/model";
 
-type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string> };
+type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string>; key?: string; header?: boolean };
 
 type Prompt =
   | { kind: "browse" }
@@ -30,7 +30,7 @@ type Prompt =
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision; original: string; discard: boolean }
   | { kind: "new"; parent: Revision }
-  | { kind: "picker"; title: string; choices: Choice[]; attach?: () => void }
+  | { kind: "picker"; title: string; all: Choice[]; choices: Choice[]; attach?: () => void }
   | { kind: "files"; revision: Revision; files: ChangedFile[] }
   | { kind: "text"; label: string; accept: (value: string) => void }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
@@ -67,7 +67,7 @@ ${row(["absorb"])} Preview absorb into mutable ancestors
 ${row(["evolution"])} Browse selected change's evolution
 Drag change       Drop onto another change to preview rebase
 ${row(["new"])} Create an empty child of selection
-${row(["actions"])} Action menu: edit, rebase, squash, split, abandon, status
+${row(["actions"])} Action menu grouped by task, showing each item's key; / filters by name
 ${row(["bookmarks"])} Local and remote bookmarks
 ${row(["git"])} Git remotes: fetch and push
 ${row(["operations"])} Operation history, inspection and restore
@@ -162,7 +162,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let searchBookmarks: Bookmark[] = [];
   let searchRequest = 0;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
-  let destinationSearch: RevisionSearch | null = null;
+  let pickerSearch: RevisionSearch | ListSearch<Choice> | null = null;
   let prompt: Prompt = { kind: "browse" };
   let levels: (() => void)[] = [];
   let completionItems: Completion[] = [];
@@ -581,8 +581,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function pushLevel() {
     const current = prompt;
     if (current.kind === "picker") {
-      const index = chooser.getSelectedIndex(), hints = overlay.hints.content;
-      levels.push(() => { pick(current.title, current.choices, { attach: current.attach, replace: true }); chooser.setSelectedIndex(index); overlay.hints.content = hints; });
+      const chosen = current.choices[chooser.getSelectedIndex()], hints = overlay.hints.content;
+      levels.push(() => {
+        pick(current.title, current.all, { attach: current.attach, replace: true });
+        let index = chosen ? current.all.indexOf(chosen) : -1;
+        if (index < 0 && chosen) index = current.all.findIndex(choice => choice.name === chosen.name && choice.description === chosen.description);
+        if (index >= 0) chooser.setSelectedIndex(index);
+        overlay.hints.content = hints;
+      });
     } else if (current.kind === "text") {
       const value = input.value;
       levels.push(() => openPrompt(current, current.label, value));
@@ -591,8 +597,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function goBack() {
     const level = levels.pop();
     if (!level) { closePrompt(); void loadPreview(); return; }
-    destinationSearch?.dispose();
-    destinationSearch = null;
+    pickerSearch?.dispose();
+    pickerSearch = null;
     review.cancel();
     descriptionInput.blur();
     descriptionInput.visible = false;
@@ -600,8 +606,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     level();
   }
   function closePrompt() {
-    destinationSearch?.dispose();
-    destinationSearch = null;
+    pickerSearch?.dispose();
+    pickerSearch = null;
     suggestions.visible = false;
     if (prompt.kind === "form") prompt.form.dispose();
     prompt = { kind: "browse" };
@@ -629,6 +635,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function openPrompt(next: Exclude<Prompt, { kind: "browse" }>, label: string, value = "") {
     pushLevel();
+    pickerSearch?.dispose();
+    pickerSearch = null;
     activateOverlay(label);
     chooser.visible = false;
     prompt = next;
@@ -820,21 +828,39 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       loading: `${choice.name}\n\n${choice.description}`, read: choice.preview });
     else showOverlay(`${choice.name}\n\n${choice.description}`, "Selection");
   }
+  function showChoices(choices: Choice[]) {
+    if (prompt.kind !== "picker") return;
+    prompt.choices = choices;
+    const width = Math.max(0, ...choices.map(choice => choice.key?.length ?? 0));
+    chooser.options = choices.map(choice => ({
+      value: choice.name,
+      name: terminalText(choice.header ? `── ${choice.name} ──` : width ? `${(choice.key ?? "").padEnd(width)}  ${choice.name}` : choice.name),
+      description: terminalText(width && !choice.header ? `${" ".repeat(width + 2)}${choice.description}` : choice.description),
+    }));
+    chooser.setSelectedIndex(Math.max(0, choices.findIndex(choice => !choice.header)));
+    previewChoice();
+  }
+  function moveChoice(direction: 1 | -1) {
+    if (prompt.kind !== "picker") return;
+    let index = chooser.getSelectedIndex() + direction;
+    while (prompt.choices[index]?.header) index += direction;
+    if (prompt.choices[index]) chooser.setSelectedIndex(index);
+  }
   function pick(title: string, choices: Choice[], options: { attach?: () => void; replace?: boolean } = {}) {
     if (!options.replace) pushLevel();
+    pickerSearch?.dispose();
+    pickerSearch = null;
     activateOverlay(title);
     input.blur();
     input.visible = false;
     promptLabel.visible = false;
-    prompt = { kind: "picker", title, choices, attach: options.attach };
+    prompt = { kind: "picker", title, all: choices, choices, attach: options.attach };
     chooser.visible = true;
     chooser.showDescription = true;
-    chooser.options = choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
-    chooser.setSelectedIndex(0);
     chooser.focus();
     overlay.hints.content = `j/k choose  Enter select  ${escHint("close")}  PgUp/Dn preview`;
+    showChoices(choices);
     options.attach?.();
-    previewChoice();
   }
   function destination(title: string, source: Revision | null, accept: (revision: Revision) => void, searchImmediately = false) {
     void run("Loading destinations…", async () => {
@@ -845,23 +871,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const choices = (items: Revision[]): Choice[] => items.map(item => ({
         name: `${item.changeId.slice(0, 8)} ${item.description.split("\n")[0] || "(no description)"}`,
         description: `${item.commitId.slice(0, 12)} ${item.bookmarks}`,
-        choose: () => { destinationSearch?.dispose(); destinationSearch = null; accept(item); },
+        choose: () => { pickerSearch?.dispose(); pickerSearch = null; accept(item); },
         preview: () => repository.diff(item),
       }));
       pick(title, choices(revisions), { attach: () => {
-        destinationSearch = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, matches => {
+        pickerSearch = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, matches => {
           if (prompt.kind !== "picker") return;
-          prompt.choices = choices(matches);
-          chooser.options = prompt.choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
-          chooser.setSelectedIndex(0);
-          if (matches.length) previewChoice();
-          else showOverlay("No matching destinations. Edit the search or press Escape to clear it.", "Destinations");
+          showChoices(choices(matches));
+          if (!matches.length) showOverlay("No matching destinations. Edit the search or press Escape to clear it.", "Destinations");
           overlay.report(`${matches.length} destinations`);
         });
-        overlay.fields.add(destinationSearch.input);
+        overlay.fields.add(pickerSearch.input);
         overlay.hints.content = `j/k choose · / search all destinations · Enter select · ${escHint("close")}`;
       } });
-      if (searchImmediately) destinationSearch?.start();
+      if (searchImmediately) pickerSearch?.start();
     });
   }
   function chooseFiles(revision: Revision, title: string, accept: (paths: string[]) => void) {
@@ -1068,28 +1091,55 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     });
   }
 
+  function matchingChoices(choices: Choice[], query: string) {
+    const needle = query.toLowerCase();
+    const matches: Choice[] = [];
+    for (const choice of choices) {
+      if (choice.header && matches.at(-1)?.header) matches.pop();
+      if (choice.header || choice.name.toLowerCase().includes(needle)) matches.push(choice);
+    }
+    if (matches.at(-1)?.header) matches.pop();
+    return matches;
+  }
   function actions(revision: Revision) {
-    pick("Actions", [
-      { name: "Edit change", description: "Make selection the working copy", choose: () => confirm({ kind: "edit", revision }) },
-      { name: "Describe change", description: `Edit the selected change's description (${bindingLabel("describe")})`, choose: () => describe(revision) },
-      { name: "Edit description in editor", description: `Edit the full multiline description in JJ's configured editor (${bindingLabel("describeExternal")})`, choose: () => describeExternally(revision) },
-      ...(revision.conflict ? [{ name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
-      { name: "Rebase change", description: `Source, destination, scope and preview (${bindingLabel("rebase")} for inline)`, choose: () => openHistory(revision, "rebase", false) },
-      { name: "Rebase change and descendants", description: "Move the selected stack", choose: () => openHistory(revision, "rebase", true) },
-      { name: "Squash changes", description: "Source, destination, files and description", choose: () => openHistory(revision, "squash") },
-      { name: "Squash interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => destination("Squash interactively into", revision, destination => editInteractively({ kind: "squash", revision, destination })) },
-      { name: "Split interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => editInteractively({ kind: "split", revision }) },
-      { name: "Split change", description: `Put selected files in a first change (${bindingLabel("split")})`, choose: () => splitChange(revision) },
-      { name: "Git remotes", description: `Fetch, push and select a remote (${bindingLabel("git")})`, choose: showRemotes },
-      { name: "Create bookmark", description: "Name the selected revision", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
-      { name: "Abandon change", description: `Remove selection and rebase its descendants (${bindingLabel("abandon")})`, choose: () => confirm({ kind: "abandon", revision }) },
-      { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
-      { name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
-      { name: "Absorb into ancestors", description: `Preview automatic fixups into mutable ancestors (${bindingLabel("absorb")})`, choose: () => confirm({ kind: "absorb", revision }) },
-      { name: "Change evolution", description: `Browse previous versions and their rewrite diffs (${bindingLabel("evolution")})`, choose: () => showEvolution(revision) },
-      { name: "Working-copy status", description: `Show jj status in the preview (${bindingLabel("status")})`, choose: () => { closePrompt(); showStatus(); } },
-      { name: "Load more revisions", description: `Load 200 more revisions, keeping selection (${bindingLabel("loadMore")})`, choose: () => { closePrompt(); void run("Loading more history…", loadMoreHistory); } },
-    ]);
+    const key = (action?: Action) => action && bindings[action].length ? keyLabel(bindings, action, true) : "—";
+    const header = (name: string): Choice => ({ name, description: "", header: true, choose: () => {} });
+    const choices: Choice[] = [
+      header("Edit"),
+      { key: key("describe"), name: "Describe", description: "Edit the selected change's description in the app", choose: () => describe(revision) },
+      { key: key("describeExternal"), name: "Describe in editor", description: "Edit the full multiline description in JJ's configured editor", choose: () => describeExternally(revision) },
+      { key: key("edit"), name: "Edit (make working copy)", description: "Make the selected change the working copy", choose: () => confirm({ kind: "edit", revision }) },
+      { key: key("new"), name: "New child", description: "Create an empty child of the selected change", choose: () => openPrompt({ kind: "new", parent: revision }, `Create child of ${revision.changeId.slice(0, 8)}?`) },
+      header("History"),
+      { key: key("rebase"), name: "Rebase", description: "Choose source, destination, scope and preview in a form", choose: () => openHistory(revision, "rebase", false) },
+      { key: key(), name: "Rebase with descendants", description: "Move the selected change and its descendants", choose: () => openHistory(revision, "rebase", true) },
+      { key: key("squash"), name: "Squash", description: "Choose destination, files and description in a form", choose: () => openHistory(revision, "squash") },
+      { key: key(), name: "Squash in diff editor", description: "Choose a destination, then files or hunks in JJ's configured diff editor", choose: () => destination("Squash in diff editor into", revision, destination => editInteractively({ kind: "squash", revision, destination })) },
+      { key: key("split"), name: "Split (choose files)", description: "Put selected files in a first change", choose: () => splitChange(revision) },
+      { key: key(), name: "Split in diff editor", description: "Choose files or hunks in JJ's configured diff editor", choose: () => editInteractively({ kind: "split", revision }) },
+      { key: key("absorb"), name: "Absorb into ancestors", description: "Preview automatic fixups into mutable ancestors", choose: () => confirm({ kind: "absorb", revision }) },
+      { key: key("abandon"), name: "Abandon", description: "Remove the selected change and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
+      ...(revision.conflict ? [{ key: key(), name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
+      header("Bookmarks & remotes"),
+      { key: key(), name: "Create bookmark", description: "Name the selected change", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
+      { key: key("git"), name: "Git remotes", description: "Fetch, push and select a remote", choose: showRemotes },
+      header("Inspect"),
+      { key: key("files"), name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
+      { key: key(), name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
+      { key: key("evolution"), name: "Change evolution", description: "Browse previous versions and their rewrite diffs", choose: () => showEvolution(revision) },
+      header("Repository"),
+      { key: key("status"), name: "Working-copy status", description: "Show jj status in the preview", choose: () => { closePrompt(); showStatus(); } },
+      { key: key("undo"), name: "Undo", description: "Preview undo of the latest operation", choose: undo },
+      { key: key("loadMore"), name: "Load more revisions", description: "Load 200 more revisions, keeping selection", choose: () => { closePrompt(); void run("Loading more history…", loadMoreHistory); } },
+    ];
+    pick("Actions", choices, { attach: () => {
+      pickerSearch = new ListSearch(renderer, "action-search", { moveDown: () => moveChoice(1), moveUp: () => moveChoice(-1), focus: () => chooser.focus() }, choices, matchingChoices, matches => {
+        showChoices(matches);
+        if (!matches.length) showOverlay("No matching actions. Edit the filter or press Escape to clear it.", "Actions");
+      }, "Filter actions by name");
+      overlay.fields.add(pickerSearch.input);
+      overlay.hints.content = `j/k choose  / filter  Enter select  ${escHint("close")}  PgUp/Dn preview`;
+    } });
   }
   function describeExternally(revision: Revision) {
     openExternal("JJ's description editor", () => repository.editDescription(revision), true);
@@ -1236,7 +1286,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (prompt.kind !== "browse") {
-      if (!isBusy() && prompt.kind === "picker" && destinationSearch?.handleKey(key)) return;
+      if (!isBusy() && prompt.kind === "picker" && pickerSearch?.handleKey(key)) return;
       if (isBusy()) { key.preventDefault(); return; }
       if (prompt.kind === "describe" && prompt.discard && key.name !== "escape") { prompt.discard = false; overlay.report(""); }
       if (prompt.kind === "describe" && key.name === "escape" && !prompt.discard && descriptionInput.plainText !== prompt.original) { key.preventDefault(); prompt.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
@@ -1247,9 +1297,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (prompt.kind === "picker") {
         key.preventDefault();
         if (isBusy()) return;
-        if (key.name === "j" || key.name === "down") chooser.moveDown();
-        else if (key.name === "k" || key.name === "up") chooser.moveUp();
-        else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; choice?.choose(); }
+        if (key.name === "j" || key.name === "down") moveChoice(1);
+        else if (key.name === "k" || key.name === "up") moveChoice(-1);
+        else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
       }
       else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.action); }
       else if (prompt.kind === "revset" && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
@@ -1336,7 +1386,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     clearTimeout(searchTimer);
     ++searchRequest;
     if (prompt.kind === "form") prompt.form.dispose();
-    destinationSearch?.dispose();
+    pickerSearch?.dispose();
     previews.dispose();
     review.dispose();
     renderer.off("focus", onTerminalFocus);
