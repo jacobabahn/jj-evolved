@@ -63,6 +63,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Open scrollable help; Escape or `?` closes it |
+| `Ctrl-E` | Show the last error in full; Escape or `d` returns to the diff |
 | Escape | Go back one overlay level, or cancel the top-level prompt |
 | `q`, Ctrl-C | Quit |
 
@@ -216,3 +217,5 @@ aliases, argument-aware suggestions, and syntax validation remain jj's job.
 Help shows the active preset (`custom` when file overrides are present). Use j/k or arrows to scroll and PgUp/PgDn to page. Sections separate navigation, preview controls, editing, history, bookmarks, symbols, and fixed prompt keys. Unbound actions available in the action menu are marked `(Space menu)`.
 
 Preset precedence is `--keys PRESET`, then `JJ_EVOLVED_KEYS`, then the file’s `preset`, then `jjui`. File `bindings` overrides apply on top of the selected preset. For example, `bun start --keys legacy` selects the earlier layout without editing the configuration.
+
+Inline rebase and squash retitle and recolor the revisions pane while choosing a destination. Tab adds `(focused)` to the preview title and changes the footer to scrolling controls. Confirmation previews keep the source context and use the operation name, with apply/cancel controls in the bottom hint. Read-only navigation preserves the message line; successful operations use a short `Ready.` message. Errors show their first line and the full-error shortcut. `lastError` is rebindable and defaults to `ctrl+e` in both presets; it also retains errors reported inside action overlays.
