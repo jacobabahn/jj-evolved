@@ -37,10 +37,10 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 ││^R                Refresh history now; external changes also  │
 ││                  refresh automatically                       │
 ││?                 Show this help                              │
+││^E                Show the last error in full; Esc or d       │
+││                  returns to the diff                         │
 ││q / Ctrl-C        Quit                                        │
 ││                                                              │
-││Preview pane                                                  │
-││p                 Hide or show the preview; the graph expand  │
 ││                                                              │
 │└─────────────────────────────────────────────────────────────┘│
 │Esc/? close  j/k scroll  PgUp/PgDn page                        │
@@ -92,6 +92,7 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 ││^L                Load 200 more revisions, keeping the selection                               ││
 ││^R                Refresh history now; external changes also refresh automatically             ││
 ││?                 Show this help                                                               ││
+││^E                Show the last error in full; Esc or d returns to the diff                    ││
 ││q / Ctrl-C        Quit                                                                         ││
 ││                                                                                               ││
 ││Preview pane                                                                                   ││
@@ -100,7 +101,6 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 ││^P / ^N           Scroll the preview by line, keeping graph focus                              ││
 ││^U / ^D           Scroll the preview by half page                                              ││
 ││d                 Show the selected revision's diff                                            ││
-││l/Right           Changed files in the left pane; j/k file, Enter focus diff, h/Left/Esc       ││
 ││                                                                                               ││
 │└───────────────────────────────────────────────────────────────────────────────────────────────┘│
 │Esc/? close  j/k scroll  PgUp/PgDn page                                                          │
