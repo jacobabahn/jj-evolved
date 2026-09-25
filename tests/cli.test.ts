@@ -57,3 +57,18 @@ test("startup reads the saved theme and explicit choices override it", async () 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("key presets validate before terminal startup and CLI overrides environment", async () => {
+  const env = { ...process.env, PATH: "/nonexistent", JJ_EVOLVED_KEYS: "invalid" };
+  const invalid = await cli([], env);
+  expect(invalid.stderr).toContain('Unknown preset "invalid" from JJ_EVOLVED_KEYS');
+  expect(invalid.stderr).toContain("jjui, legacy");
+  expect(invalid.stdout).toBe("");
+  expect((await cli(["--keys", "invalid"], env)).stderr).toContain("from --keys");
+  for (const preset of ["jjui", "legacy"]) {
+    expect((await cli(["--keys", preset], env)).stderr).toContain("jj is not installed");
+    expect((await cli([], { ...env, JJ_EVOLVED_KEYS: preset })).stderr).toContain("jj is not installed");
+  }
+  expect((await cli(["--keys"], env)).code).toBe(1);
+  expect((await cli(["--help"], env)).stdout).toContain("--keys PRESET");
+});
