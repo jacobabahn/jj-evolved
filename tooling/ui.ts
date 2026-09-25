@@ -1,7 +1,7 @@
 import type { Keybindings } from "../src/ui/keybindings";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { SelectRenderable, type Renderable } from "@opentui/core";
+import { SelectRenderable, type Renderable, type SelectOption } from "@opentui/core";
 import { createTestRenderer, type MockInput } from "@opentui/core/testing";
 import { createApp } from "../src/app";
 import { Repository } from "../src/repository/repository";
@@ -82,11 +82,12 @@ export async function createUiFixture(options: FixtureOptions = {}) {
         const chooser = node(id);
         if (!(chooser instanceof SelectRenderable)) throw new Error(`UI target is not a selection menu: ${id}`);
         if (!chooser.focused) throw new Error(`UI menu does not have keyboard focus: ${id}`);
-        const destination = chooser.options.findIndex(option => option.name === name);
+        const label = (option: SelectOption | null) => option?.value ?? option?.name;
+        const destination = chooser.options.findIndex(option => label(option) === name);
         if (destination < 0) throw new Error(`Missing choice: ${name}`);
         recording.mark(`choose ${name} in ${id}`);
         for (let index = 0; index < chooser.options.length; index++) {
-          if (chooser.getSelectedOption()?.name === name) { screen.mockInput.pressEnter(); return; }
+          if (label(chooser.getSelectedOption()) === name) { screen.mockInput.pressEnter(); return; }
           screen.mockInput.pressKey(chooser.getSelectedIndex() < destination ? "j" : "k");
         }
         throw new Error(`Could not reach choice: ${name}`);

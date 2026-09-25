@@ -15,7 +15,7 @@ for (const mode of ["save", "unchanged", "fail"] as const) {
       await ui.prompt("feature");
       const before = await ui.repo.operationId();
       ui.key(" ");
-      ui.choose("Edit description in editor");
+      ui.choose("Describe in editor");
       await ui.until(mode === "fail" ? "Description editor did not complete" : "Ready.");
       expect(await Bun.file(editor.original).text()).toContain(original);
       expect((await ui.repo.snapshot("feature")).revisions[0]?.description).toBe(mode === "save" ? replacement : original);

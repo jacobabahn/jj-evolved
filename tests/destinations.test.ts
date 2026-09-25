@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { InputRenderable, SelectRenderable } from "@opentui/core";
 import { withUiFixture } from "../tooling/ui";
 
-for (const action of ["Rebase change", "Squash changes"]) {
+for (const action of ["Rebase", "Squash"]) {
   test(`${action} destination search excludes source, handles no matches and cancels`, () => withUiFixture("destination-search", async ui => {
     const operation = await ui.repo.operationId();
     ui.key(" "); ui.choose(action);
@@ -28,7 +28,7 @@ for (const action of ["Rebase change", "Squash changes"]) {
 test("interactive destination picker searches full IDs and cancels without editing", () => withUiFixture("interactive-destination-search", async ui => {
   const revision = (await ui.repo.snapshot("feature")).revisions[0]!;
   const operation = await ui.repo.operationId();
-  ui.key(" "); ui.choose("Squash interactively");
+  ui.key(" "); ui.choose("Squash in diff editor");
   await ui.until("/ search all destinations");
   ui.key("/"); await ui.type(revision.commitId);
   await ui.until("1 destinations");

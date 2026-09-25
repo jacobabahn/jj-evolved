@@ -1,4 +1,5 @@
 import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
+import { SelectRenderable } from "@opentui/core";
 import { strict as assert } from "node:assert";
 import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
@@ -72,7 +73,7 @@ export const scenarios: Scenario[] = [
       assert(first.hasMore);
       assert(!first.revisions.some(revision => revision.description.includes("Initial feature")));
       const before = await ui.repo.operationId();
-      ui.key(" "); ui.choose("Rebase change");
+      ui.key(" "); ui.choose("Rebase");
       await ui.until("Destination: Choose a revision");
       ui.key("RETURN");
       await ui.until("/ search all destinations");
@@ -162,9 +163,9 @@ export const scenarios: Scenario[] = [
       const editor = await descriptionEditor(ui.f, description);
       try {
         ui.key(" ");
-        await ui.until("Edit description in editor");
+        await ui.until("Describe in editor");
         await ui.capture("Edit the full description from the action menu");
-        ui.choose("Edit description in editor");
+        ui.choose("Describe in editor");
         await ui.until("Ready.");
         assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description, description);
         await ui.until("Keep context and implementation details together.");
@@ -299,7 +300,7 @@ export const scenarios: Scenario[] = [
       const source = (await ui.repo.snapshot("@")).revisions[0];
       assert(source);
       ui.key(" ");
-      ui.choose("Rebase change");
+      ui.choose("Rebase");
       await ui.until("Destination: Choose a revision");
       ui.key("RETURN");
       await ui.until("j/k choose");
@@ -324,6 +325,42 @@ export const scenarios: Scenario[] = [
       assert.deepEqual((await ui.repo.snapshot(source.changeId)).revisions[0]?.parents, ["0".repeat(40)]);
       assert.equal(ui.screen.renderer.root.findDescendantById("history-form"), undefined);
       await ui.capture("Rebase applied once and form closed");
+    },
+  },
+  {
+    name: "action-menu", title: "Grouped action menu with a key column and filtering",
+    async run(ui) {
+      const operation = await ui.repo.operationId();
+      ui.key(" ");
+      await ui.until("── Edit ──");
+      const chooser = ui.node("action-choices");
+      assert(chooser instanceof SelectRenderable);
+      const selected = () => chooser.getSelectedOption()?.value;
+      assert.equal(chooser.options[0]?.name, "── Edit ──");
+      assert.equal(chooser.getSelectedOption()?.name, "Enter  Describe");
+      assert.equal(selected(), "Describe");
+      await ui.capture("Grouped actions with a shortcut column");
+      ui.key("j"); ui.key("j"); ui.key("j"); ui.key("j");
+      await ui.until("▶ r      Rebase");
+      assert.equal(selected(), "Rebase");
+      assert(chooser.options.slice(1, chooser.getSelectedIndex()).some(option => option.name === "── History ──"));
+      await ui.capture("Moving down skips the History header");
+      ui.key("/"); await ui.type("spl");
+      await ui.until("Split in diff editor");
+      assert.deepEqual(chooser.options.map(option => option.value), ["History", "Split (choose files)", "Split in diff editor"]);
+      assert.equal(selected(), "Split (choose files)");
+      await ui.capture("Filtering with spl keeps only the split actions");
+      ui.key("ESCAPE");
+      await ui.until("▶ Enter  Describe");
+      assert.equal(chooser.options.length > 20, true);
+      assert.equal(ui.node("action-choices").focused, true);
+      await ui.resize(80, 24);
+      await ui.until("── Edit ──");
+      await ui.capture("Grouped menu with key column at 80x24");
+      ui.key("ESCAPE");
+      await ui.until("Change preview");
+      assert.equal(ui.screen.renderer.root.findDescendantById("action-overlay")?.visible, false);
+      assert.equal(await ui.repo.operationId(), operation);
     },
   },
   {

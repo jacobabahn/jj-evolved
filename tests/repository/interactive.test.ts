@@ -66,7 +66,7 @@ for (const kind of ["squash", "split"] satisfies ("squash" | "split")[]) {
       screen.mockInput.pressKey(" ");
       const choices = screen.renderer.root.findDescendantById("action-choices");
       if (!(choices instanceof SelectRenderable)) throw new Error("Missing action menu");
-      choices.setSelectedIndex(choices.options.findIndex(option => option.name === `${kind === "split" ? "Split" : "Squash"} interactively`));
+      choices.setSelectedIndex(choices.options.findIndex(option => option.value === `${kind === "split" ? "Split" : "Squash"} in diff editor`));
       screen.mockInput.pressEnter();
       if (kind === "squash") {
         await until(() => choices.options.some(option => option.name.startsWith(f.destination.changeId.slice(0, 8))));
@@ -113,7 +113,7 @@ for (const mode of ["none", "fail"]) {
       screen.mockInput.pressKey(" ");
       const choices = screen.renderer.root.findDescendantById("action-choices");
       if (!(choices instanceof SelectRenderable)) throw new Error("Missing actions");
-      choices.setSelectedIndex(choices.options.findIndex(option => option.name === "Split interactively"));
+      choices.setSelectedIndex(choices.options.findIndex(option => option.value === "Split in diff editor"));
       screen.mockInput.pressEnter();
       let returned = false;
       for (let attempt = 0; attempt < 400; attempt++) {

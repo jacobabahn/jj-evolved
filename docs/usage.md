@@ -52,7 +52,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `a` | Preview abandoning the selected change |
 | `A` | Preview absorbing the selected change's edits into mutable ancestors |
 | `v` | Browse the selected change's evolution and preview each version's rewrite diff |
-| Space | Open revision actions: edit, describe, rebase, squash, split, bookmark creation, abandon |
+| Space | Open the action menu, grouped into Edit, History, Bookmarks & remotes, Inspect and Repository; each item shows its effective key and `/` filters by name |
 | `b` | Browse bookmarks; move, rename, or delete a local bookmark |
 | `g` | Git remotes: fetch, push, and select a remote |
 | `o` | Browse operation history, inspect an operation, or restore its state |
@@ -67,6 +67,8 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 ## Preview and overlays
 
 Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
+
+The Space action menu groups actions by task and displays the effective shortcut beside each item (`—` means no shortcut). `j`/`k` and arrows skip section headers. Press `/` to filter action names; empty sections disappear. Escape clears the filter first, then closes the menu.
 
 Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
 
@@ -88,7 +90,7 @@ The rebase and squash menu forms show the source, destination, options, and prev
 
 ## External diff editors and Hunk
 
-For individual files or hunks, open the Space menu and choose **Squash interactively** or **Split interactively**. Squash asks you to choose a destination change first. The app pauses while JJ opens your configured diff editor, followed by your description editor when needed. Save and close the editor to let JJ apply your selection. Cancel using the editor's controls or Ctrl-C. The app resumes and refreshes the graph when JJ exits.
+For individual files or hunks, open the Space menu and choose **Squash in diff editor** or **Split in diff editor**. Squash asks you to choose a destination change first. The app pauses while JJ opens your configured diff editor, followed by your description editor when needed. Save and close the editor to let JJ apply your selection. Cancel using the editor's controls or Ctrl-C. The app resumes and refreshes the graph when JJ exits.
 
 To review a change in [Hunk](https://github.com/modem-dev/hunk/), install its CLI with `npm install -g hunkdiff`, then select the change and choose **Open in Hunk** from the Space menu. The app runs `hunk show` with the selected commit in the repository directory. Close Hunk to return to the app and refresh the graph. Hunk is optional and must be on your PATH.
 
@@ -104,7 +106,7 @@ Drag a local `[bookmark]` label in the log onto another change to preview a move
 
 ## Search, navigation, and descriptions
 
-The initial revision graph loads 200 revisions. Press `Ctrl+L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `Ctrl+R` remains available for an immediate reload. Press Enter to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. `D`, or **Edit description in editor** in the Space menu, opens JJ’s configured external editor.
+The initial revision graph loads 200 revisions. Press `Ctrl+L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `Ctrl+R` remains available for an immediate reload. Press Enter to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. `D`, or **Describe in editor** in the Space menu, opens JJ’s configured external editor.
 
 Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
 
@@ -174,7 +176,8 @@ Available actions and defaults:
 | `actions`, `bookmarks`, `git`, `operations` | `space`, `b`, `g`, `o` | `space`, `b`, unbound, `o` |
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
 
-Unbound actions stay reachable from the Space menu. Inline rebase uses fixed
+Unbound actions stay reachable from the Space menu, which shows the effective
+key for every item and `—` for unbound ones. Inline rebase uses fixed
 `r` (change only) and `s` (with descendants) to set its scope.
 
 Overrides apply while browsing, including movement in the preview pane. Prompts,
