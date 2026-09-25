@@ -10,7 +10,7 @@ Choosing a JJ client is largely about how you like to work with history. jj-evol
 
 Select a change, choose where it should go, and compare the proposed graph with the current one. Rebase and squash previews include bookmarks and conflict markers. With descendant rebasing, the app marks the moving changes and shows the full scope, including revisions outside the visible graph. Menus and editing forms keep the graph visible behind them so you can retain your place.
 
-For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `r`, press `s` to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
+For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `r`, press Tab to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
 
 ![Rebase preview showing Add login and Test login moving onto main, with the proposed tree on the left and current tree on the right.](docs/images/rebase-preview.png)
 
@@ -72,9 +72,8 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `@`, `[` / `]` | Jump to the working copy, a parent, or a child |
 | `Space` | Open actions for the selected revision |
 | Enter / `D` | Edit a multiline description in the app / in JJ's editor |
-| `e` | Immediately make the selected revision the working copy |
-| `n` | Create a child change after confirmation |
-| `r` / `S` | Choose a rebase / squash destination in the graph |
+| `e` / `n` | Immediately make the selected revision the working copy / create an empty child; `u` previews an undo |
+| `r` / `S` | Choose a rebase / squash destination in the graph; Tab includes descendants |
 | `s` / `a` | Split selected files / preview abandoning the change |
 | `A` / `v` | Preview absorb / browse change evolution |
 | `b` / `g` / `o` / `u` | Bookmarks / Git remotes / operation history / undo preview |

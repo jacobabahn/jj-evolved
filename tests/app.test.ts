@@ -3,13 +3,14 @@ import { SelectRenderable, TextRenderable, TextareaRenderable } from "@opentui/c
 import { createTestRenderer } from "@opentui/core/testing";
 import { createApp } from "../src/app";
 import { Repository } from "../src/repository/repository";
+import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
 import { fixture } from "./fixture";
 
-async function setup(kittyKeyboard = false) {
+async function setup(kittyKeyboard = false, bindings?: Keybindings) {
   const f = await fixture();
   const screen = await createTestRenderer({ width: 100, height: 30, kittyKeyboard });
   const repo = await Repository.open(f.path);
-  const app = createApp(screen.renderer, repo);
+  const app = createApp(screen.renderer, repo, undefined, undefined, bindings);
   await app.start();
   async function until(text: string) {
     for (let attempt = 0; attempt < 150; attempt++) {
@@ -221,26 +222,29 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
   } finally { await t.cleanup(); }
 }, 15_000);
 
-test("keyboard describe, cancelled new, confirmed new and external refresh", async () => {
+test("keyboard describe, immediate new and external refresh", async () => {
   const t = await setup();
   try {
     t.screen.mockInput.pressEnter();
     await t.until("Describe");
     await t.prompt("Renamed in the TUI");
-    expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Renamed in the TUI");
+    const parent = (await t.repo.snapshot("@")).revisions[0];
+    if (!parent) throw new Error("Missing parent");
+    expect(parent.description.trim()).toBe("Renamed in the TUI");
     t.screen.mockInput.pressKey("n");
-    await t.until("Create child");
-    t.screen.mockInput.pressEscape();
-    await Bun.sleep(50);
-    expect((await t.repo.snapshot("all()")).revisions).toHaveLength(3);
-    t.screen.mockInput.pressKey("n");
-    t.screen.mockInput.pressEnter();
-    t.screen.mockInput.pressKey("n");
-    t.screen.mockInput.pressEnter();
+    await t.until("new completed");
     await t.until("4 revisions");
     await t.until("Ready.");
+    const child = (await t.repo.snapshot("@")).revisions[0];
+    if (!child) throw new Error("Missing child");
     expect((await t.repo.snapshot("all()")).revisions).toHaveLength(4);
-    expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("");
+    expect(child.description.trim()).toBe("");
+    expect(child.parents).toEqual([parent.commitId]);
+    const frame = t.screen.captureCharFrame();
+    expect(frame).toContain(`new completed`);
+    expect(frame).toContain(child.changeId.slice(0, 8));
+    expect(frame).not.toContain("Create child");
+    expect(frame).not.toContain("Confirm operation");
     await t.f.jj("describe", "-m", "External edit");
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("External edit");
@@ -613,15 +617,18 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     };
     const before = await t.repo.operationId();
     t.screen.mockInput.pressKey("r");
-    await t.until("Selected change only");
+    await t.until("[ ] include descendants (4 changes) · Tab toggle");
     expect(marked(source.commitId)).toBe(true);
     expect(marked(left.commitId)).toBe(false);
     t.screen.mockInput.pressKey("s");
-    await t.until("Change and descendants: 4 changes");
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).toContain("[ ] include descendants");
+    t.screen.mockInput.pressTab();
+    await t.until("[x] include descendants (4 changes)");
     for (const item of [source, left, right, merge]) expect(marked(item.commitId)).toBe(true);
     expect(marked(destination.commitId)).toBe(false);
-    t.screen.mockInput.pressKey("r");
-    await t.until("Selected change only");
+    t.screen.mockInput.pressTab();
+    await t.until("[ ] include descendants (4 changes)");
     for (const item of [left, right, merge]) expect(marked(item.commitId)).toBe(false);
     t.screen.mockInput.pressEscape();
     await t.until("Cancelled.");
@@ -643,13 +650,49 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     await t.prompt(source.changeId);
     t.screen.resize(80, 24);
     t.screen.mockInput.pressKey("r");
-    await t.until("Selected change only");
-    t.screen.mockInput.pressKey("s");
+    await t.until("[ ] include descendants");
+    t.screen.mockInput.pressTab();
     await t.until("3 outside view");
-    expect(t.screen.captureCharFrame()).toContain("4 changes");
+    expect(t.screen.captureCharFrame()).toContain("[x] include descendants (4 changes)");
     t.screen.mockInput.pressEscape();
     await t.until("Cancelled.");
     expect(await t.repo.operationId()).toBe(before);
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("inline rebase scope, load more and preview toggle follow custom bindings while other keys stay fixed", async () => {
+  const bindings = parseKeybindings({ bindings: { rebaseScope: ["x"], togglePreview: ["P"] } });
+  const t = await setup(false, bindings);
+  try {
+    const before = await t.repo.operationId();
+    t.screen.mockInput.pressKey("j");
+    await t.until("+ hello from jj-evolved");
+    t.screen.mockInput.pressKey("r");
+    await t.until("[ ] include descendants (2 changes) · x toggle");
+    const preview = t.screen.renderer.root.findDescendantById("preview");
+    if (!preview) throw new Error("Missing preview");
+    t.screen.mockInput.pressKey("p");
+    await t.screen.renderOnce();
+    expect(preview.visible).toBe(true);
+    t.screen.mockInput.pressKey("P");
+    await t.screen.renderOnce();
+    expect(preview.visible).toBe(false);
+    expect(t.screen.captureCharFrame()).toContain("Rebase from ●");
+    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("s");
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).toContain("[ ] include descendants");
+    t.screen.mockInput.pressKey("x");
+    await t.until("[x] include descendants (2 changes)");
+    t.screen.mockInput.pressKey("x");
+    await t.until("[ ] include descendants (2 changes)");
+    t.screen.mockInput.pressKey("P");
+    await t.screen.renderOnce();
+    expect(preview.visible).toBe(true);
+    t.screen.mockInput.pressEscape();
+    await t.until("Cancelled.");
+    expect(await t.repo.operationId()).toBe(before);
+    expect(t.screen.captureCharFrame()).not.toContain("Split files");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -661,21 +704,22 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     const before = await t.repo.operationId();
     t.screen.mockInput.pressKey("r");
     await t.until("Rebase from ●");
-    t.screen.mockInput.pressKey("s");
-    await t.until("Change and descendants");
+    t.screen.mockInput.pressTab();
+    await t.until("[x] include descendants");
     t.screen.mockInput.pressEscape();
     await t.until("Cancelled.");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressKey("r");
-    await t.until("Selected change only");
-    t.screen.mockInput.pressKey("s");
+    await t.until("[ ] include descendants");
+    t.screen.mockInput.pressTab();
     t.screen.mockInput.pressKey("k");
     t.screen.mockInput.pressEnter();
     await t.until("Error");
     expect(t.screen.captureCharFrame()).toContain("Rebase from ●");
     expect(await t.repo.operationId()).toBe(before);
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressTab();
+    await t.until("[ ] include descendants");
     t.screen.mockInput.pressEnter();
     await t.until("Confirm operation");
     await t.until("Current tree");
@@ -851,16 +895,16 @@ test("change clicks, invalid drops, Escape and cancelled previews do not rebase"
   } finally { await t.cleanup(); }
 }, 15_000);
 
-for (const flow of ["confirmation", "form"] as const) {
+for (const flow of ["new menu", "form"] as const) {
   test(`${flow} closes after a successful write even if refreshing the graph fails`, async () => {
     const t = await setup();
     const source = (await t.repo.snapshot("@")).revisions[0];
     if (!source) throw new Error("Missing source");
     let reload: ReturnType<typeof spyOn<typeof t.repo, "snapshot">> | undefined;
     try {
-      if (flow === "confirmation") {
-        t.screen.mockInput.pressKey("n");
-        await t.until("Create child");
+      if (flow === "new menu") {
+        t.screen.mockInput.pressKey(" ");
+        await t.until("Create child change");
       } else {
         t.screen.mockInput.pressKey(" ");
         t.choose("Rebase change");
@@ -883,13 +927,13 @@ for (const flow of ["confirmation", "form"] as const) {
         reload = spyOn(t.repo, "snapshot").mockRejectedValue(new Error("Graph unavailable"));
       });
       try {
-        t.screen.mockInput.pressEnter();
+        if (flow === "new menu") t.choose("Create child change"); else t.screen.mockInput.pressEnter();
         await t.until("Operation succeeded, but refresh failed");
         reload?.mockRestore();
         expect(t.screen.renderer.root.findDescendantById("action-overlay")?.visible).toBe(false);
         expect(t.screen.renderer.root.findDescendantById("history-form")).toBeUndefined();
         const current = (await snapshot("@")).revisions[0];
-        if (flow === "confirmation") expect(current?.parents).toContain(source.commitId);
+        if (flow === "new menu") expect(current?.parents).toContain(source.commitId);
         else expect(current?.parents).toEqual(["0".repeat(40)]);
         const operation = await t.repo.operationId();
         t.screen.mockInput.pressEnter();
