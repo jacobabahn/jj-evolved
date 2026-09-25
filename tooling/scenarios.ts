@@ -191,6 +191,44 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "files-pane", title: "Changed files drill-down in the left pane",
+    async run(ui) {
+      await ui.f.jj("describe", "-m", "Rework greeting and add notes");
+      await Bun.write(`${ui.f.path}/hello.txt`, "hello from the files pane\n");
+      await Bun.write(`${ui.f.path}/notes.md`, "# Notes\n\nFiles mode lists each changed file.\n");
+      ui.key("r", { ctrl: true });
+      await ui.until("+ hello from the files pane");
+      await ui.until("Ready.");
+      ui.key("l");
+      await ui.until("M hello.txt");
+      await ui.until("── hello.txt ──");
+      await ui.until("+ hello from the files pane");
+      const frame = ui.screen.captureCharFrame();
+      assert(frame.includes("Files ·"));
+      assert(frame.includes("A notes.md"));
+      assert(!frame.includes("# Notes"));
+      assert.equal(ui.screen.renderer.root.findDescendantById("revisions")?.visible, false);
+      await ui.capture("Files mode: first file selected with its diff");
+      ui.key("j");
+      await ui.until("── notes.md ──");
+      await ui.until("+ # Notes");
+      assert(!ui.screen.captureCharFrame().includes("+ hello from the files pane"));
+      await ui.capture("j selects the second file and the preview follows");
+      await ui.resize(80, 24);
+      await ui.until("A notes.md");
+      await ui.capture("Files mode at 80x24");
+      await ui.resize(100, 30);
+      ui.key("h");
+      await ui.until("Change preview");
+      await ui.until("+ # Notes");
+      assert(ui.screen.captureCharFrame().includes("+ hello from the files pane"));
+      assert.equal(ui.node("revisions").visible, true);
+      assert.equal(ui.screen.renderer.root.findDescendantById("changed-files")?.visible, false);
+      assert(ui.screen.captureCharFrame().includes("▶ @  "));
+      await ui.capture("h returns to the graph with the same revision and its full diff");
+    },
+  },
+  {
     name: "rebase", title: "Rebase preview and cancellation",
     async run(ui) {
       const before = await ui.repo.operationId();

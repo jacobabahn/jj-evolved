@@ -57,7 +57,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `g` | Git remotes: fetch, push, and select a remote |
 | `o` | Browse operation history, inspect an operation, or restore its state |
 | `u` | Preview undo of the latest operation |
-| `l` / Right | Browse the selected revision's changed files; `h` / Left returns |
+| `l` / Right | Show the selected revision's changed files in the left pane; `j` / `k` preview one file at a time, `h` / Left / Escape returns |
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Show help |
@@ -69,6 +69,10 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
 
 Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
+
+## Changed files
+
+Press `l` or Right, or choose **Browse changed files** from the Space menu, to replace the graph with the selected revision's changed files. The left pane is titled with the change ID and description, and each file shows a status letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied. `j` and `k` move through the files, and the preview shows only the selected file's diff with the path as its title. Enter moves focus to the diff so `j` and `k` scroll it; Tab switches focus back. Page Up / Page Down, `Ctrl+N` / `Ctrl+P`, `Ctrl+D` / `Ctrl+U`, and `p` control the preview as usual. `h`, Left, Escape, or `l` again returns to the graph with the same revision selected and reloads its full diff. An empty change shows "Empty change. No changed files." in the pane. Automatic refresh pauses while the file list is open and resumes when you return; refresh from a terminal focus return runs then too.
 
 ## Absorb
 
@@ -112,7 +116,7 @@ Destination pickers for bookmark moves, rebase, and squash include the full hist
 
 The app also refreshes when your terminal reports focus returning. Open prompts retain their drafts and defer that refresh until they close. Returning focus invalidates a pending operation review; press `p` to prepare it again.
 
-While browsing, the app checks for changes every two seconds. It runs `jj status` to snapshot pending working-copy edits and checks the operation ID before reloading. Automatic updates preserve the active revset, accepted search, selection where possible, graph and preview scroll, temporary navigation views, and pane visibility. Checks pause during prompts, action reviews, drags, and external tools; stale in-flight results are discarded if you interact. Failed checks report an error and retry. No filesystem watcher is required.
+While browsing, the app checks for changes every two seconds. It runs `jj status` to snapshot pending working-copy edits and checks the operation ID before reloading. Automatic updates preserve the active revset, accepted search, selection where possible, graph and preview scroll, temporary navigation views, and pane visibility. Checks pause during prompts, the changed-files view, action reviews, drags, and external tools; stale in-flight results are discarded if you interact. Failed checks report an error and retry. No filesystem watcher is required.
 
 ## Conflict resolution
 
