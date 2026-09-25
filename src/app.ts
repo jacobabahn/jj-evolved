@@ -1,5 +1,5 @@
 import { RevisionSearch, matchingRevisions } from "./ui/revision-search";
-import { actionForKey, defaultBindings, keyLabel, type Keybindings, type Action } from "./ui/keybindings";
+import { actionForKey, defaultBindings, inlineActions, keyLabel, type Keybindings, type Action } from "./ui/keybindings";
 import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
@@ -28,7 +28,6 @@ type Prompt =
   | { kind: "search"; view: NavigationView; previous: Search; returnPoint: NavigationView | null }
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision }
-  | { kind: "new"; parent: Revision }
   | { kind: "picker"; choices: Choice[] }
   | { kind: "text"; accept: (value: string) => void }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
@@ -64,7 +63,7 @@ ${row(["abandon"])} Preview abandoning the selected change
 ${row(["absorb"])} Preview absorb into mutable ancestors
 ${row(["evolution"])} Browse selected change's evolution
 Drag change       Drop onto another change to preview rebase
-${row(["new"])} Create an empty child of selection
+${row(["new"])} Create an empty child of selection immediately
 ${row(["actions"])} Action menu: edit, rebase, squash, split, abandon, status
 ${row(["bookmarks"])} Local and remote bookmarks
 ${row(["git"])} Git remotes: fetch and push
@@ -88,7 +87,7 @@ Escape or dropping outside the graph cancels. Use ${keyLabel(bindings, "bookmark
 Tree lines show ancestry; ~ marks omitted history.
 ${row(["loadMore"])} Load 200 more revisions (keeps selection)
 Destination lists: / searches all revisions, including older history.
-Rebase destination: r moves the change only, s includes descendants.
+Rebase destination: ${keyLabel(bindings, "rebaseScope")} toggles including descendants; ${keyLabel(bindings, "loadMore")} and ${keyLabel(bindings, "togglePreview")} also apply.
 Select a revision to return from status or help.
 Commands use your installed jj and its repository rules.`; }
 
@@ -600,13 +599,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.top = "20%";
       overlayPreview.visible = false;
     }
-    if (next.kind === "describe" || next.kind === "new" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
+    if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
     promptLabel.content = terminalText(`${label}  [Enter apply · Esc cancel]`);
     promptLabel.visible = true;
     input.placeholder = "";
     input.value = terminalText(value);
     descriptionInput.visible = next.kind === "describe";
-    input.visible = next.kind !== "new" && next.kind !== "confirm" && next.kind !== "describe";
+    input.visible = next.kind !== "confirm" && next.kind !== "describe";
     if (!input.visible) { list.blur(); preview.blur(); } else input.focus();
     if (next.kind === "describe") {
       overlay.height = "65%";
@@ -631,12 +630,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (current.kind === "text") { current.accept(value); return; }
     if (current.kind === "confirm") { await run("Applying jj operation…", applyReviewed); return; }
     if (current.kind === "revset") await run("Loading revset…", async () => { await refresh(value.trim() || "all()"); closePrompt(); });
-    else if (current.kind === "describe" || current.kind === "new") {
-      const mutation: Mutation = current.kind === "new" ? { kind: "new", parent: current.parent } : { kind: "describe", revision: current.revision, description: value };
-      await run("Applying jj operation…", async () => {
-        if (await review.prepare(mutation)) await applyReviewed();
-      });
-    }
+    else if (current.kind === "describe") await run("Applying jj operation…", async () => {
+      if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) await applyReviewed();
+    });
   }
   async function refreshAfterMutation(action: Mutation) {
     if (stopped) return;
@@ -990,9 +986,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     });
   }
 
+  function createChild(parent: Revision) {
+    void run("Creating child change…", async () => {
+      if (await review.prepare({ kind: "new", parent })) await applyReviewed();
+    });
+  }
   function actions(revision: Revision) {
     pick("Actions", [
-      { name: "Edit change", description: "Make selection the working copy", choose: () => confirm({ kind: "edit", revision }) },
+      { name: "Edit change", description: `Make selection the working copy after review (${bindingLabel("edit")} applies immediately)`, choose: () => confirm({ kind: "edit", revision }) },
+      { name: "Create child change", description: `Start an empty child immediately (${bindingLabel("new")})`, choose: () => createChild(revision) },
       { name: "Describe change", description: `Edit the selected change's description (${bindingLabel("describe")})`, choose: () => describe(revision) },
       { name: "Edit description in editor", description: `Edit the full multiline description in JJ's configured editor (${bindingLabel("describeExternal")})`, choose: () => describeExternally(revision) },
       ...(revision.conflict ? [{ name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
@@ -1037,7 +1039,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const outside = moving.filter(revision => !visible.has(revision.commitId)).length;
     list.markSource(revisions.findIndex(revision => revision.commitId === source.commitId), new Set(moving.map(revision => revision.commitId)));
     const scope = prompt.action.kind === "rebase"
-      ? `${prompt.action.descendants ? `Change and descendants: ${moving.length} changes` : "Selected change only"}${outside ? ` · ${outside} outside view` : ""} · r change · s descendants`
+      ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""} · ${bindingLabel("rebaseScope")} toggle`
       : "All files · Keep destination description";
     inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · / search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
   }
@@ -1087,16 +1089,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (key.name === "return") void keepTheme();
       return;
     }
-    if (((prompt.kind === "browse" && actionForKey(bindings, key) === "togglePreview") || (prompt.kind === "inline" && key.name === "p" && !key.ctrl && !key.meta && !key.shift))) {
+    if (prompt.kind === "browse" && actionForKey(bindings, key) === "togglePreview") {
       key.preventDefault();
       setPreviewVisible(!preview.visible);
       return;
     }
     if (prompt.kind === "inline") {
       key.preventDefault();
+      const action = actionForKey(bindings, key, inlineActions);
+      if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
       if (isBusy()) return;
       if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
-      else if (actionForKey(bindings, key) === "loadMore") void run("Loading more history…", loadMoreHistory);
+      else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
       else if (key.name === "/" || key.sequence === "/") {
         const state = prompt;
         destination("Choose destination", state.source, target => {
@@ -1109,8 +1113,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (key.name === "j" || key.name === "down") list.moveDown();
       else if (key.name === "k" || key.name === "up") list.moveUp();
       else if (key.name === "pageup" || key.name === "pagedown") preview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, preview.height - 3));
-      else if ((key.name === "r" || key.name === "s") && !key.shift && prompt.action.kind === "rebase") {
-        prompt.action.descendants = key.name === "s";
+      else if (action === "rebaseScope" && prompt.action.kind === "rebase") {
+        prompt.action.descendants = !prompt.action.descendants;
         updateInlineHint();
       } else if (key.name === "return") {
         const destination = selected();
@@ -1209,11 +1213,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       key.preventDefault();
       const revision = selected();
       if (!revision) { report("Select a revision first.", true); return; }
-      if (action === "edit") void run("Switching working copy…", async () => {
+      if (action === "describe") { describe(revision); return; }
+      if (action === "new") { createChild(revision); return; }
+      void run("Switching working copy…", async () => {
         if (await review.prepare({ kind: "edit", revision })) await applyReviewed();
       });
-      else if (action === "new") openPrompt({ kind: "new", parent: revision }, `Create child of ${revision.changeId.slice(0, 8)}?`);
-      else describe(revision);
     }
   }
   function stop() {

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { actionForKey, keyLabel, defaultBindings, jjuiBindings, legacyBindings, parseKeybindings, readKeybindings } from "../../src/ui/keybindings";
+import { actionForKey, inlineActions, keyLabel, defaultBindings, jjuiBindings, legacyBindings, parseKeybindings, readKeybindings } from "../../src/ui/keybindings";
 
 test("defaults and overrides preserve independent arrays and support unbinding", () => {
   expect(defaultBindings).toBe(jjuiBindings);
@@ -24,9 +24,27 @@ test("presets select jjui or legacy defaults and accept overrides on top", () =>
   expect(() => parseKeybindings({ preset: "vim" })).toThrow("Unknown preset");
   expect(() => parseKeybindings({ preset: 1 })).toThrow("Unknown preset");
   for (const preset of [jjuiBindings, legacyBindings]) {
-    const keys = Object.values(preset).flat();
+    const keys = Object.entries(preset).filter(([action]) => action !== "rebaseScope").flatMap(([, keys]) => keys);
     expect(new Set(keys).size).toBe(keys.length);
+    expect(preset.rebaseScope).toEqual(["tab"]);
+    expect(preset.focus).toEqual(["tab"]);
   }
+});
+
+test("rebaseScope shares keys with browse-only actions but not with actions live during destination choice", () => {
+  expect(inlineActions).toEqual(["rebaseScope", "loadMore", "togglePreview"]);
+  const shared = parseKeybindings({ bindings: { rebaseScope: ["s"] } });
+  const key = { name: "s", sequence: "s", ctrl: false, shift: false, meta: false, option: false };
+  expect(actionForKey(shared, key)).toBe("split");
+  expect(actionForKey(shared, key, inlineActions)).toBe("rebaseScope");
+  expect(parseKeybindings({ bindings: { rebaseScope: ["s"] } })).toMatchObject({ rebaseScope: ["s"], split: ["s"] });
+  for (const key of ["j", "k", "up", "down", "pageup", "pagedown", "/", "return", "escape"]) expect(() => parseKeybindings({ bindings: { rebaseScope: [key] } })).toThrow("reserved for inline destination controls");
+  expect(parseKeybindings({ bindings: { focus: ["ctrl+t"] } })).toMatchObject({ focus: ["ctrl+t"], rebaseScope: ["tab"] });
+  expect(() => parseKeybindings({ bindings: { rebaseScope: ["ctrl+l"] } })).toThrow("conflicts between loadMore and rebaseScope");
+  expect(() => parseKeybindings({ bindings: { rebaseScope: ["p"] } })).toThrow("conflicts between rebaseScope and togglePreview");
+  expect(() => parseKeybindings({ bindings: { rebaseScope: ["x"], loadMore: ["x"] } })).toThrow("conflicts between loadMore and rebaseScope");
+  expect(() => parseKeybindings({ bindings: { status: ["tab"] } })).toThrow("conflicts between focus and status");
+  expect(() => parseKeybindings({ bindings: { rebaseScope: ["x"], togglePreview: ["x"] } })).toThrow("conflicts between rebaseScope and togglePreview");
 });
 
 test("rejects malformed configuration, unknown actions, terminal aliases and collisions", () => {
@@ -49,6 +67,11 @@ test("matching separates control, shifted and modified keys", () => {
   expect(actionForKey(defaultBindings, { ...event, name: "right", sequence: "\u001b[C" })).toBe("files");
   expect(actionForKey(defaultBindings, { ...event, name: "return", sequence: "\r" })).toBe("describe");
   expect(actionForKey(legacyBindings, { ...event, name: "r", sequence: "R", shift: true })).toBe("rebase");
+  const tab = { ...event, name: "tab", sequence: "\t" };
+  expect(actionForKey(defaultBindings, tab)).toBe("focus");
+  expect(actionForKey(defaultBindings, tab, inlineActions)).toBe("rebaseScope");
+  expect(actionForKey(defaultBindings, { ...event, name: "s", sequence: "s" }, inlineActions)).toBeUndefined();
+  expect(actionForKey(defaultBindings, { ...event, name: "p", sequence: "p" }, inlineActions)).toBe("togglePreview");
 });
 
 test("missing configuration uses defaults and invalid files report their path", async () => {
@@ -72,4 +95,5 @@ test("labels name control, named and literal keys", () => {
   expect(keyLabel(defaultBindings, "files")).toBe("l/Right");
   expect(keyLabel(defaultBindings, "describe")).toBe("Enter");
   expect(keyLabel(parseKeybindings({ bindings: { help: [] } }), "help")).toBe("unbound");
+  expect(keyLabel(defaultBindings, "rebaseScope")).toBe("Tab");
 });

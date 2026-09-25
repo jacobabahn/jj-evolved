@@ -45,9 +45,10 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `Ctrl+L` | Load 200 more revisions |
 | Enter | Edit a multiline description in the app |
 | `D` | Edit the description in JJ's configured editor |
-| `e` | Switch the working copy to the selected revision immediately |
-| `n` | Confirm creation of a child of the selected revision |
+| `e` | Switch the working copy to the selected revision immediately; `u` previews an undo |
+| `n` | Create an empty child of the selected revision immediately; `u` previews an undo |
 | `r` / `S` | Start inline rebase / squash; choose a destination in the graph and Enter previews |
+| Tab (during inline rebase) | Toggle whether descendants move with the change |
 | `s` | Split selected files into a first change |
 | `a` | Preview abandoning the selected change |
 | `A` | Preview absorbing the selected change's edits into mutable ancestors |
@@ -66,7 +67,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 
 ## Preview and overlays
 
-Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
+Press `p` (the `togglePreview` binding) while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
 
 Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
 
@@ -80,7 +81,7 @@ Press `v`, or choose **Change evolution** from the Space menu, to browse previou
 
 ## Rebase and squash
 
-For inline rebase or squash, press `r` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. `s` widens rebase to the selected change and its descendants; `r` narrows it back to the change alone. With descendants enabled, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
+For inline rebase or squash, press `r` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. For rebase, the hint shows a checkbox such as `[ ] include descendants (3 changes) · Tab toggle`; Tab (the `rebaseScope` binding) checks or clears it. With descendants included, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
 
 Rebase and squash previews show the proposed tree on the left and the current tree on the right with native graph lines, local bookmarks, and conflict markers. Both columns scroll together; long labels are clipped to preserve tree alignment. The view includes relevant descendants and parents, up to 40 revisions. Previewing does not change the working copy or live operation log.
 
@@ -94,7 +95,7 @@ To review a change in [Hunk](https://github.com/modem-dev/hunk/), install its CL
 
 ## Applying edits and splitting files
 
-Errors stay inside the overlay and preserve your input. Success closes it, selects the resulting revision when available, and briefly shows a confirmation above the graph. The footer contains keyboard hints. If another command or working-copy edit changes the repository before confirmation, the app rejects the stale action.
+Errors stay inside the overlay and preserve your input. Success closes it, selects the resulting revision when available, and briefly shows a confirmation above the graph. `e` and `n` skip the overlay: they switch the working copy or create an empty child immediately, select the result, and show the same confirmation; press `u` to preview an undo. The Space menu's **Create child change** also applies immediately; **Edit change** reviews the operation first. The footer contains keyboard hints. If another command or working-copy edit changes the repository before confirmation, the app rejects the stale action.
 
 Rebase can move one change or its descendants. Squash accepts all files or a selected group and lets you keep or replace the destination description. In its description field, Ctrl-D restores the choice to keep the destination text. Split selects whole files for the first change and asks for its description. Then choose **Keep original description** for the second change, or **Edit second description** to enter a replacement (which may be empty). Keeping the original preserves multiline text. Review both descriptions and file groups before applying; undo reverses the entire split in one operation. Enter toggles files in the file-selection menu; select **Continue** when the group is ready.
 
@@ -170,17 +171,22 @@ Available actions and defaults:
 | `clearSearch`, `diff`, `togglePreview` | `escape`, `d`, `p` | `escape`, `return`, `p` |
 | `describe`, `describeExternal`, `edit`, `new` | `return`, `D`, `e`, `n` | `d`, unbound, `e`, `n` |
 | `rebase`, `squash`, `split`, `abandon` | `r`, `S`, `s`, `a` | `R`, `S`, unbound, unbound |
+| `rebaseScope` (inline rebase only) | `tab` | same |
 | `absorb`, `evolution` | `A`, `v` | `a`, `v` |
 | `actions`, `bookmarks`, `git`, `operations` | `space`, `b`, `g`, `o` | `space`, `b`, unbound, `o` |
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
 
-Unbound actions stay reachable from the Space menu. Inline rebase uses fixed
-`r` (change only) and `s` (with descendants) to set its scope.
+Unbound actions stay reachable from the Space menu. `rebaseScope` toggles
+descendants while choosing an inline rebase destination. Because it is only live
+there, it may share a key with a browse action that is not: the default Tab is
+also `focus`. It cannot share a key with `loadMore` or `togglePreview`, which stay
+active during destination choice. Fixed inline controls (`j`/`k`, arrows up/down, Page Up/Down, `/`, Enter, and Escape) are reserved for destination navigation and cannot be assigned to these three actions.
 
-Overrides apply while browsing, including movement in the preview pane. Prompts,
-menus, destination selection, and history forms retain their displayed fixed
-controls: `j`/`k` or arrows to choose, Enter to submit, Escape to cancel, and their
-existing field/preview controls. Text inputs retain normal editing keys; typing a
+Overrides apply while browsing, including movement in the preview pane. Inline
+destination choice honours `rebaseScope`, `loadMore`, and `togglePreview`. Prompts,
+menus, destination selection, and history forms otherwise retain their displayed
+fixed controls: `j`/`k` or arrows to choose, Enter to submit, Escape to cancel, and
+their existing field/preview controls. Text inputs retain normal editing keys; typing a
 custom browse shortcut inserts text. Ctrl-C remains available everywhere.
 
 ## Revset completion

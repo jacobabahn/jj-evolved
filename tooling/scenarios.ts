@@ -1,5 +1,6 @@
 import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
 import { strict as assert } from "node:assert";
+import { TextRenderable } from "@opentui/core";
 import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
 
@@ -214,6 +215,55 @@ export const scenarios: Scenario[] = [
       await ui.until("Cancelled.");
       await ui.capture("Cancelled without changing the repository");
       assert.equal(await ui.repo.operationId(), before);
+    },
+  },
+  {
+    name: "scope-toggle", title: "Tab toggles inline rebase scope and n creates a child immediately",
+    async run(ui) {
+      await ui.f.jj("new", "-m", "Follow-up on next change");
+      ui.key("r", { ctrl: true });
+      await ui.until("4 revisions");
+      await ui.until("Ready.");
+      const snapshot = await ui.repo.snapshot("all()");
+      const marked = (description: string) => {
+        const index = snapshot.graph.findIndex(row => row.kind === "revision" && row.revision.description.startsWith(description));
+        const label = ui.node(`revision-label-${index}`);
+        assert(label instanceof TextRenderable);
+        return label.content.chunks.map(chunk => chunk.text).join("").startsWith("● ");
+      };
+      const before = await ui.repo.operationId();
+      ui.key("j");
+      await ui.until("+ hello from jj-evolved");
+      ui.key("r");
+      await ui.until("[ ] include descendants (3 changes) · Tab toggle");
+      assert(marked("Initial feature") && !marked("Next change") && !marked("Follow-up"));
+      await ui.capture("Inline rebase starts with the change alone");
+      ui.key("s");
+      await ui.screen.renderOnce();
+      assert(ui.screen.captureCharFrame().includes("[ ] include descendants"));
+      ui.key("TAB");
+      await ui.until("[x] include descendants (3 changes)");
+      assert(marked("Initial feature") && marked("Next change") && marked("Follow-up"));
+      await ui.capture("Tab checks the scope box and marks every moving descendant");
+      ui.key("TAB");
+      await ui.until("[ ] include descendants (3 changes)");
+      assert(!marked("Next change"));
+      ui.key("ESCAPE");
+      await ui.until("Cancelled.");
+      assert.equal(await ui.repo.operationId(), before);
+      await ui.capture("Escape cancels without touching the repository");
+      ui.key("n");
+      await ui.until("new completed");
+      await ui.until("5 revisions");
+      await ui.until("Ready.");
+      const child = (await ui.repo.snapshot("@")).revisions[0];
+      assert(child);
+      const parent = (await ui.repo.snapshot("feature")).revisions[0];
+      assert.deepEqual(child.parents, [parent?.commitId]);
+      assert.notEqual(await ui.repo.operationId(), before);
+      const frame = ui.screen.captureCharFrame();
+      assert(frame.includes(child.changeId.slice(0, 8)) && !frame.includes("Create child"));
+      await ui.capture("n creates and selects an empty child immediately with the result toast");
     },
   },
   {
