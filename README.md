@@ -56,7 +56,7 @@ With no path, the app opens the current directory. It does not initialize a JJ r
 
 ## Getting around
 
-The default keys follow [jjui](https://github.com/idursun/jjui), so existing jjui users can keep their habits. See [custom keybindings](docs/usage.md#custom-keybindings) to change browse shortcuts or switch to the `legacy` preset with jj-evolved's earlier keys.
+The default keys follow [jjui](https://github.com/idursun/jjui), so existing jjui users can keep their habits. Press `?` for scrollable help showing the active preset; Escape closes it. Use `--keys legacy` or `JJ_EVOLVED_KEYS=legacy` to switch presets. See [custom keybindings](docs/usage.md#custom-keybindings) to change browse shortcuts or switch to the `legacy` preset with jj-evolved's earlier keys.
 
 | Key | Action |
 | --- | --- |

@@ -172,7 +172,7 @@ test("auto-refresh keeps scroll and help, retries errors, and stops polling on d
     list.scrollTop = 10;
     t.screen.mockInput.pressKey("?");
     await t.text("Keyboard reference");
-    const pane = t.node<ScrollBoxRenderable>("preview");
+    const pane = t.node<ScrollBoxRenderable>("overlay-preview");
     pane.scrollTo(8);
     await t.f.jj("bookmark", "create", "external");
     const failed = spyOn(t.repo, "status").mockRejectedValueOnce(new Error("temporary failure"));
@@ -183,7 +183,7 @@ test("auto-refresh keeps scroll and help, retries errors, and stops polling on d
     expect(list.scrollTop).toBe(10);
     expect(list.getSelectedIndex()).toBe(18);
     expect(pane.scrollTop).toBe(8);
-    expect(pane.title).toContain("Help");
+    expect(pane.title).toContain("Keyboard reference");
     const noChangeFailure = spyOn(t.repo, "status").mockRejectedValueOnce(new Error("retry without new operations"));
     await t.app.checkForUpdates();
     await t.text("Auto-refresh failed");

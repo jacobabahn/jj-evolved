@@ -28,7 +28,7 @@ for (const width of [80, 120]) {
     expect(styles).toMatchSnapshot(`selected revision ${width}`);
     ui.key("?");
     await ui.until("Keyboard reference");
-    const preview = ui.node("preview");
+    const preview = ui.node("action-overlay");
     const text = ui.screen.captureCharFrame().split("\n")
       .slice(preview.screenY, preview.screenY + preview.height)
       .map(line => Array.from(line).slice(preview.screenX, preview.screenX + preview.width).join(""))
