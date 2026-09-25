@@ -28,7 +28,7 @@ for (const code of [0, 1]) {
       screen.mockInput.pressKey(" ");
       const choices = screen.renderer.root.findDescendantById("action-choices");
       if (!(choices instanceof SelectRenderable)) throw new Error("Missing action menu");
-      choices.setSelectedIndex(choices.options.findIndex(option => option.name === "Open in Hunk"));
+      choices.setSelectedIndex(choices.options.findIndex(option => option.value === "Open in Hunk"));
       screen.mockInput.pressEnter();
       let returned = false;
       for (let attempt = 0; attempt < 400; attempt++) {

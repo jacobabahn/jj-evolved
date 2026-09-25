@@ -70,7 +70,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `Ctrl+L` | Load 200 more revisions |
 | `Ctrl+R` | Refresh immediately |
 | `@`, `[` / `]` | Jump to the working copy, a parent, or a child |
-| `Space` | Open actions for the selected revision |
+| `Space` | Open the grouped action menu; each item shows its key and `/` filters by name |
 | Enter / `D` | Edit a multiline description in the app / in JJ's editor |
 | `e` | Immediately make the selected revision the working copy |
 | `n` | Create a child change after confirmation |
