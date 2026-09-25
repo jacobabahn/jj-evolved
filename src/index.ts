@@ -1,4 +1,4 @@
-import { readKeybindings } from "./ui/keybindings";
+import { parsePreset, presetNames, readKeybindings } from "./ui/keybindings";
 import { readThemePreference, saveThemePreference } from "./ui/theme-preference";
 import { parseArgs } from "node:util";
 import { parseThemeName, themes, themeNames } from "./ui/theme";
@@ -8,19 +8,20 @@ import { Repository } from "./repository/repository";
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
-  process.stdout.write(`Usage: bun start [--theme NAME] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nDefault keys follow jjui; t changes themes and ? opens keyboard help.\nKeybindings: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config) with preset "jjui" or "legacy" and per-action overrides.\n`);
+  process.stdout.write(`Usage: bun start [--theme NAME] [--keys PRESET] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nKey presets: ${presetNames.join(", ")}. Preset defaults to JJ_EVOLVED_KEYS, the keybindings file, or jjui.\nDefault keys follow jjui; t changes themes and ? opens keyboard help showing the active preset.\nKeybindings: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config) with preset "jjui" or "legacy" and per-action overrides.\n`);
 } else {
   try {
     const { values, positionals } = parseArgs({
-      args, allowPositionals: true, options: { theme: { type: "string" } },
+      args, allowPositionals: true, options: { theme: { type: "string" }, keys: { type: "string" } },
     });
     if (positionals.length > 1) throw new Error("Expected at most one repository path.");
     const theme = themes[parseThemeName(values.theme ?? process.env.JJ_EVOLVED_THEME ?? await readThemePreference())];
-    const bindings = await readKeybindings();
+    const requestedPreset = values.keys ?? process.env.JJ_EVOLVED_KEYS;
+    const keys = await readKeybindings(undefined, requestedPreset === undefined ? undefined : parsePreset(requestedPreset, values.keys === undefined ? "JJ_EVOLVED_KEYS" : "--keys"));
     const repository = await Repository.open(positionals[0] ?? process.cwd());
     const renderer = await createCliRenderer({ exitOnCtrlC: false });
     try {
-      const app = createApp(renderer, repository, theme, saveThemePreference, bindings);
+      const app = createApp(renderer, repository, theme, saveThemePreference, keys.bindings, { preset: keys.custom ? "custom" : keys.preset });
       await app.start();
     } catch (error) {
       renderer.destroy();

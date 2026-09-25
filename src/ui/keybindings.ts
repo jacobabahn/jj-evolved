@@ -32,15 +32,24 @@ export type Preset = keyof typeof presets;
 export const defaultBindings: Keybindings = jjuiBindings;
 const namedKeys = new Set(["up", "down", "left", "right", "tab", "pageup", "pagedown", "home", "end", "space", "escape", "return", ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`)]);
 
-export function parseKeybindings(value: unknown): Keybindings {
+export const presetNames = Object.keys(presets) as Preset[];
+export type KeybindingConfig = { preset: Preset; custom: boolean; bindings: Keybindings };
+
+export function parsePreset(value: unknown, source?: string): Preset {
+  if (typeof value === "string" && Object.hasOwn(presets, value)) return value as Preset;
+  throw new Error(`Unknown preset ${JSON.stringify(value)}${source ? ` from ${source}` : ""}. Use one of: ${presetNames.join(", ")}.`);
+}
+
+// An explicit preset (CLI flag or environment) replaces the file's preset; file bindings still apply on top.
+export function loadKeybindings(value: unknown, preset?: Preset): KeybindingConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected an object with a bindings object.");
   const config = value as Record<string, unknown>;
   for (const field of Object.keys(config)) if (field !== "bindings" && field !== "preset") throw new Error(`Unknown configuration field: ${field}`);
-  const preset = config.preset ?? "jjui";
-  if (typeof preset !== "string" || !Object.hasOwn(presets, preset)) throw new Error(`Unknown preset ${JSON.stringify(preset)}. Use one of: ${Object.keys(presets).join(", ")}.`);
+  const filePreset = config.preset === undefined ? "jjui" : parsePreset(config.preset);
+  const chosen = preset ?? filePreset;
   const bindings = config.bindings ?? {};
   if (!bindings || typeof bindings !== "object" || Array.isArray(bindings)) throw new Error("Expected a bindings object.");
-  const result = structuredClone(presets[preset as Preset]) as Keybindings;
+  const result = structuredClone(presets[chosen]) as Keybindings;
   for (const [action, keys] of Object.entries(bindings)) {
     if (!Object.hasOwn(jjuiBindings, action)) throw new Error(`Unknown keybinding action: ${action}`);
     if (!Array.isArray(keys) || keys.some(key => typeof key !== "string")) throw new Error(`Keybinding ${action} must be an array of keys.`);
@@ -58,16 +67,19 @@ export function parseKeybindings(value: unknown): Keybindings {
       owners.set(key, action);
     }
   }
-  return result;
+  return { preset: chosen, custom: Object.keys(bindings).length > 0, bindings: result };
+}
+export function parseKeybindings(value: unknown, preset?: Preset): Keybindings {
+  return loadKeybindings(value, preset).bindings;
 }
 
 export function keybindingsPath() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jj-evolved", "keybindings.json");
 }
-export async function readKeybindings(path = keybindingsPath()): Promise<Keybindings> {
-  try { return parseKeybindings(JSON.parse(await readFile(path, "utf8"))); }
+export async function readKeybindings(path = keybindingsPath(), preset?: Preset): Promise<KeybindingConfig> {
+  try { return loadKeybindings(JSON.parse(await readFile(path, "utf8")), preset); }
   catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return structuredClone(defaultBindings);
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return { preset: preset ?? "jjui", custom: false, bindings: structuredClone(presets[preset ?? "jjui"]) as Keybindings };
     throw new Error(`Cannot load keybindings from ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

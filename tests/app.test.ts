@@ -196,6 +196,8 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
     await t.until("Working copy");
     t.screen.mockInput.pressKey("?");
     await t.until("Keyboard reference");
+    t.screen.mockInput.pressEscape();
+    await Bun.sleep(50);
     t.screen.mockInput.pressKey("L");
     await t.until("Esc cancel");
     t.screen.mockInput.pressEscape();
@@ -1069,7 +1071,12 @@ test("preview toggle expands the graph, keeps focus visible, and preserves selec
     t.screen.resize(80, 24);
     await t.screen.renderOnce();
     expect(graph.width).toBe(80);
-    for (const key of ["?", "w", "d"]) {
+    t.screen.mockInput.pressKey("?");
+    await t.until("Keyboard reference");
+    expect(pane.visible).toBe(false);
+    t.screen.mockInput.pressEscape();
+    await Bun.sleep(50);
+    for (const key of ["w", "d"]) {
       t.screen.mockInput.pressKey(key);
       await t.screen.renderOnce();
       expect({ key, visible: pane.visible }).toEqual({ key, visible: true });
@@ -1204,6 +1211,8 @@ test("focus preserves help and defers refresh while a filtered target is tempora
     await Promise.resolve();
     await t.until("Ready.");
     expect(t.screen.captureCharFrame()).toContain("Keyboard reference");
+    t.screen.mockInput.pressEscape();
+    await Bun.sleep(50);
     t.screen.mockInput.pressKey("L");
     await t.prompt("@");
     t.screen.mockInput.pressKey("[");
@@ -1297,12 +1306,12 @@ test("focus refresh does not restore scroll over help opened during a pending di
     await t.screen.waitForVisualIdle();
     t.screen.mockInput.pressKey("\x1b[6~");
     await t.screen.renderOnce();
-    const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
+    const preview = t.screen.renderer.root.findDescendantById("overlay-preview") as import("@opentui/core").ScrollBoxRenderable;
     const top = preview.scrollTop;
     expect(top).toBeGreaterThan(0);
     gate.resolve();
     await t.until("Ready.");
-    expect(String(preview.title).trim()).toBe("Help");
+    expect(String(preview.title).trim()).toBe("Keyboard reference");
     expect(preview.scrollTop).toBe(top);
   } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);

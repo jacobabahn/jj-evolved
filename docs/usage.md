@@ -60,13 +60,13 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `l` / Right | Browse the selected revision's changed files; `h` / Left returns |
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
-| `?` | Show help |
+| `?` | Open scrollable help; Escape or `?` closes it |
 | Escape | Cancel a prompt |
 | `q`, Ctrl-C | Quit |
 
 ## Preview and overlays
 
-Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
+Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d` or `w` reopens it for the revision preview or status. `?` opens a separate help overlay even when the preview is hidden. Escape returns from status to the change preview. The choice lasts for the current session.
 
 Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
 
@@ -197,3 +197,7 @@ Suggestions are computed locally without running commands or contacting remotes.
 Bookmark names are quoted when needed, and a small list of common built-in jj
 functions is included. This is token completion, not a full revset parser: custom
 aliases, argument-aware suggestions, and syntax validation remain jj's job.
+
+Help shows the active preset (`custom` when file overrides are present). Use j/k or arrows to scroll and PgUp/PgDn to page. Sections separate navigation, preview controls, editing, history, bookmarks, symbols, and fixed prompt keys. Unbound actions available in the action menu are marked `(Space menu)`.
+
+Preset precedence is `--keys PRESET`, then `JJ_EVOLVED_KEYS`, then the file’s `preset`, then `jjui`. File `bindings` overrides apply on top of the selected preset. For example, `bun start --keys legacy` selects the earlier layout without editing the configuration.

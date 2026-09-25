@@ -20,31 +20,32 @@ exports[`styled selection and help layout at 80 columns: selected revision 80 1`
 `;
 
 exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
-"▀─ Help ─────────────────────────────────────┐
-Keyboard reference                           │
-                                             │
-j/down / k/up      Move through revisions    │
-Tab                Switch revisions / preview│
-focus                                        │
-p                  Toggle preview pane       │
-PgUp / PgDn        Scroll preview by page    │
-^P / ^N            Scroll preview by line,   │
-keeping graph focus                          │
-^U / ^D            Scroll preview by half pag│
-w                  Working-copy status       │
-^R                 Refresh history           │
-L                  Enter a revset; empty     │
-restores all()                               │
-/                  Search descriptions,      │
-bookmarks and ID prefixes in revset          │
-' / "              Next / previous search    │
-match, wrapping                              │
-@ / [ / ]          Jump to working copy /    │
-parent / child                               │
-^O                 Return from temporary     │
-reveal                                       │
-Esc                Clear accepted search     │
-─────────────────────────────────────────────┘"
+"┌─ Help · keys: jjui ───────────────────────────────────────────┐
+│Keyboard reference · jjui preset                               │
+│Switch: --keys jjui|legacy, JJ_EVOLVED_KEYS, keybindings.json  │
+│┌─ Keyboard reference ────────────────────────────────────────┐│
+││Navigate                                                     ▀│
+││j/down / k/up    Move through revisions                       │
+││Tab              Switch focus between the revisions and the   │
+││                 preview                                      │
+││@ / [ / ]        Jump to the working copy / parent / child;   │
+││                 choose when there are several                │
+││^O               Return from a temporary reveal to the        │
+││                 previous view                                │
+││^L               Load 200 more revisions, keeping the         │
+││                 selection                                    │
+││^R               Refresh history now; external changes also   │
+││                 refresh automatically                        │
+││?                Show this help                               │
+││q / Ctrl-C       Quit                                         │
+││                                                              │
+││Preview pane                                                  │
+││p                Hide or show the preview; the graph expands  │
+││                                                              │
+│└─────────────────────────────────────────────────────────────┘│
+│Esc/? close  j/k scroll  PgUp/PgDn page                        │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘"
 `;
 
 exports[`styled selection and help layout at 80 columns: footer styles 80 1`] = `
@@ -79,31 +80,32 @@ exports[`styled selection and help layout at 120 columns: selected revision 120 
 `;
 
 exports[`styled selection and help layout at 120 columns: help layout 120 1`] = `
-"▀─ Help ─────────────────────────────────────────────────────────────┐
-Keyboard reference                                                   │
-                                                                     │
-j/down / k/up      Move through revisions                            │
-Tab                Switch revisions / preview focus                  │
-p                  Toggle preview pane                               │
-PgUp / PgDn        Scroll preview by page                            │
-^P / ^N            Scroll preview by line, keeping graph focus       │
-^U / ^D            Scroll preview by half page                       │
-w                  Working-copy status                               │
-^R                 Refresh history                                   │
-L                  Enter a revset; empty restores all()              │
-/                  Search descriptions, bookmarks and ID prefixes in │
-revset                                                               │
-' / "              Next / previous search match, wrapping            │
-@ / [ / ]          Jump to working copy / parent / child             │
-^O                 Return from temporary reveal                      │
-Esc                Clear accepted search                             │
-* / +             Search match / revision outside active revset      │
-Enter              Describe selected change in the app, including    │
-multiline                                                            │
-D                  Describe selected change in JJ's configured editor│
-e                  Make selection the working copy immediately       │
-r / S              Choose rebase / squash destination in the graph   │
-─────────────────────────────────────────────────────────────────────┘"
+"┌─ Help · keys: jjui ─────────────────────────────────────────────────────────────────────────────┐
+│Keyboard reference · jjui preset                                                                 │
+│Switch: --keys jjui|legacy, JJ_EVOLVED_KEYS, keybindings.json                                    │
+│┌─ Keyboard reference ──────────────────────────────────────────────────────────────────────────┐│
+││Navigate                                                                                     ▀ ││
+││j/down / k/up    Move through revisions                                                        ││
+││Tab              Switch focus between the revisions and the preview                            ││
+││@ / [ / ]        Jump to the working copy / parent / child; choose when there are several      ││
+││^O               Return from a temporary reveal to the previous view                           ││
+││^L               Load 200 more revisions, keeping the selection                                ││
+││^R               Refresh history now; external changes also refresh automatically              ││
+││?                Show this help                                                                ││
+││q / Ctrl-C       Quit                                                                          ││
+││                                                                                               ││
+││Preview pane                                                                                   ││
+││p                Hide or show the preview; the graph expands when hidden                       ││
+││PgUp / PgDn      Scroll the preview by page                                                    ││
+││^P / ^N          Scroll the preview by line, keeping graph focus                               ││
+││^U / ^D          Scroll the preview by half page                                               ││
+││d                Show the selected revision's diff                                             ││
+││l/Right          Browse files changed in the selected revision; h/Left returns                 ││
+││                                                                                               ││
+│└───────────────────────────────────────────────────────────────────────────────────────────────┘│
+│Esc/? close  j/k scroll  PgUp/PgDn page                                                          │
+│                                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘"
 `;
 
 exports[`styled selection and help layout at 120 columns: footer styles 120 1`] = `

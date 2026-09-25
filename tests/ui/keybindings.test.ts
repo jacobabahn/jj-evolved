@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { actionForKey, keyLabel, defaultBindings, jjuiBindings, legacyBindings, parseKeybindings, readKeybindings } from "../../src/ui/keybindings";
+import { actionForKey, keyLabel, defaultBindings, jjuiBindings, legacyBindings, loadKeybindings, parseKeybindings, parsePreset, presetNames, readKeybindings } from "../../src/ui/keybindings";
 
 test("defaults and overrides preserve independent arrays and support unbinding", () => {
   expect(defaultBindings).toBe(jjuiBindings);
@@ -55,14 +55,33 @@ test("missing configuration uses defaults and invalid files report their path", 
   const directory = await mkdtemp(join(tmpdir(), "jj-evolved-keys-"));
   const path = join(directory, "keybindings.json");
   try {
-    expect(await readKeybindings(path)).toEqual(defaultBindings);
+    expect(await readKeybindings(path)).toEqual({ preset: "jjui", custom: false, bindings: defaultBindings });
+    expect(await readKeybindings(path, "legacy")).toEqual({ preset: "legacy", custom: false, bindings: legacyBindings });
     await writeFile(path, '{"bindings":{"help":["h"]}}');
-    expect((await readKeybindings(path)).help).toEqual(["h"]);
+    expect(await readKeybindings(path)).toMatchObject({ preset: "jjui", custom: true, bindings: { help: ["h"], describe: ["return"] } });
     await writeFile(path, '{"preset":"legacy"}');
-    expect((await readKeybindings(path)).describe).toEqual(["d"]);
+    expect(await readKeybindings(path)).toMatchObject({ preset: "legacy", custom: false, bindings: { describe: ["d"] } });
     await writeFile(path, "not json");
     await expect(readKeybindings(path)).rejects.toThrow(path);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("an explicit preset replaces the file preset while file bindings still apply", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-keys-"));
+  const path = join(directory, "keybindings.json");
+  try {
+    await writeFile(path, '{"preset":"jjui","bindings":{"help":["h"]}}');
+    expect(await readKeybindings(path, "legacy")).toMatchObject({ preset: "legacy", custom: true, bindings: { help: ["h"], describe: ["d"], refresh: ["r"] } });
+    expect(await readKeybindings(path, "jjui")).toMatchObject({ preset: "jjui", bindings: { help: ["h"], describe: ["return"] } });
+    await writeFile(path, '{"preset":"vim"}');
+    await expect(readKeybindings(path, "legacy")).rejects.toThrow('Unknown preset "vim"');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+  expect(presetNames).toEqual(["jjui", "legacy"]);
+  expect(parsePreset("legacy")).toBe("legacy");
+  expect(() => parsePreset("vim", "--keys")).toThrow('Unknown preset "vim" from --keys. Use one of: jjui, legacy.');
+  expect(() => parsePreset(undefined)).toThrow("Use one of: jjui, legacy.");
+  expect(loadKeybindings({ bindings: {} })).toEqual({ preset: "jjui", custom: false, bindings: jjuiBindings });
+  expect(loadKeybindings({ preset: "jjui", bindings: { down: ["x"] } }, "legacy")).toMatchObject({ preset: "legacy", custom: true, bindings: { down: ["x"], up: ["k", "up"], describe: ["d"] } });
 });
 
 test("labels name control, named and literal keys", () => {

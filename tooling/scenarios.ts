@@ -7,6 +7,23 @@ type Scenario = { bindings?: Keybindings; name: string; title: string; run: (ui:
 
 export const scenarios: Scenario[] = [
   {
+    name: "help-overlay", title: "Structured help, scrolling and return to the graph",
+    async run(ui) {
+      await ui.until("Empty change.");
+      ui.key("?");
+      await ui.until("Help · keys: jjui");
+      await ui.capture("Help sections and active preset");
+      ui.key("\x1b[6~");
+      await ui.capture("One page through keyboard help");
+      await ui.resize(80, 24);
+      await ui.capture("Descriptions wrap independently at 80 columns");
+      ui.key("ESCAPE");
+      await ui.until("Empty change.");
+      assert.equal(ui.screen.renderer.root.findDescendantById("action-overlay")?.visible, false);
+      await ui.capture("Escape restores the selected change");
+    },
+  },
+  {
     name: "keybindings", title: "Custom browse keys and unchanged text input",
     bindings: parseKeybindings({ bindings: { down: ["x", "down"], help: ["h"], describe: ["D"], describeExternal: [], togglePreview: ["P"] } }),
     async run(ui) {
@@ -16,11 +33,13 @@ export const scenarios: Scenario[] = [
       assert.equal(ui.screen.renderer.root.findDescendantById("preview")?.visible, false);
       ui.key("h");
       await ui.until("Keyboard reference");
-      assert.equal(ui.node("preview").visible, true);
+      assert.equal(ui.screen.renderer.root.findDescendantById("preview")?.visible, false);
       assert(ui.screen.captureCharFrame().includes("x/down / k/up"));
       await ui.capture("Custom movement and describe shortcuts in help");
       ui.key("j");
       await ui.until("Keyboard reference");
+      ui.key("h");
+      ui.key("P");
       ui.key("x");
       await ui.until("+ hello from jj-evolved");
       await ui.capture("Remapped x selects the parent change");
@@ -186,8 +205,8 @@ export const scenarios: Scenario[] = [
       await ui.resize(80, 24);
       await ui.until("Keyboard reference");
       await ui.capture("Help at 80x24");
-      await ui.scroll("preview", "down");
-      await ui.capture("Scroll the narrow help pane");
+      await ui.scroll("overlay-preview", "down");
+      await ui.capture("Scroll the narrow help overlay");
     },
   },
   {
