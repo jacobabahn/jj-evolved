@@ -29,8 +29,8 @@ type Prompt =
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision }
   | { kind: "new"; parent: Revision }
-  | { kind: "picker"; choices: Choice[] }
-  | { kind: "text"; accept: (value: string) => void }
+  | { kind: "picker"; title: string; choices: Choice[]; attach?: () => void }
+  | { kind: "text"; label: string; accept: (value: string) => void }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
 type Search = { query: string; matches: Revision[] };
@@ -155,6 +155,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let destinationSearch: RevisionSearch | null = null;
   let prompt: Prompt = { kind: "browse" };
+  let levels: (() => void)[] = [];
   let completionItems: Completion[] = [];
   let completionOriginal = "";
   let completionIndex = -1;
@@ -566,12 +567,35 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     completing = false;
     renderCompletions();
   }
+  function escHint(top: string) { return `Esc ${levels.length ? "back" : top}`; }
+  function pushLevel() {
+    const current = prompt;
+    if (current.kind === "picker") {
+      const index = chooser.getSelectedIndex(), hints = overlay.hints.content;
+      levels.push(() => { pick(current.title, current.choices, { attach: current.attach, replace: true }); chooser.setSelectedIndex(index); overlay.hints.content = hints; });
+    } else if (current.kind === "text") {
+      const value = input.value;
+      levels.push(() => openPrompt(current, current.label, value));
+    } else if (current.kind === "inline") levels.push(() => resumeInline(current));
+  }
+  function goBack() {
+    const level = levels.pop();
+    if (!level) { closePrompt(); void loadPreview(); return; }
+    destinationSearch?.dispose();
+    destinationSearch = null;
+    review.cancel();
+    descriptionInput.blur();
+    descriptionInput.visible = false;
+    prompt = { kind: "browse" };
+    level();
+  }
   function closePrompt() {
     destinationSearch?.dispose();
     destinationSearch = null;
     suggestions.visible = false;
     if (prompt.kind === "form") prompt.form.dispose();
     prompt = { kind: "browse" };
+    levels = [];
     review.cancel();
     previews.cancel();
     overlay.visible = false;
@@ -591,6 +615,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     scheduleFocusRefresh();
   }
   function openPrompt(next: Exclude<Prompt, { kind: "browse" }>, label: string, value = "") {
+    pushLevel();
     activateOverlay(label);
     chooser.visible = false;
     prompt = next;
@@ -601,7 +626,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlayPreview.visible = false;
     }
     if (next.kind === "describe" || next.kind === "new" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
-    promptLabel.content = terminalText(`${label}  [Enter apply · Esc cancel]`);
+    if (next.kind === "text") overlay.hints.content = `Enter apply  ${escHint("cancel")}`;
+    promptLabel.content = terminalText(`${label}  [Enter apply · ${escHint("cancel")}]`);
     promptLabel.visible = true;
     input.placeholder = "";
     input.value = terminalText(value);
@@ -615,14 +641,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       descriptionInput.setText(terminalText(value));
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
-      overlay.hints.content = "Enter save · Shift/Alt+Enter newline · Esc cancel";
+      overlay.hints.content = `Enter save · Shift/Alt+Enter newline · ${escHint("cancel")}`;
     }
     if (next.kind === "revset") {
       overlay.height = 15;
-      overlay.hints.content = "Tab complete/cycle  Enter apply  Esc cancel";
+      overlay.hints.content = `Tab complete/cycle  Enter apply  ${escHint("cancel")}`;
       updateCompletions();
     }
-    if (next.kind === "confirm") overlay.hints.content = "Enter apply  p refresh preview  Esc cancel  PgUp/Dn scroll";
+    if (next.kind === "confirm") overlay.hints.content = `Enter apply  p refresh preview  ${escHint("cancel")}  PgUp/Dn scroll`;
   }
   async function submit() {
     if (isBusy()) return;
@@ -668,10 +694,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function confirm(action: Mutation) {
     const previous = prompt;
-    const value = input.value;
-    const label = String(overlay.title || "Edit action").trim();
     const back = previous.kind === "inline" ? () => resumeInline(previous) : previous.kind === "confirm" ? previous.back : null;
-    const edit = back || (previous.kind === "text" ? () => openPrompt(previous, label, value) : previous.kind === "confirm" ? previous.edit : null);
+    const edit = back || (previous.kind === "text" ? goBack : previous.kind === "confirm" ? previous.edit : null);
     void run("Preparing operation preview…", async () => {
       const prepared = await review.prepare(action);
       if (!prepared) return;
@@ -691,7 +715,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     });
   }
   function ask(label: string, value: string, accept: (value: string) => void) {
-    openPrompt({ kind: "text", accept }, label, value);
+    openPrompt({ kind: "text", label, accept }, label, value);
   }
   function applyTheme(theme: Theme) {
     colors = theme;
@@ -781,18 +805,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       loading: `${choice.name}\n\n${choice.description}`, read: choice.preview });
     else showOverlay(`${choice.name}\n\n${choice.description}`, "Selection");
   }
-  function pick(title: string, choices: Choice[]) {
+  function pick(title: string, choices: Choice[], options: { attach?: () => void; replace?: boolean } = {}) {
+    if (!options.replace) pushLevel();
     activateOverlay(title);
     input.blur();
     input.visible = false;
     promptLabel.visible = false;
-    prompt = { kind: "picker", choices };
+    prompt = { kind: "picker", title, choices, attach: options.attach };
     chooser.visible = true;
     chooser.showDescription = true;
     chooser.options = choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
     chooser.setSelectedIndex(0);
     chooser.focus();
-    overlay.hints.content = "j/k choose  Enter select  Esc cancel  PgUp/Dn preview";
+    overlay.hints.content = `j/k choose  Enter select  ${escHint("close")}  PgUp/Dn preview`;
+    options.attach?.();
     previewChoice();
   }
   function destination(title: string, source: Revision | null, accept: (revision: Revision) => void, searchImmediately = false) {
@@ -807,19 +833,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         choose: () => { destinationSearch?.dispose(); destinationSearch = null; accept(item); },
         preview: () => repository.diff(item),
       }));
-      pick(title, choices(revisions));
-      destinationSearch = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, matches => {
-        if (prompt.kind !== "picker") return;
-        prompt.choices = choices(matches);
-        chooser.options = prompt.choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
-        chooser.setSelectedIndex(0);
-        if (matches.length) previewChoice();
-        else showOverlay("No matching destinations. Edit the search or press Escape to clear it.", "Destinations");
-        overlay.report(`${matches.length} destinations`);
-      });
-      overlay.fields.add(destinationSearch.input);
-      if (searchImmediately) destinationSearch.start();
-      overlay.hints.content = "j/k choose · / search all destinations · Enter select · Esc back";
+      pick(title, choices(revisions), { attach: () => {
+        destinationSearch = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, matches => {
+          if (prompt.kind !== "picker") return;
+          prompt.choices = choices(matches);
+          chooser.options = prompt.choices.map(choice => ({ name: terminalText(choice.name), description: terminalText(choice.description) }));
+          chooser.setSelectedIndex(0);
+          if (matches.length) previewChoice();
+          else showOverlay("No matching destinations. Edit the search or press Escape to clear it.", "Destinations");
+          overlay.report(`${matches.length} destinations`);
+        });
+        overlay.fields.add(destinationSearch.input);
+        overlay.hints.content = `j/k choose · / search all destinations · Enter select · ${escHint("close")}`;
+      } });
+      if (searchImmediately) destinationSearch?.start();
     });
   }
   function chooseFiles(revision: Revision, title: string, accept: (paths: string[]) => void) {
@@ -827,17 +854,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const files = await repository.files(revision);
       if (stopped) return;
       const chosen = new Set<string>();
-      function renderFiles() {
+      function renderFiles(replace = false) {
         pick(title, [
           { name: `Continue with ${chosen.size} files`, description: "Enter to review the selected group", choose: () => {
-            if (!chosen.size) { report("Select at least one file.", true); renderFiles(); return; }
+            if (!chosen.size) { report("Select at least one file.", true); renderFiles(true); return; }
             accept([...chosen]);
           } },
           ...files.map(file => ({ name: `${chosen.has(file.path) ? "[x]" : "[ ]"} ${file.path}`, description: file.status,
-            choose: () => { const index = chooser.getSelectedIndex(); chosen.has(file.path) ? chosen.delete(file.path) : chosen.add(file.path); renderFiles(); chooser.setSelectedIndex(index); },
+            choose: () => { const index = chooser.getSelectedIndex(); chosen.has(file.path) ? chosen.delete(file.path) : chosen.add(file.path); renderFiles(true); chooser.setSelectedIndex(index); },
             preview: () => repository.diff(revision, [file.path]),
           })),
-        ]);
+        ], { replace });
       }
       renderFiles();
     });
@@ -919,7 +946,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         ]),
       }));
       if (operations.length === limit) choices.push({ name: "Load older operations", description: `Show up to ${limit + 50} operations`, choose: () => showOperations(limit + 50) });
-      pick("Operation history", choices);
+      pick("Operation history", choices, { replace: limit > 50 });
     });
   }
   function showEvolution(revision: Revision, limit = 50, operationId?: string, selectedIndex = 0) {
@@ -936,9 +963,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         name: "Load older versions", description: `Show up to ${limit + 50} versions`,
         choose: () => showEvolution(revision, limit + 50, page.operationId, page.entries.length),
       });
-      pick("Change evolution", choices);
+      pick("Change evolution", choices, { replace: operationId !== undefined });
       chooser.setSelectedIndex(selectedIndex);
-      overlay.hints.content = "j/k version  Enter preview  Esc close  PgUp/Dn scroll";
+      overlay.hints.content = `j/k version  Enter preview  ${escHint("close")}  PgUp/Dn scroll`;
       if (!page.entries.length) showOverlay("No evolution history is available for this revision.", "Change evolution");
     });
   }
@@ -1129,7 +1156,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind !== "browse") {
       if (!isBusy() && prompt.kind === "picker" && destinationSearch?.handleKey(key)) return;
       if (isBusy()) { key.preventDefault(); return; }
-      if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
+      if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) { prompt.back(); void loadPreview(); } else goBack(); }
       else if (prompt.kind === "describe" && key.name === "return" && (key.shift || key.meta)) { key.preventDefault(); descriptionInput.newLine(); }
       else if (prompt.kind !== "describe" && (key.name === "pageup" || key.name === "pagedown")) { key.preventDefault(); overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3)); }
       else if (prompt.kind === "picker") {

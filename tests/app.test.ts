@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { SelectRenderable, TextRenderable, TextareaRenderable } from "@opentui/core";
+import { InputRenderable, SelectRenderable, TextRenderable, TextareaRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createApp } from "../src/app";
 import { Repository } from "../src/repository/repository";
@@ -27,16 +27,25 @@ async function setup(kittyKeyboard = false) {
     screen.mockInput.pressEnter();
     await until("Ready.");
   }
+  function chooser() {
+    const value = screen.renderer.root.findDescendantById("action-choices");
+    if (!(value instanceof SelectRenderable)) throw new Error("Missing action picker");
+    return value;
+  }
   function choose(name: string) {
-    const chooser = screen.renderer.root.findDescendantById("action-choices");
-    if (!(chooser instanceof SelectRenderable)) throw new Error("Missing action picker");
-    for (let index = 0; index < chooser.options.length; index++) {
-      if (chooser.getSelectedOption()?.name === name) { screen.mockInput.pressEnter(); return; }
+    const picker = chooser();
+    for (let index = 0; index < picker.options.length; index++) {
+      if (picker.getSelectedOption()?.name === name) { screen.mockInput.pressEnter(); return; }
       screen.mockInput.pressKey("j");
     }
     throw new Error(`Missing choice: ${name}`);
   }
-  return { f, screen, repo, app, until, prompt, choose, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
+  async function closed() {
+    const overlay = screen.renderer.root.findDescendantById("action-overlay");
+    for (let attempt = 0; attempt < 150 && overlay?.visible; attempt++) { await screen.renderOnce(); await Bun.sleep(10); }
+    if (overlay?.visible) throw new Error(`Expected the overlay to close:\n${screen.captureCharFrame()}`);
+  }
+  return { f, screen, repo, app, until, prompt, chooser, choose, closed, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
 
 test("absorb menu preview cancels, rejects stale state, refreshes and applies", async () => {
@@ -59,6 +68,10 @@ test("absorb menu preview cancels, rejects stale state, refreshes and applies", 
     }
     expect(sawRemainder).toBe(true);
     t.screen.mockInput.pressEscape();
+    await t.until("Esc close");
+    expect(t.chooser().getSelectedOption()?.name).toBe("Absorb into ancestors");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
     await t.until("Change preview");
     expect(await t.repo.operationId()).toBe(operation);
     t.screen.mockInput.pressKey("A");
@@ -114,7 +127,12 @@ test("evolution menu and shortcut browse description patches without changing re
     t.screen.mockInput.pressKey("j");
     await t.until("new empty commit");
     expect(await t.repo.operationId()).toBe(operation);
+    expect(t.screen.captureCharFrame()).toContain("Esc back");
     t.screen.mockInput.pressEscape();
+    await t.until("Esc close");
+    expect(t.chooser().getSelectedOption()?.name).toBe("Change evolution");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
     await t.until("Change preview");
     t.screen.resize(80, 24);
     t.screen.mockInput.pressKey("v");
@@ -386,6 +404,63 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
   } finally { await t.cleanup(); }
 }, 15_000);
 
+test("Escape and h return from a bookmark's actions to the bookmark list before closing", async () => {
+  const t = await setup();
+  try {
+    t.screen.mockInput.pressKey("b");
+    await t.until("Git remotes");
+    await t.until("Ready.");
+    expect(t.screen.captureCharFrame()).toContain("Esc close");
+    t.choose("feature");
+    await t.until("Move bookmark");
+    expect(t.screen.captureCharFrame()).toContain("Esc back");
+    t.screen.mockInput.pressKey("j");
+    t.screen.mockInput.pressEscape();
+    await t.until("Esc close");
+    expect(t.chooser().getSelectedOption()?.name).toBe("feature");
+    expect(t.screen.captureCharFrame()).not.toContain("Move bookmark");
+    t.choose("feature");
+    await t.until("Move bookmark");
+    t.screen.mockInput.pressKey("h");
+    await t.until("Esc close");
+    expect(t.chooser().getSelectedOption()?.name).toBe("feature");
+    t.choose("feature");
+    t.choose("Rename bookmark");
+    await t.until("New bookmark name");
+    expect(t.screen.captureCharFrame()).toContain("Esc back");
+    t.screen.mockInput.pressEscape();
+    await t.until("Move bookmark");
+    expect(t.chooser().getSelectedOption()?.name).toBe("Rename bookmark");
+    t.screen.mockInput.pressEscape();
+    await t.until("Esc close");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    expect((await t.repo.bookmarks()).some(b => b.name === "feature")).toBe(true);
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("Escape returns from operation actions to the operation list with the same operation selected", async () => {
+  const t = await setup();
+  try {
+    t.screen.mockInput.pressKey("o");
+    await t.until("Operation history");
+    await t.until("Ready.");
+    t.screen.mockInput.pressKey("j");
+    const name = t.chooser().getSelectedOption()?.name;
+    expect(name).not.toContain("@ ");
+    t.screen.mockInput.pressEnter();
+    await t.until("Restore this operation");
+    expect(t.screen.captureCharFrame()).toContain("Esc back");
+    t.screen.mockInput.pressEscape();
+    await t.until("Esc close");
+    expect(t.screen.captureCharFrame()).not.toContain("Restore this operation");
+    expect(t.chooser().getSelectedIndex()).toBe(1);
+    expect(t.chooser().getSelectedOption()?.name).toBe(name);
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+  } finally { await t.cleanup(); }
+}, 15_000);
+
 test("stale action confirmation refuses to edit and cancellation keeps the working copy", async () => {
   const t = await setup();
   try {
@@ -395,7 +470,10 @@ test("stale action confirmation refuses to edit and cancellation keeps the worki
     t.screen.mockInput.pressEnter();
     await t.until("Confirm operation");
     t.screen.mockInput.pressEscape();
-    await Bun.sleep(50);
+    await t.until("Esc close");
+    expect(t.chooser().getSelectedOption()?.name).toBe("Edit change");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
     expect((await t.repo.snapshot("@")).revisions[0]?.commitId).toBe(original?.commitId);
     t.screen.mockInput.pressKey(" ");
     t.screen.mockInput.pressEnter();
@@ -964,7 +1042,15 @@ test("split second-description choice cancels without writes and preserves multi
       await t.until("Keep original description");
       if (cancel) {
         t.screen.mockInput.pressEscape();
-        await t.until("Change preview");
+        await t.until("First change description");
+        expect((t.screen.renderer.root.findDescendantById("prompt-input") as InputRenderable).value).toBe("Selected files");
+        t.screen.mockInput.pressEscape();
+        await t.until("Continue with 1 files");
+        t.screen.mockInput.pressEscape();
+        await t.until("Esc close");
+        expect(t.chooser().getSelectedOption()?.name).toBe("Split change");
+        t.screen.mockInput.pressEscape();
+        await t.closed();
         expect(await t.repo.operationId()).toBe(before);
       } else {
         t.choose("Keep original description");
