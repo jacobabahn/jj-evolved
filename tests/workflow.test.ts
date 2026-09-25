@@ -61,7 +61,7 @@ test("destination search reaches old revisions in bookmark, history form and inl
     await t.searchDestination("FEATURE");
     expect(t.node<SelectRenderable>("action-choices").options).toHaveLength(1);
     t.screen.mockInput.pressEnter();
-    await t.text("Confirm operation");
+    await t.text("Review before applying");
     await t.escape();
     for (const action of ["Rebase change", "Squash changes"]) {
       t.screen.mockInput.pressKey(" ");
@@ -77,11 +77,11 @@ test("destination search reaches old revisions in bookmark, history form and inl
       await t.escape();
     }
     t.screen.mockInput.pressKey("r");
-    await t.text("Ready.");
+    await t.text("Rebase: choose destination");
     await t.searchDestination("Initial feature");
     t.screen.mockInput.pressEnter();
     await t.text("temporary view");
-    await t.text("Ready.");
+    await t.text("Initial feature");
     expect(t.node<RevisionLog>("revisions").getSelectedIndex()).toBeGreaterThanOrEqual(0);
     expect(t.screen.captureCharFrame()).toContain("Initial feature");
     expect(t.node<any>("inline-action").visible).toBe(true);

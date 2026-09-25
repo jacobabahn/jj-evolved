@@ -3,6 +3,7 @@ import { BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core
 import { terminalText } from "../terminal-text";
 
 export class ActionOverlay extends BoxRenderable {
+  onError?: (message: string) => void;
   readonly context: TextRenderable;
   readonly fields: BoxRenderable;
   readonly feedback: TextRenderable;
@@ -32,6 +33,7 @@ export class ActionOverlay extends BoxRenderable {
   }
 
   report(message: string, error = false) {
+    if (error) this.onError?.(message);
     this.feedback.visible = Boolean(message);
     this.feedback.fg = error ? getTheme(this.ctx).conflict : getTheme(this.ctx).muted;
     this.feedback.content = terminalText(message);

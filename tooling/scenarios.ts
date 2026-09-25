@@ -7,6 +7,33 @@ type Scenario = { bindings?: Keybindings; name: string; title: string; run: (ui:
 
 export const scenarios: Scenario[] = [
   {
+    name: "mode-signals", title: "Destination mode, focused preview and retained errors",
+    async run(ui) {
+      ui.key("r");
+      await ui.until("Rebase: choose destination");
+      await ui.capture("Rebase mode labels and colors the destination pane");
+      ui.key("j"); ui.key("j"); ui.key("RETURN");
+      await ui.until("Rebase preview");
+      assert.equal(ui.screen.renderer.root.findDescendantById("prompt-label")?.visible, false);
+      await ui.capture("Operation review keeps source context with less chrome");
+      ui.key("ESCAPE"); await ui.until("Rebase: choose destination");
+      ui.key("ESCAPE"); await ui.until("Cancelled.");
+      ui.key("TAB"); await ui.until("(focused)");
+      await ui.until("Empty change.");
+      await ui.capture("Focused preview shows scrolling controls");
+      ui.key("TAB"); ui.key("L");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true }); await ui.type("foo("); ui.key("RETURN");
+      await ui.until("Error:");
+      await ui.capture("Invalid revset retains the draft and error");
+      ui.key("ESCAPE");
+      for (let i = 0; i < 100 && ui.screen.renderer.root.findDescendantById("action-overlay")?.visible; i++) { await Bun.sleep(10); await ui.screen.renderOnce(); }
+      assert.equal(ui.screen.renderer.root.findDescendantById("action-overlay")?.visible, false);
+      ui.key("e", { ctrl: true }); await ui.until("Last error");
+      await ui.capture("Full error stays available after closing the prompt");
+      ui.key("d"); await ui.until("Change preview");
+    },
+  },
+  {
     name: "keybindings", title: "Custom browse keys and unchanged text input",
     bindings: parseKeybindings({ bindings: { down: ["x", "down"], help: ["h"], describe: ["D"], describeExternal: [], togglePreview: ["P"] } }),
     async run(ui) {
@@ -198,7 +225,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Rebase from ●");
       ui.key("j"); ui.key("j");
       ui.key("RETURN");
-      await ui.until("Confirm operation");
+      await ui.until("Review before applying");
       await ui.until("Current tree");
       await ui.until("After rebase");
       await ui.capture("Review proposed and current trees");
@@ -231,7 +258,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Bookmark name");
       await ui.type("feature");
       ui.key("RETURN");
-      await ui.until("Confirm operation");
+      await ui.until("Review before applying");
       ui.key("RETURN");
       await ui.until("already exists");
       await ui.capture("Duplicate bookmark error retains the input");
@@ -254,7 +281,7 @@ export const scenarios: Scenario[] = [
       const target = snapshot.graph.findIndex(row => row.kind === "revision" && row.revision.workingCopy);
       const before = await ui.repo.operationId();
       await ui.drag(`bookmark-${row}-${badge}`, `revision-row-${target}`);
-      await ui.until("Confirm operation");
+      await ui.until("Review before applying");
       await ui.capture("Bookmark move preview");
       assert.equal(await ui.repo.operationId(), before);
       ui.key("ESCAPE");

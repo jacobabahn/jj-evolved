@@ -20,12 +20,24 @@ async function setup(kittyKeyboard = false) {
     }
     throw new Error(`Expected screen to contain ${text}:\n${screen.captureCharFrame()}`);
   }
-  async function prompt(value: string) {
+  async function overlayReady(text: string) {
+    await until(text);
+    for (let attempt = 0; attempt < 150; attempt++) {
+      await screen.renderOnce();
+      const overlay = screen.renderer.root.findDescendantById("action-overlay");
+      const feedback = screen.renderer.root.findDescendantById("action-overlay-feedback");
+      if (overlay?.visible && feedback && !feedback.visible) return;
+      await Bun.sleep(10);
+    }
+    throw new Error(`Expected overlay to finish loading ${text}:\n${screen.captureCharFrame()}`);
+  }
+  async function prompt(value: string, review = false) {
     screen.mockInput.pressKey("a", { ctrl: true });
     screen.mockInput.pressKey("k", { ctrl: true });
     await screen.mockInput.typeText(value);
     screen.mockInput.pressEnter();
-    await until("Ready.");
+    if (review) await overlayReady("Review before applying");
+    else await until("Ready.");
   }
   function choose(name: string) {
     const chooser = screen.renderer.root.findDescendantById("action-choices");
@@ -36,7 +48,7 @@ async function setup(kittyKeyboard = false) {
     }
     throw new Error(`Missing choice: ${name}`);
   }
-  return { f, screen, repo, app, until, prompt, choose, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
+  return { f, screen, repo, app, until, overlayReady, prompt, choose, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
 
 test("absorb menu preview cancels, rejects stale state, refreshes and applies", async () => {
@@ -67,7 +79,7 @@ test("absorb menu preview cancels, rejects stale state, refreshes and applies", 
     t.screen.mockInput.pressEnter();
     await t.until("Repository changed since this preview");
     t.screen.mockInput.pressKey("p");
-    await t.until("Ready.");
+    await t.overlayReady("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("absorb completed");
     expect(await t.f.jj("file", "show", "-r", "feature", "hello.txt")).toBe("absorbed through the UI\n");
@@ -149,7 +161,7 @@ for (const close of [false, true]) test(`late evolution previews are ignored, ov
     blockedCommit = current.commitId;
     t.screen.mockInput.pressKey("v");
     await started.promise;
-    await t.until("Ready.");
+    await t.overlayReady("Change evolution");
     t.screen.mockInput.pressKey("j");
     await t.until("Selection preview");
     if (close) t.screen.mockInput.pressEscape();
@@ -170,11 +182,11 @@ test("evolution loads older versions through the picker after an external rewrit
     await t.until("Ready.");
     t.screen.mockInput.pressKey("v");
     await t.until("Change evolution");
-    await t.until("Ready.");
+    await t.overlayReady("Change evolution");
     await t.f.jj("describe", "-m", "Later external version");
     const operation = await t.repo.operationId();
     t.choose("Load older versions");
-    await t.until("Ready.");
+    await t.overlayReady("History version 0");
     const chooser = t.screen.renderer.root.findDescendantById("action-choices");
     if (!(chooser instanceof SelectRenderable)) throw new Error("Missing version picker");
     expect(chooser.options).toHaveLength(52);
@@ -259,7 +271,7 @@ test("action menu edits the selected description and switches the working copy",
     expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Next change");
     t.screen.mockInput.pressKey(" ");
     t.choose("Edit change");
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("Ready.");
     expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Edited parent description");
@@ -274,7 +286,7 @@ test("e switches the working copy immediately without a confirmation prompt", as
     t.screen.mockInput.pressKey("e");
     await t.until("edit completed");
     expect((await t.repo.snapshot("@")).revisions[0]?.changeId).toBe(target);
-    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -351,13 +363,13 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
     await t.until("Bookmark name");
     await t.screen.mockInput.typeText("keyboard-bookmark");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("Ready.");
     expect((await t.repo.bookmarks()).some(b => b.name === "keyboard-bookmark")).toBe(true);
     t.screen.mockInput.pressKey("b");
     await t.until("Bookmarks");
-    await t.until("Ready.");
+    await t.overlayReady("Bookmarks");
     t.choose("keyboard-bookmark");
     await t.until("Rename bookmark");
     t.screen.mockInput.pressKey("j");
@@ -367,18 +379,18 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
     t.screen.mockInput.pressKey("k", { ctrl: true });
     await t.screen.mockInput.typeText("renamed-in-ui");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("Ready.");
     expect((await t.repo.bookmarks()).some(b => b.name === "renamed-in-ui")).toBe(true);
     t.screen.mockInput.pressKey("u");
-    await t.until("Confirm undo");
+    await t.until("Undo preview");
     t.screen.mockInput.pressEnter();
     await t.until("Ready.");
     expect((await t.repo.bookmarks()).some(b => b.name === "keyboard-bookmark")).toBe(true);
     t.screen.mockInput.pressKey("o");
     await t.until("Operation history");
-    await t.until("Ready.");
+    await t.overlayReady("Operation history");
     t.screen.mockInput.pressEnter();
     await t.until("Restore this operation");
     t.screen.mockInput.pressEscape();
@@ -393,13 +405,13 @@ test("stale action confirmation refuses to edit and cancellation keeps the worki
     t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressKey(" ");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
     expect((await t.repo.snapshot("@")).revisions[0]?.commitId).toBe(original?.commitId);
     t.screen.mockInput.pressKey(" ");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     await t.f.jj("bookmark", "create", "external");
     t.screen.mockInput.pressEnter();
     await t.until("Repository changed");
@@ -419,7 +431,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     t.screen.mockInput.pressKey(" ");
     t.choose("Split change");
     await t.until("Continue with 0 files");
-    await t.until("Ready.");
+    await t.overlayReady("Continue with 0 files");
     t.choose("[ ] one.txt");
     t.screen.mockInput.pressKey("k");
     t.choose("Continue with 1 files");
@@ -429,8 +441,8 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await t.until("Keep original description");
     t.choose("Edit second description");
     await t.until("Second change description  [Enter");
-    await t.prompt("Second group");
-    await t.until("Confirm operation");
+    await t.prompt("Second group", true);
+    await t.until("Review before applying");
     await t.until("Second change: Second group");
     t.screen.mockInput.pressEnter();
     await t.until("Ready.");
@@ -477,7 +489,7 @@ test("quick-action overlay keeps the graph visible and a failed name editable", 
     expect(input.y + input.height).toBeLessThan(overlay.y + overlay.height);
     await t.screen.mockInput.typeText("feature");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("already exists");
     expect(overlay.visible).toBe(true);
@@ -486,7 +498,7 @@ test("quick-action overlay keeps the graph visible and a failed name editable", 
     t.screen.mockInput.pressKey("k", { ctrl: true });
     await t.screen.mockInput.typeText("fixed-name");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("completed");
     expect(overlay.visible).toBe(false);
@@ -547,9 +559,9 @@ test("inline squash reviews a graph destination before applying", async () => {
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressKey("j");
     await t.until("Keep destination description");
-    expect(t.screen.captureCharFrame()).toContain("Revisions");
+    expect(t.screen.captureCharFrame()).toContain("Squash: choose destination");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     await t.until("Current tree");
     await t.until("After squash");
     const treeText = t.screen.renderer.root.findDescendantById("confirmation-trees-after");
@@ -573,7 +585,7 @@ test("inline squash reviews a graph destination before applying", async () => {
     await t.until("Enter preview");
     expect(t.screen.captureCharFrame()).toContain("Squash from ●");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     await t.until("Current tree");
     await t.until("After squash");
     t.screen.mockInput.pressEnter();
@@ -583,7 +595,7 @@ test("inline squash reviews a graph destination before applying", async () => {
     expect(target.description.trim()).toBe("Initial feature");
     expect((await t.repo.files(target)).map(file => file.path)).toContain("inline.txt");
     expect(t.screen.captureCharFrame()).not.toContain("Squash from ●");
-    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -677,7 +689,7 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressKey("r");
     t.screen.mockInput.pressEnter();
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     await t.until("Current tree");
     await t.until("After rebase");
     expect(await t.repo.operationId()).toBe(before);
@@ -721,7 +733,7 @@ test("dragging an individual bookmark highlights a change and moves only after c
     await t.until("Move feature →");
     expect(t.screen.captureCharFrame()).toContain(`→ @`);
     await t.screen.mockMouse.release(target.x + 2, target.y);
-    await t.until("Confirm operation");
+    await t.until("Review before applying");
     expect(await t.repo.bookmarks()).toEqual(before);
     expect(t.screen.captureCharFrame()).toContain("bookmark-move feature");
     t.screen.mockInput.pressEnter();
@@ -748,7 +760,7 @@ test("bookmark click, same-change drop, outside drop, Escape and right drag do n
       const y = mode === "same" ? badge.y : target.y;
       await t.screen.mockMouse.release(x, y, button);
       await t.screen.renderOnce();
-      expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+      expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
       expect(t.screen.captureCharFrame()).not.toContain("release to preview");
       expect(await t.repo.operationId()).toBe(before);
     }
@@ -762,7 +774,7 @@ test("bookmark drop confirmation can be cancelled and rejects an external operat
     const before = await t.repo.bookmarks();
     async function drop() {
       await t.screen.mockMouse.drag(badge.x + 2, badge.y, target.x + 2, target.y);
-      await t.until("Confirm operation");
+      await t.until("Review before applying");
     }
     await drop();
     t.screen.mockInput.pressEscape();
@@ -784,15 +796,15 @@ test("remote bookmark labels stay read-only and overlays block bookmark drags", 
     const before = await t.repo.operationId();
     await t.screen.mockMouse.drag(badge.x + 2, badge.y, target.x + 2, target.y);
     await t.screen.renderOnce();
-    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
     expect(await t.repo.operationId()).toBe(before);
     const local = await bookmarkDragTargets(t);
     t.screen.mockInput.pressKey("b");
     await t.until("Bookmarks");
-    await t.until("Ready.");
+    await t.overlayReady("Bookmarks");
     await t.screen.mockMouse.drag(local.badge.x + 2, local.badge.y, local.target.x + 2, local.target.y);
     await t.screen.renderOnce();
-    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
     expect(await t.repo.operationId()).toBe(before);
   } finally { await t.cleanup(); }
 }, 15_000);
@@ -811,8 +823,8 @@ test("dragging a change previews a rebase and applies only after confirmation", 
     expect(t.screen.captureCharFrame()).toContain("only this change");
     expect(t.screen.captureCharFrame()).toContain("→");
     await t.screen.mockMouse.release(target.x + 3, target.y);
-    await t.until("Confirm operation");
-    await t.until("Ready.");
+    await t.until("Review before applying");
+    await t.overlayReady("Review before applying");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressEnter();
     await t.until("rebase completed");
@@ -838,15 +850,15 @@ test("change clicks, invalid drops, Escape and cancelled previews do not rebase"
       if (mode === "escape") t.screen.mockInput.pressEscape();
       await t.screen.mockMouse.release(mode === "outside" ? 90 : x, mode === "same" ? badge.y : target.y, button);
       await t.screen.renderOnce();
-      expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+      expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
       expect(await t.repo.operationId()).toBe(before);
     }
     await t.screen.mockMouse.drag(x, badge.y, x, target.y);
-    await t.until("Confirm operation");
-    await t.until("Ready.");
+    await t.until("Review before applying");
+    await t.overlayReady("Review before applying");
     t.screen.mockInput.pressEscape();
     await t.until("diff --git");
-    expect(t.screen.captureCharFrame()).not.toContain("Confirm operation");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
     expect(await t.repo.operationId()).toBe(before);
   } finally { await t.cleanup(); }
 }, 15_000);
@@ -954,7 +966,7 @@ test("split second-description choice cancels without writes and preserves multi
       t.screen.mockInput.pressKey(" ");
       t.choose("Split change");
       await t.until("Continue with 0 files");
-      await t.until("Ready.");
+      await t.overlayReady("Continue with 0 files");
       t.choose("[ ] one.txt");
       t.screen.mockInput.pressKey("k");
       t.choose("Continue with 1 files");
@@ -968,7 +980,7 @@ test("split second-description choice cancels without writes and preserves multi
         expect(await t.repo.operationId()).toBe(before);
       } else {
         t.choose("Keep original description");
-        await t.until("Confirm operation");
+        await t.until("Review before applying");
         await t.until("Original body");
         t.screen.mockInput.pressEnter();
         await t.until("Ready.");
@@ -1129,7 +1141,7 @@ test("focus invalidates a reviewed operation until it is reviewed again", async 
   try {
     t.screen.mockInput.pressKey(" ");
     t.choose("Abandon change");
-    await t.until("Ready.");
+    await t.overlayReady("Review before applying");
     const operation = await t.repo.operationId();
     t.screen.renderer.emit("focus");
     await t.until("Preview may be stale");
@@ -1137,7 +1149,7 @@ test("focus invalidates a reviewed operation until it is reviewed again", async 
     await t.until("Review the action again");
     expect(await t.repo.operationId()).toBe(operation);
     t.screen.mockInput.pressKey("p");
-    await t.until("Ready.");
+    await t.overlayReady("Review before applying");
     t.screen.mockInput.pressEnter();
     await t.until("abandon completed");
   } finally { await t.cleanup(); }
