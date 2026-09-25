@@ -81,6 +81,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `w` | Show working-copy status |
 | `t` | Choose a theme |
 | `?` | Show keyboard help |
+| `Ctrl-E` | Reopen the last error in full |
 
 For a first history edit, select a change, press `r`, and select its new parent. Press Enter to review the proposed graph, then Enter again to apply. Escape backs out before applying. Use `u` to review an undo afterward.
 
@@ -132,3 +133,5 @@ Bug reports and pull requests are welcome. For bugs, include your OS, terminal, 
 - [Feature specification](docs/features.md) — scope and acceptance criteria.
 - [Implementation notes](docs/implementation.md) — architecture and repository operation handling.
 - [UI tooling](docs/ui-tooling.md) — renderer tests, snapshots, and recordings.
+
+Inline rebase and squash label the destination pane. Tab marks preview focus and shows scrolling controls in the footer. Errors remain available with `Ctrl-E`; Escape or the diff key returns to the selected change.

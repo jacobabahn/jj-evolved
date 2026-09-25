@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { InputRenderable, SelectRenderable } from "@opentui/core";
+import { InputRenderable, SelectRenderable, TextRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createApp } from "../src/app";
 import { Repository } from "../src/repository/repository";
@@ -20,6 +20,15 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
       await Bun.sleep(10);
     }
     throw new Error(`Missing ${text}:\n${screen.captureCharFrame()}`);
+  }
+  async function navigationFinished() {
+    for (let i = 0; i < 200; i++) {
+      await screen.renderOnce();
+      const message = screen.renderer.root.findDescendantById("message") as TextRenderable;
+      if (!["Navigating…", "Finding revision…", "Finding match…"].includes(message.plainText)) return;
+      await Bun.sleep(10);
+    }
+    throw new Error("Navigation did not finish");
   }
   function list() {
     const node = screen.renderer.root.findDescendantById("revisions");
@@ -49,7 +58,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
     screen.mockInput.pressEnter();
     await until("Ready.");
   }
-  return { f, repo, screen, app, until, list, search, filter, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
+  return { f, repo, screen, app, until, navigationFinished, list, search, filter, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
 
 test("search previews, wraps, cancels and clears without changing the revset or repository", async () => {
@@ -117,10 +126,10 @@ test("ancestry chooser includes filtered relatives, cancellation and repeated re
     await t.until("Choose parent");
     t.screen.mockInput.pressEnter();
     await t.until("temporary view");
-    await t.until("Ready.");
+    await t.navigationFinished();
     t.screen.mockInput.pressKey("[");
     await Bun.sleep(100);
-    await t.until("Ready.");
+    await t.navigationFinished();
     t.screen.mockInput.pressKey("o", { ctrl: true });
     await Bun.sleep(80);
     const frame = await t.until("revset: @");
@@ -222,7 +231,7 @@ test("children include all branches and empty ancestry leaves selection unchange
     expect(t.list().getSelectedIndex()).toBe(0);
     t.screen.mockInput.pressKey("@");
     await t.until("temporary view");
-    await t.until("Ready.");
+    await t.navigationFinished();
     const selected = t.list().getSelectedIndex();
     t.screen.mockInput.pressKey("]");
     await t.until("No child.");

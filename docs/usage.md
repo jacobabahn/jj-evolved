@@ -61,6 +61,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Show help |
+| `Ctrl-E` | Show the last error in full; Escape or `d` returns to the diff |
 | Escape | Cancel a prompt |
 | `q`, Ctrl-C | Quit |
 
@@ -197,3 +198,5 @@ Suggestions are computed locally without running commands or contacting remotes.
 Bookmark names are quoted when needed, and a small list of common built-in jj
 functions is included. This is token completion, not a full revset parser: custom
 aliases, argument-aware suggestions, and syntax validation remain jj's job.
+
+Inline rebase and squash retitle and recolor the revisions pane while choosing a destination. Tab adds `(focused)` to the preview title and changes the footer to scrolling controls. Confirmation previews keep the source context and use the operation name, with apply/cancel controls in the bottom hint. Read-only navigation preserves the message line; successful operations use a short `Ready.` message. Errors show their first line and the full-error shortcut. `lastError` is rebindable and defaults to `ctrl+e` in both presets; it also retains errors reported inside action overlays.

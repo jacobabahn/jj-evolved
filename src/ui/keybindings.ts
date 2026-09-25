@@ -14,7 +14,7 @@ export const jjuiBindings = {
   describe: ["return"], describeExternal: ["D"], edit: ["e"], rebase: ["r"], squash: ["S"],
   abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
   new: ["n"], actions: ["space"], bookmarks: ["b"], git: ["g"], operations: ["o"], undo: ["u"], files: ["l", "right"],
-  diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], quit: ["q"],
+  diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], lastError: ["ctrl+e"], quit: ["q"],
 } satisfies Record<string, string[]>;
 export type Action = keyof typeof jjuiBindings;
 export type Keybindings = Record<Action, string[]>;
