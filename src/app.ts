@@ -43,7 +43,9 @@ function helpText(bindings: Keybindings) {
 ${row(["down", "up"])} Move through revisions
 ${row(["focus"])} Switch revisions / preview focus
 ${row(["togglePreview"])} Toggle preview pane
-${row(["pageUp", "pageDown"])} Scroll preview
+${row(["pageUp", "pageDown"])} Scroll preview by page
+${row(["previewUp", "previewDown"])} Scroll preview by line, keeping graph focus
+${row(["previewHalfUp", "previewHalfDown"])} Scroll preview by half page
 ${row(["status"])} Working-copy status
 ${row(["refresh"])} Refresh history
 ${row(["filter"])} Enter a revset; empty restores all()
@@ -53,19 +55,23 @@ ${row(["workingCopy", "parent", "child"])} Jump to working copy / parent / child
 ${row(["return"])} Return from temporary reveal
 ${row(["clearSearch"])} Clear accepted search
 * / +             Search match / revision outside active revset
-${row(["describe"])} Describe selected change, including multiline
+${row(["describe"])} Describe selected change in the app, including multiline
+${row(["describeExternal"])} Describe selected change in JJ's configured editor
 ${row(["edit"])} Make selection the working copy immediately
 ${row(["rebase", "squash"])} Choose rebase / squash destination in the graph
+${row(["split"])} Split selected files into a new first change
+${row(["abandon"])} Preview abandoning the selected change
 ${row(["absorb"])} Preview absorb into mutable ancestors
 ${row(["evolution"])} Browse selected change's evolution
 Drag change       Drop onto another change to preview rebase
 ${row(["new"])} Create an empty child of selection
-${row(["actions"])} Action menu: edit, rebase, squash, split, abandon
+${row(["actions"])} Action menu: edit, rebase, squash, split, abandon, status
 ${row(["bookmarks"])} Local and remote bookmarks
+${row(["git"])} Git remotes: fetch and push
 ${row(["operations"])} Operation history, inspection and restore
 ${row(["undo"])} Preview undo of the latest operation
-${row(["files"])} Browse files changed in selected revision
-${row(["preview"])} Return to the selected revision preview
+${row(["files"])} Browse files changed in selected revision; h/Left returns
+${row(["diff"])} Show the selected revision's diff preview
 ${row(["theme"])} Choose a theme, preview and save
 ${row(["help"])} Show this help
 ${keyLabel(bindings, "quit")} / Ctrl-C  Quit
@@ -82,6 +88,7 @@ Escape or dropping outside the graph cancels. Use ${keyLabel(bindings, "bookmark
 Tree lines show ancestry; ~ marks omitted history.
 ${row(["loadMore"])} Load 200 more revisions (keeps selection)
 Destination lists: / searches all revisions, including older history.
+Rebase destination: r moves the change only, s includes descendants.
 Select a revision to return from status or help.
 Commands use your installed jj and its repository rules.`; }
 
@@ -107,7 +114,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} move  ${bindingLabel("filter")} filter  ${bindingLabel("search")} search  ${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} match  ${bindingLabel("workingCopy")} work  ${bindingLabel("parent")}/${bindingLabel("child")} ancestry\n${bindingLabel("return")} return  ${bindingLabel("clearSearch")} clear  ${bindingLabel("actions")} actions  ${bindingLabel("togglePreview")} preview  ${bindingLabel("refresh")} refresh  ${bindingLabel("help")} help  ${bindingLabel("quit")} quit` });
+  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} move  ${bindingLabel("filter")} revset  ${bindingLabel("search")} search  ${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} match  ${bindingLabel("workingCopy")} work  ${bindingLabel("parent")}/${bindingLabel("child")} ancestry  ${bindingLabel("return")} return\n${bindingLabel("diff")} diff  ${bindingLabel("describe")} describe  ${bindingLabel("rebase")}/${bindingLabel("squash")} rebase/squash  ${bindingLabel("actions")} actions  ${bindingLabel("help")} help  ${bindingLabel("quit")} quit` });
   const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
@@ -606,6 +613,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.body.marginBottom = 0;
       overlay.top = "12%";
       descriptionInput.setText(terminalText(value));
+      descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
       overlay.hints.content = "Enter save · Shift/Alt+Enter newline · Esc cancel";
     }
@@ -986,25 +994,39 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pick("Actions", [
       { name: "Edit change", description: "Make selection the working copy", choose: () => confirm({ kind: "edit", revision }) },
       { name: "Describe change", description: `Edit the selected change's description (${bindingLabel("describe")})`, choose: () => describe(revision) },
-      { name: "Edit description in editor", description: "Edit the full multiline description in JJ's configured editor", choose: () => openExternal("JJ's description editor", () => repository.editDescription(revision), true) },
+      { name: "Edit description in editor", description: `Edit the full multiline description in JJ's configured editor (${bindingLabel("describeExternal")})`, choose: () => describeExternally(revision) },
       ...(revision.conflict ? [{ name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
-      { name: "Rebase change", description: "Source, destination, scope and preview", choose: () => openHistory(revision, "rebase", false) },
+      { name: "Rebase change", description: `Source, destination, scope and preview (${bindingLabel("rebase")} for inline)`, choose: () => openHistory(revision, "rebase", false) },
       { name: "Rebase change and descendants", description: "Move the selected stack", choose: () => openHistory(revision, "rebase", true) },
       { name: "Squash changes", description: "Source, destination, files and description", choose: () => openHistory(revision, "squash") },
       { name: "Squash interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => destination("Squash interactively into", revision, destination => editInteractively({ kind: "squash", revision, destination })) },
       { name: "Split interactively", description: "Choose files or hunks in JJ's configured diff editor", choose: () => editInteractively({ kind: "split", revision }) },
-      { name: "Split change", description: "Put selected files in a first change", choose: () => chooseFiles(revision, "Split files", files => ask("First change description", "", description => pick("Second change description", [
-        { name: "Keep original description", description: revision.description || "(no description)", choose: () => confirm({ kind: "split", revision, files, description, secondDescription: revision.description }) },
-        { name: "Edit second description", description: "Enter a replacement description", choose: () => ask("Second change description", revision.description.trim().includes("\n") ? "" : revision.description.trim(), secondDescription => confirm({ kind: "split", revision, files, description, secondDescription })) },
-      ]))) },
-      { name: "Git remotes", description: "Fetch, push and select a remote", choose: showRemotes },
+      { name: "Split change", description: `Put selected files in a first change (${bindingLabel("split")})`, choose: () => splitChange(revision) },
+      { name: "Git remotes", description: `Fetch, push and select a remote (${bindingLabel("git")})`, choose: showRemotes },
       { name: "Create bookmark", description: "Name the selected revision", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
-      { name: "Abandon change", description: "Remove selection and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
+      { name: "Abandon change", description: `Remove selection and rebase its descendants (${bindingLabel("abandon")})`, choose: () => confirm({ kind: "abandon", revision }) },
       { name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
       { name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
       { name: "Absorb into ancestors", description: `Preview automatic fixups into mutable ancestors (${bindingLabel("absorb")})`, choose: () => confirm({ kind: "absorb", revision }) },
       { name: "Change evolution", description: `Browse previous versions and their rewrite diffs (${bindingLabel("evolution")})`, choose: () => showEvolution(revision) },
+      { name: "Working-copy status", description: `Show jj status in the preview (${bindingLabel("status")})`, choose: () => { closePrompt(); showStatus(); } },
+      { name: "Load more revisions", description: `Load 200 more revisions, keeping selection (${bindingLabel("loadMore")})`, choose: () => { closePrompt(); void run("Loading more history…", loadMoreHistory); } },
     ]);
+  }
+  function describeExternally(revision: Revision) {
+    openExternal("JJ's description editor", () => repository.editDescription(revision), true);
+  }
+  function splitChange(revision: Revision) {
+    chooseFiles(revision, "Split files", files => ask("First change description", "", description => pick("Second change description", [
+      { name: "Keep original description", description: revision.description || "(no description)", choose: () => confirm({ kind: "split", revision, files, description, secondDescription: revision.description }) },
+      { name: "Edit second description", description: "Enter a replacement description", choose: () => ask("Second change description", revision.description.trim().includes("\n") ? "" : revision.description.trim(), secondDescription => confirm({ kind: "split", revision, files, description, secondDescription })) },
+    ])));
+  }
+  function showStatus() {
+    setPreviewVisible(true);
+    ++previewNavigation;
+    void previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…",
+      read: () => repository.status(), errorTitle: "Status error" });
   }
   function updateInlineHint() {
     if (prompt.kind !== "inline") return;
@@ -1015,9 +1037,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const outside = moving.filter(revision => !visible.has(revision.commitId)).length;
     list.markSource(revisions.findIndex(revision => revision.commitId === source.commitId), new Set(moving.map(revision => revision.commitId)));
     const scope = prompt.action.kind === "rebase"
-      ? `${prompt.action.descendants ? `Change and descendants: ${moving.length} changes` : "Selected change only"}${outside ? ` · ${outside} outside view` : ""} · Tab scope`
+      ? `${prompt.action.descendants ? `Change and descendants: ${moving.length} changes` : "Selected change only"}${outside ? ` · ${outside} outside view` : ""} · r change · s descendants`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · / search · L load more · Enter preview · Esc cancel`);
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · / search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
@@ -1074,7 +1096,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       key.preventDefault();
       if (isBusy()) return;
       if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
-      else if (key.sequence === "L") void run("Loading more history…", loadMoreHistory);
+      else if (actionForKey(bindings, key) === "loadMore") void run("Loading more history…", loadMoreHistory);
       else if (key.name === "/" || key.sequence === "/") {
         const state = prompt;
         destination("Choose destination", state.source, target => {
@@ -1087,8 +1109,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (key.name === "j" || key.name === "down") list.moveDown();
       else if (key.name === "k" || key.name === "up") list.moveUp();
       else if (key.name === "pageup" || key.name === "pagedown") preview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, preview.height - 3));
-      else if (key.name === "tab" && prompt.action.kind === "rebase") {
-        prompt.action.descendants = !prompt.action.descendants;
+      else if ((key.name === "r" || key.name === "s") && !key.shift && prompt.action.kind === "rebase") {
+        prompt.action.descendants = key.name === "s";
         updateInlineHint();
       } else if (key.name === "return") {
         const destination = selected();
@@ -1107,7 +1129,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind !== "browse") {
       if (!isBusy() && prompt.kind === "picker" && destinationSearch?.handleKey(key)) return;
       if (isBusy()) { key.preventDefault(); return; }
-      if (key.name === "escape") { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
+      if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
       else if (prompt.kind === "describe" && key.name === "return" && (key.shift || key.meta)) { key.preventDefault(); descriptionInput.newLine(); }
       else if (prompt.kind !== "describe" && (key.name === "pageup" || key.name === "pagedown")) { key.preventDefault(); overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3)); }
       else if (prompt.kind === "picker") {
@@ -1134,15 +1156,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (direction < 0) list.moveUp(); else list.moveDown();
       return;
     }
-    if (action === "help") { key.preventDefault(); setPreviewVisible(true); show(helpText(bindings), "Help"); return; }
-    if (action === "status") {
+    if (["previewUp", "previewDown", "previewHalfUp", "previewHalfDown"].includes(action)) {
       key.preventDefault();
-      setPreviewVisible(true);
+      const direction = action === "previewUp" || action === "previewHalfUp" ? -1 : 1;
       ++previewNavigation;
-      void previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…",
-        read: () => repository.status(), errorTitle: "Status error" });
+      preview.scrollBy(direction * (action === "previewUp" || action === "previewDown" ? 1 : Math.max(1, Math.floor((preview.height - 2) / 2))));
       return;
     }
+    if (action === "help") { key.preventDefault(); setPreviewVisible(true); show(helpText(bindings), "Help"); return; }
+    if (action === "status") { key.preventDefault(); showStatus(); return; }
     if (isBusy()) return;
     if (action === "loadMore") { key.preventDefault(); void run("Loading more history…", loadMoreHistory); return; }
     if (action === "search") { key.preventDefault(); beginSearch(); return; }
@@ -1165,19 +1187,22 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     if (action === "actions") { key.preventDefault(); const revision = selected(); if (revision) actions(revision); return; }
     if (action === "bookmarks") { key.preventDefault(); showBookmarks(); return; }
+    if (action === "git") { key.preventDefault(); showRemotes(); return; }
     if (action === "operations") { key.preventDefault(); showOperations(); return; }
     if (action === "undo") { key.preventDefault(); undo(); return; }
     if (action === "files") { key.preventDefault(); const revision = selected(); if (revision) browseFiles(revision); return; }
-    if (action === "absorb" || action === "evolution") {
+    if (action === "absorb" || action === "abandon" || action === "split" || action === "describeExternal" || action === "evolution") {
       key.preventDefault();
       const revision = selected();
-      if (revision) {
-        if (action === "absorb") confirm({ kind: "absorb", revision });
-        else showEvolution(revision);
-      }
+      if (!revision) { report("Select a revision first.", true); return; }
+      if (action === "absorb") confirm({ kind: "absorb", revision });
+      else if (action === "abandon") confirm({ kind: "abandon", revision });
+      else if (action === "split") splitChange(revision);
+      else if (action === "describeExternal") describeExternally(revision);
+      else showEvolution(revision);
       return;
     }
-    if (action === "preview") { key.preventDefault(); setPreviewVisible(true); void loadPreview(); return; }
+    if (action === "diff") { key.preventDefault(); setPreviewVisible(true); void loadPreview(); return; }
     if (action === "refresh") { key.preventDefault(); void run("Refreshing history…", () => refresh()); }
     else if (action === "filter") { key.preventDefault(); openPrompt({ kind: "revset" }, "Revset", revset); }
     else if (action === "describe" || action === "new" || action === "edit") {

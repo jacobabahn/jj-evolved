@@ -3,27 +3,46 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { KeyEvent } from "@opentui/core";
 
-export const defaultBindings = {
+// Default keys follow jjui (https://github.com/idursun/jjui) so muscle memory carries over.
+export const jjuiBindings = {
   down: ["j", "down"], up: ["k", "up"], focus: ["tab"],
-  pageUp: ["pageup"], pageDown: ["pagedown"], status: ["s"], refresh: ["r"], loadMore: ["L"],
-  filter: ["/"], search: ["ctrl+f"], nextMatch: ["ctrl+n"], previousMatch: ["ctrl+p"],
+  pageUp: ["pageup"], pageDown: ["pagedown"],
+  previewUp: ["ctrl+p"], previewDown: ["ctrl+n"], previewHalfUp: ["ctrl+u"], previewHalfDown: ["ctrl+d"],
+  status: ["w"], refresh: ["ctrl+r"], loadMore: ["ctrl+l"],
+  filter: ["L"], search: ["/"], nextMatch: ["'"], previousMatch: ['"'],
   workingCopy: ["@"], parent: ["["], child: ["]"], return: ["ctrl+o"], clearSearch: ["escape"],
-  describe: ["d"], edit: ["e"], rebase: ["R"], squash: ["S"], absorb: ["a"], evolution: ["v"],
-  new: ["n"], actions: ["space"], bookmarks: ["b"], operations: ["o"], undo: ["u"], files: ["f"],
-  preview: ["return"], togglePreview: ["p"], theme: ["t"], help: ["?"], quit: ["q"],
+  describe: ["return"], describeExternal: ["D"], edit: ["e"], rebase: ["r"], squash: ["S"],
+  abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
+  new: ["n"], actions: ["space"], bookmarks: ["b"], git: ["g"], operations: ["o"], undo: ["u"], files: ["l", "right"],
+  diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], quit: ["q"],
 } satisfies Record<string, string[]>;
-export type Action = keyof typeof defaultBindings;
+export type Action = keyof typeof jjuiBindings;
 export type Keybindings = Record<Action, string[]>;
+
+// The keys jj-evolved shipped before adopting jjui's defaults.
+export const legacyBindings: Keybindings = {
+  ...jjuiBindings,
+  previewUp: [], previewDown: [], previewHalfUp: ["ctrl+u"], previewHalfDown: ["ctrl+d"],
+  status: ["s"], refresh: ["r"], loadMore: ["L"],
+  filter: ["/"], search: ["ctrl+f"], nextMatch: ["ctrl+n"], previousMatch: ["ctrl+p"],
+  describe: ["d"], describeExternal: [], rebase: ["R"], abandon: [], absorb: ["a"], split: [], git: [], files: ["f"], diff: ["return"],
+};
+export const presets = { jjui: jjuiBindings, legacy: legacyBindings } as const;
+export type Preset = keyof typeof presets;
+export const defaultBindings: Keybindings = jjuiBindings;
 const namedKeys = new Set(["up", "down", "left", "right", "tab", "pageup", "pagedown", "home", "end", "space", "escape", "return", ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`)]);
 
 export function parseKeybindings(value: unknown): Keybindings {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected an object with a bindings object.");
   const config = value as Record<string, unknown>;
-  for (const field of Object.keys(config)) if (field !== "bindings") throw new Error(`Unknown configuration field: ${field}`);
-  if (!config.bindings || typeof config.bindings !== "object" || Array.isArray(config.bindings)) throw new Error("Expected a bindings object.");
-  const result = structuredClone(defaultBindings) as Keybindings;
-  for (const [action, keys] of Object.entries(config.bindings)) {
-    if (!Object.hasOwn(defaultBindings, action)) throw new Error(`Unknown keybinding action: ${action}`);
+  for (const field of Object.keys(config)) if (field !== "bindings" && field !== "preset") throw new Error(`Unknown configuration field: ${field}`);
+  const preset = config.preset ?? "jjui";
+  if (typeof preset !== "string" || !Object.hasOwn(presets, preset)) throw new Error(`Unknown preset ${JSON.stringify(preset)}. Use one of: ${Object.keys(presets).join(", ")}.`);
+  const bindings = config.bindings ?? {};
+  if (!bindings || typeof bindings !== "object" || Array.isArray(bindings)) throw new Error("Expected a bindings object.");
+  const result = structuredClone(presets[preset as Preset]) as Keybindings;
+  for (const [action, keys] of Object.entries(bindings)) {
+    if (!Object.hasOwn(jjuiBindings, action)) throw new Error(`Unknown keybinding action: ${action}`);
     if (!Array.isArray(keys) || keys.some(key => typeof key !== "string")) throw new Error(`Keybinding ${action} must be an array of keys.`);
     for (const key of keys) {
       if (!(namedKeys.has(key) || /^[!-~]$/.test(key) || /^ctrl\+[a-z]$/.test(key))) throw new Error(`Invalid key ${JSON.stringify(key)} for ${action}. Use a printable ASCII character, named key, or ctrl+a through ctrl+z.`);
@@ -62,5 +81,5 @@ export function actionForKey(bindings: Keybindings, key: Pick<KeyEvent, "name" |
   return (Object.keys(bindings) as Action[]).find(action => bindings[action].includes(name));
 }
 export function keyLabel(bindings: Keybindings, action: Action, firstOnly = false) {
-  return (firstOnly ? bindings[action].slice(0, 1) : bindings[action]).map(key => key.startsWith("ctrl+") ? `^${key.slice(5).toUpperCase()}` : ({ space: "Space", return: "Enter", escape: "Esc", tab: "Tab", pageup: "PgUp", pagedown: "PgDn" }[key] ?? key)).join("/") || "unbound";
+  return (firstOnly ? bindings[action].slice(0, 1) : bindings[action]).map(key => key.startsWith("ctrl+") ? `^${key.slice(5).toUpperCase()}` : ({ space: "Space", return: "Enter", escape: "Esc", tab: "Tab", pageup: "PgUp", pagedown: "PgDn", left: "Left", right: "Right" }[key] ?? key)).join("/") || "unbound";
 }

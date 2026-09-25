@@ -10,7 +10,7 @@ Choosing a JJ client is largely about how you like to work with history. jj-evol
 
 Select a change, choose where it should go, and compare the proposed graph with the current one. Rebase and squash previews include bookmarks and conflict markers. With descendant rebasing, the app marks the moving changes and shows the full scope, including revisions outside the visible graph. Menus and editing forms keep the graph visible behind them so you can retain your place.
 
-For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `R`, use Tab to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
+For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `r`, press `s` to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
 
 ![Rebase preview showing Add login and Test login moving onto main, with the proposed tree on the left and current tree on the right.](docs/images/rebase-preview.png)
 
@@ -56,29 +56,33 @@ With no path, the app opens the current directory. It does not initialize a JJ r
 
 ## Getting around
 
-These are the default keys. See [custom keybindings](docs/usage.md#custom-keybindings) to change browse shortcuts.
+The default keys follow [jjui](https://github.com/idursun/jjui), so existing jjui users can keep their habits. See [custom keybindings](docs/usage.md#custom-keybindings) to change browse shortcuts or switch to the `legacy` preset with jj-evolved's earlier keys.
 
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows | Select a revision |
 | `Tab` | Switch between the graph and preview |
 | `p` | Hide or show the preview |
-| `f` | Browse changed files |
-| `/` | Filter the graph with a revset |
-| `L` | Load 200 more revisions |
-| `Ctrl+F` | Search revisions |
+| `d` | Show the selected revision's diff |
+| `l` / Right | Browse changed files; `h` / Left returns |
+| `L` | Filter the graph with a revset |
+| `/` | Search revisions; `'` / `"` step through matches |
+| `Ctrl+L` | Load 200 more revisions |
+| `Ctrl+R` | Refresh immediately |
 | `@`, `[` / `]` | Jump to the working copy, a parent, or a child |
 | `Space` | Open actions for the selected revision |
-| `d` | Edit a multiline description |
+| Enter / `D` | Edit a multiline description in the app / in JJ's editor |
 | `e` | Immediately make the selected revision the working copy |
 | `n` | Create a child change after confirmation |
-| `R` / `S` | Choose a rebase / squash destination in the graph |
-| `a` / `v` | Preview absorb / browse change evolution |
-| `b` / `o` / `u` | Bookmarks / operation history / undo preview |
+| `r` / `S` | Choose a rebase / squash destination in the graph |
+| `s` / `a` | Split selected files / preview abandoning the change |
+| `A` / `v` | Preview absorb / browse change evolution |
+| `b` / `g` / `o` / `u` | Bookmarks / Git remotes / operation history / undo preview |
+| `w` | Show working-copy status |
 | `t` | Choose a theme |
 | `?` | Show keyboard help |
 
-For a first history edit, select a change, press `R`, and select its new parent. Press Enter to review the proposed graph, then Enter again to apply. Escape backs out before applying. Use `u` to review an undo afterward.
+For a first history edit, select a change, press `r`, and select its new parent. Press Enter to review the proposed graph, then Enter again to apply. Escape backs out before applying. Use `u` to review an undo afterward.
 
 See the [usage guide](docs/usage.md) for all controls, search and navigation behavior, editor integration, and theme settings.
 
@@ -88,8 +92,8 @@ jj-evolved is under active development and focuses on local repository work. It 
 
 - **Remote operations:** fetch, push, and bookmark tracking are available through **Git remotes** in the action menu or bookmark browser. Configure remotes and authentication through the CLI.
 - **Hunks and conflicts:** interactive hunk selection and conflict resolution use JJ’s configured external tools. There is no built-in hunk or merge editor.
-- **Customization:** browse keybindings are configurable; prompts retain their displayed controls. Revset completion covers bookmarks and common functions; custom aliases, scripted workflows, and custom themes are not implemented.
-- **Large histories:** the graph starts with 200 revisions; `L` loads more. Search and destination pickers cover the full history; diffs and search metadata are buffered in memory.
+- **Customization:** browse keybindings are configurable, with `jjui` and `legacy` presets; prompts retain their displayed controls. Revset completion covers bookmarks and common functions; custom aliases, scripted workflows, and custom themes are not implemented.
+- **Large histories:** the graph starts with 200 revisions; `Ctrl+L` loads more. Search and destination pickers cover the full history; diffs and search metadata are buffered in memory.
 - **Compatibility:** broader platform, terminal, and JJ-version coverage is still being established.
 
 While browsing, automatic refresh runs `jj status`, which can snapshot pending working-copy edits. Reviewed actions reject stale repository state if another command or file edit changes it before confirmation. JJ remains responsible for validating operations.

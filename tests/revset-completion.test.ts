@@ -36,7 +36,7 @@ test("80-column revset completion types, cycles, applies, cancels and preserves 
     await f.jj("bookmark", "create", "map", "-r", "@-");
   } });
   const operation = await ui.repo.operationId();
-  ui.key("/");
+  ui.key("L");
   ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
   await ui.type("ma");
   await ui.until("4 suggestions");
@@ -47,7 +47,7 @@ test("80-column revset completion types, cycles, applies, cancels and preserves 
   ui.key("RETURN");
   await ui.until("revset: main");
   await ui.until("Ready.");
-  ui.key("/"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+  ui.key("L"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
   await ui.type("does_not_exist");
   await ui.until("No suggestions");
   ui.key("TAB"); expect(input.value).toBe("does_not_exist");

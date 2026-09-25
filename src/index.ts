@@ -8,7 +8,7 @@ import { Repository } from "./repository/repository";
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
-  process.stdout.write(`Usage: bun start [--theme NAME] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nDefault keys: t changes themes; ? opens keyboard help.\nBrowse overrides: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config).\n`);
+  process.stdout.write(`Usage: bun start [--theme NAME] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nDefault keys follow jjui; t changes themes and ? opens keyboard help.\nKeybindings: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config) with preset "jjui" or "legacy" and per-action overrides.\n`);
 } else {
   try {
     const { values, positionals } = parseArgs({
