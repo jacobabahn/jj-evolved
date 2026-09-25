@@ -8,7 +8,7 @@ type Scenario = { bindings?: Keybindings; name: string; title: string; run: (ui:
 export const scenarios: Scenario[] = [
   {
     name: "keybindings", title: "Custom browse keys and unchanged text input",
-    bindings: parseKeybindings({ bindings: { down: ["x", "down"], help: ["h"], describe: ["D"], togglePreview: ["P"] } }),
+    bindings: parseKeybindings({ bindings: { down: ["x", "down"], help: ["h"], describe: ["D"], describeExternal: [], togglePreview: ["P"] } }),
     async run(ui) {
       ui.key("P");
       assert.equal(ui.screen.renderer.root.findDescendantById("preview")?.visible, false);
@@ -37,7 +37,7 @@ export const scenarios: Scenario[] = [
   {
     name: "automatic-refresh", title: "External changes refresh when terminal focus returns",
     async run(ui) {
-      ui.key("/");
+      ui.key("L");
       await ui.prompt("@ | feature");
       ui.key("j");
       await ui.until("+ hello from jj-evolved");
@@ -49,7 +49,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Ready.");
       assert(ui.screen.captureCharFrame().includes("revset: @ | feature"));
       await ui.capture("Focus return updates history and preserves selection and filter");
-      ui.key("d");
+      ui.key("RETURN");
       await ui.type(" draft");
       ui.screen.renderer.emit("focus");
       await ui.until("refresh pending");
@@ -63,7 +63,7 @@ export const scenarios: Scenario[] = [
     bindings: parseKeybindings({ bindings: { loadMore: ["x"] } }),
     async run(ui) {
       for (let i = 0; i < 202; i++) await ui.f.jj("new", "-m", `History change ${i + 1}`);
-      ui.key("r");
+      ui.key("r", { ctrl: true });
       await ui.until("x load 200 more");
       await ui.until("Ready.");
       await ui.capture("First 200 revisions with load more available");
@@ -84,7 +84,7 @@ export const scenarios: Scenario[] = [
       await ui.capture("Older destination selected and previewed");
       ui.key("ESCAPE");
       await ui.until("Working copy");
-      ui.key("L");
+      ui.key("l", { ctrl: true });
       await ui.screen.renderOnce();
       assert(ui.screen.captureCharFrame().includes("200 revisions"));
       ui.key("x");
@@ -142,7 +142,7 @@ export const scenarios: Scenario[] = [
     name: "completion", title: "Revset bookmark completion",
     async run(ui) {
       await ui.resize(80, 24);
-      ui.key("/");
+      ui.key("L");
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.type("ancestors(fea");
       await ui.until("feature@git");
@@ -194,7 +194,7 @@ export const scenarios: Scenario[] = [
     name: "rebase", title: "Rebase preview and cancellation",
     async run(ui) {
       const before = await ui.repo.operationId();
-      ui.key("R");
+      ui.key("r");
       await ui.until("Rebase from ●");
       ui.key("j"); ui.key("j");
       ui.key("RETURN");
@@ -219,11 +219,11 @@ export const scenarios: Scenario[] = [
   {
     name: "states", title: "Empty history and an editable error",
     async run(ui) {
-      ui.key("/");
+      ui.key("L");
       await ui.prompt("none()");
       await ui.until("No revisions match");
       await ui.capture("Empty revset");
-      ui.key("/");
+      ui.key("L");
       await ui.prompt("all()");
       await ui.until("3 revisions");
       ui.key(" ");
@@ -282,7 +282,7 @@ export const scenarios: Scenario[] = [
     name: "unicode", title: "Unicode description via bracketed paste",
     async run(ui) {
       const description = "日本語 café 👩‍💻";
-      ui.key("d");
+      ui.key("RETURN");
       await ui.until("Describe");
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.paste(description);

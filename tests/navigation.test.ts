@@ -27,7 +27,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
     return node;
   }
   async function search(query: string) {
-    screen.mockInput.pressKey("f", { ctrl: true });
+    screen.mockInput.pressKey("/");
     for (let i = 0; i < 200; i++) {
       const input = screen.renderer.root.findDescendantById("search-input");
       if (input?.visible) break;
@@ -41,7 +41,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
     await Bun.sleep(140);
   }
   async function filter(query: string) {
-    screen.mockInput.pressKey("/");
+    screen.mockInput.pressKey("L");
     await until("Revset");
     const node = screen.renderer.root.findDescendantById("prompt-input");
     if (!(node instanceof InputRenderable)) throw new Error("Missing revset input");
@@ -72,7 +72,7 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await t.until("1/1");
     t.screen.mockInput.pressEnter();
     await Bun.sleep(100);
-    t.screen.mockInput.pressKey("n", { ctrl: true });
+    t.screen.mockInput.pressKey("'");
     await Bun.sleep(80);
     await t.until("Ready.");
     expect(t.list().getSelectedIndex()).toBe(original);
@@ -85,8 +85,8 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await Bun.sleep(80);
     const frame = await t.until("revset: @ | parents(@)");
     expect(frame).not.toContain("Search in revset:");
-    expect(frame).toContain("^F search");
-    expect(frame).toContain("^N/^P match");
+    expect(frame).toContain("/ search");
+    expect(frame).toContain("'/\" match");
     expect(frame).toContain("@ work");
     expect(await t.repo.operationId()).toBe(operation);
     expect(await Bun.file(`${t.f.path}/unsnapshotted.txt`).text()).toBe("navigation must leave this alone\n");
@@ -187,9 +187,9 @@ test("search matches multiline descriptions, bookmark names and both IDs, with n
     await t.until("1/2");
     t.screen.mockInput.pressEnter();
     await Bun.sleep(80);
-    for (const [key, position] of [["n", "2/2"], ["n", "1/2"], ["p", "2/2"]]) {
+    for (const [key, position] of [["'", "2/2"], ["'", "1/2"], ['"', "2/2"]]) {
       if (!key || !position) throw new Error("Missing navigation test case");
-      t.screen.mockInput.pressKey(key, { ctrl: true });
+      t.screen.mockInput.pressKey(key);
       await t.until(position);
       await t.until("Ready.");
     }
@@ -244,7 +244,7 @@ test("loading more history preserves a selection made while loading and resets o
       if (limit === 400) { started.resolve(); await gate.promise; }
       return read(revset, readOnly, limit);
     };
-    t.screen.mockInput.pressKey("L");
+    t.screen.mockInput.pressKey("l", { ctrl: true });
     await started.promise;
     t.screen.mockInput.pressKey("j");
     const index = t.list().getSelectedIndex();

@@ -30,28 +30,35 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `j` / `k`, arrows | Move through revisions |
 | Tab | Switch focus between revisions and preview |
 | `p` | Hide/show preview; the graph expands when hidden |
-| Page Up / Page Down | Scroll preview |
-| `/` | Enter a revset; empty restores `all()` |
-| `Ctrl+F` | Search descriptions, bookmarks, and ID prefixes throughout the active revset |
-| `Ctrl+N` / `Ctrl+P` | Next / previous accepted search match, wrapping at either end |
+| Page Up / Page Down | Scroll preview by page |
+| `Ctrl+N` / `Ctrl+P` | Scroll preview by line without leaving the graph |
+| `Ctrl+D` / `Ctrl+U` | Scroll preview by half page |
+| `L` | Enter a revset; empty restores `all()` |
+| `/` | Search descriptions, bookmarks, and ID prefixes throughout the active revset |
+| `'` / `"` | Next / previous accepted search match, wrapping at either end |
 | `@` | Select the working copy without editing it |
 | `[` / `]` | Jump to a parent / child; choose when there are several |
 | `Ctrl+O` | Return to the original view after revealing a distant or filtered target |
 | `Escape` | Cancel search editing, or clear an accepted search |
-| `s` | Show working-copy status |
-| `r` | Refresh repository data |
-| `d` | Edit a multiline description in the app |
+| `w` | Show working-copy status |
+| `Ctrl+R` | Refresh repository data |
+| `Ctrl+L` | Load 200 more revisions |
+| Enter | Edit a multiline description in the app |
+| `D` | Edit the description in JJ's configured editor |
 | `e` | Switch the working copy to the selected revision immediately |
 | `n` | Confirm creation of a child of the selected revision |
-| `R` / `S` | Start inline rebase / squash; choose a destination in the graph and Enter previews |
-| `a` | Preview absorbing the selected change's edits into mutable ancestors |
+| `r` / `S` | Start inline rebase / squash; choose a destination in the graph and Enter previews |
+| `s` | Split selected files into a first change |
+| `a` | Preview abandoning the selected change |
+| `A` | Preview absorbing the selected change's edits into mutable ancestors |
 | `v` | Browse the selected change's evolution and preview each version's rewrite diff |
 | Space | Open revision actions: edit, describe, rebase, squash, split, bookmark creation, abandon |
 | `b` | Browse bookmarks; move, rename, or delete a local bookmark |
+| `g` | Git remotes: fetch, push, and select a remote |
 | `o` | Browse operation history, inspect an operation, or restore its state |
 | `u` | Preview undo of the latest operation |
-| `f` | Browse the selected revision's changed files |
-| Enter | Return to the revision preview |
+| `l` / Right | Browse the selected revision's changed files; `h` / Left returns |
+| `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Show help |
 | Escape | Cancel a prompt |
@@ -59,13 +66,13 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 
 ## Preview and overlays
 
-Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. Enter, `s`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
+Press `p` while browsing or choosing an inline rebase/squash destination to toggle the right-hand preview. While it is hidden, Tab keeps focus on the graph. `d`, `w`, or `?` reopens it for the revision preview, status, or help. The choice lasts for the current session.
 
 Menu actions open in overlays, leaving the graph and selected revision visible behind them. Quick text edits use a smaller dialog. Use `j` and `k` to choose an item and Enter to select it. Page Up and Page Down scroll the overlay preview, and Escape cancels.
 
 ## Absorb
 
-Press `a`, or choose **Absorb into ancestors** from the Space menu, to distribute fixes across a stack. JJ chooses the mutable ancestors that last changed the affected lines. The preview shows the actual proposed operation changes and the edits remaining in the source. Edits JJ cannot assign stay in the source. Enter applies the preview; Escape cancels; `p` refreshes a stale preview. An emptied source with no description is abandoned. The app keeps the source selected if it survives, otherwise selects the working copy.
+Press `A`, or choose **Absorb into ancestors** from the Space menu, to distribute fixes across a stack. JJ chooses the mutable ancestors that last changed the affected lines. The preview shows the actual proposed operation changes and the edits remaining in the source. Edits JJ cannot assign stay in the source. Enter applies the preview; Escape cancels; `p` refreshes a stale preview. An emptied source with no description is abandoned. The app keeps the source selected if it survives, otherwise selects the working copy.
 
 ## Change evolution
 
@@ -73,7 +80,7 @@ Press `v`, or choose **Change evolution** from the Space menu, to browse previou
 
 ## Rebase and squash
 
-For inline rebase or squash, press `R` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. Tab toggles rebase between the selected change and its descendants. With descendants enabled, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
+For inline rebase or squash, press `r` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. `s` widens rebase to the selected change and its descendants; `r` narrows it back to the change alone. With descendants enabled, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
 
 Rebase and squash previews show the proposed tree on the left and the current tree on the right with native graph lines, local bookmarks, and conflict markers. Both columns scroll together; long labels are clipped to preserve tree alignment. The view includes relevant descendants and parents, up to 40 revisions. Previewing does not change the working copy or live operation log.
 
@@ -97,7 +104,7 @@ Drag a local `[bookmark]` label in the log onto another change to preview a move
 
 ## Search, navigation, and descriptions
 
-The initial revision graph loads 200 revisions. Press `L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `r` remains available for an immediate reload. Press `d` to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. **Edit description in editor** in the Space menu still opens JJ’s configured external editor.
+The initial revision graph loads 200 revisions. Press `Ctrl+L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `Ctrl+R` remains available for an immediate reload. Press Enter to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. `D`, or **Edit description in editor** in the Space menu, opens JJ’s configured external editor.
 
 Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
 
@@ -122,17 +129,22 @@ restart the app. The file is optional. For example:
 
 ```json
 {
+  "preset": "jjui",
   "bindings": {
     "down": ["x", "down"],
     "up": ["k", "up"],
-    "describe": ["D"],
+    "status": ["s"],
     "help": ["h"]
   }
 }
 ```
 
-Each supplied array replaces all keys for that action; omitted actions retain
-their defaults and `[]` disables an action. Help and the footer show the effective
+`preset` chooses the base layout: `jjui` (the default) follows
+[jjui](https://github.com/idursun/jjui), and `legacy` restores the keys
+jj-evolved used before adopting it (`d` describe, `r` refresh, `R` rebase,
+`a` absorb, `s` status, `/` revset, `Ctrl+F` search, `L` load more, `f` files,
+Enter for the diff preview). Each supplied array replaces all keys for that
+action; omitted actions retain the preset's defaults and `[]` disables an action. Help and the footer show the effective
 bindings. Unknown fields/actions, invalid keys, and duplicate keys fail startup
 with an error naming the file and conflict. To reuse an assigned key, override
 both actions in the same file.
@@ -146,18 +158,24 @@ Alt/Meta combinations and key sequences are not supported.
 
 Available actions and defaults:
 
-| Action | Default keys |
-| --- | --- |
-| `down`, `up` | `j`/`down`, `k`/`up` |
-| `focus`, `pageUp`, `pageDown` | `tab`, `pageup`, `pagedown` |
-| `status`, `refresh`, `filter`, `loadMore` | `s`, `r`, `/`, `L` |
-| `search`, `nextMatch`, `previousMatch` | `ctrl+f`, `ctrl+n`, `ctrl+p` |
-| `workingCopy`, `parent`, `child`, `return` | `@`, `[`, `]`, `ctrl+o` |
-| `clearSearch`, `preview`, `togglePreview` | `escape`, `return`, `p` |
-| `describe`, `edit`, `new` | `d`, `e`, `n` |
-| `rebase`, `squash`, `absorb`, `evolution` | `R`, `S`, `a`, `v` |
-| `actions`, `bookmarks`, `operations` | `space`, `b`, `o` |
-| `undo`, `files`, `theme`, `help`, `quit` | `u`, `f`, `t`, `?`, `q` |
+| Action | `jjui` preset | `legacy` preset |
+| --- | --- | --- |
+| `down`, `up` | `j`/`down`, `k`/`up` | same |
+| `focus`, `pageUp`, `pageDown` | `tab`, `pageup`, `pagedown` | same |
+| `previewUp`, `previewDown` | `ctrl+p`, `ctrl+n` | unbound |
+| `previewHalfUp`, `previewHalfDown` | `ctrl+u`, `ctrl+d` | same |
+| `status`, `refresh`, `filter`, `loadMore` | `w`, `ctrl+r`, `L`, `ctrl+l` | `s`, `r`, `/`, `L` |
+| `search`, `nextMatch`, `previousMatch` | `/`, `'`, `"` | `ctrl+f`, `ctrl+n`, `ctrl+p` |
+| `workingCopy`, `parent`, `child`, `return` | `@`, `[`, `]`, `ctrl+o` | same |
+| `clearSearch`, `diff`, `togglePreview` | `escape`, `d`, `p` | `escape`, `return`, `p` |
+| `describe`, `describeExternal`, `edit`, `new` | `return`, `D`, `e`, `n` | `d`, unbound, `e`, `n` |
+| `rebase`, `squash`, `split`, `abandon` | `r`, `S`, `s`, `a` | `R`, `S`, unbound, unbound |
+| `absorb`, `evolution` | `A`, `v` | `a`, `v` |
+| `actions`, `bookmarks`, `git`, `operations` | `space`, `b`, `g`, `o` | `space`, `b`, unbound, `o` |
+| `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
+
+Unbound actions stay reachable from the Space menu. Inline rebase uses fixed
+`r` (change only) and `s` (with descendants) to set its scope.
 
 Overrides apply while browsing, including movement in the preview pane. Prompts,
 menus, destination selection, and history forms retain their displayed fixed
@@ -167,13 +185,13 @@ custom browse shortcut inserts text. Ctrl-C remains available everywhere.
 
 ## Revset completion
 
-In `/`, type a bookmark or function prefix and press Tab to insert a suggestion.
+In the `L` revset prompt, type a bookmark or function prefix and press Tab to insert a suggestion.
 Tab cycles forward and Shift-Tab cycles backward; the visible list tracks the
 selection. Enter applies the expression, and Escape cancels the prompt. Invalid
 expressions leave the current history view intact so you can correct the input.
 Completion replaces only the token at the cursor, preserving the surrounding
 expression. Local and remote bookmark suggestions use the most recently loaded
-repository state; press `r` before opening `/` to refresh that state.
+repository state; press `Ctrl+R` before opening the prompt to refresh that state.
 
 Suggestions are computed locally without running commands or contacting remotes.
 Bookmark names are quoted when needed, and a small list of common built-in jj

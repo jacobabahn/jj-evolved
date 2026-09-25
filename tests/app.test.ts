@@ -44,7 +44,7 @@ test("absorb menu preview cancels, rejects stale state, refreshes and applies", 
   try {
     await Bun.write(`${t.f.path}/hello.txt`, "absorbed through the UI\n");
     await Bun.write(`${t.f.path}/leftover.txt`, "keep this edit\n");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("+ absorbed through the UI");
     const operation = await t.repo.operationId();
     t.screen.mockInput.pressKey(" ");
@@ -61,7 +61,7 @@ test("absorb menu preview cancels, rejects stale state, refreshes and applies", 
     t.screen.mockInput.pressEscape();
     await t.until("Change preview");
     expect(await t.repo.operationId()).toBe(operation);
-    t.screen.mockInput.pressKey("a");
+    t.screen.mockInput.pressKey("A");
     await t.until("Absorb from");
     await t.f.jj("bookmark", "create", "external");
     t.screen.mockInput.pressEnter();
@@ -82,10 +82,10 @@ test("absorb follows the working copy when an unnamed filtered source disappears
   try {
     await t.f.jj("describe", "-m", "");
     await Bun.write(`${t.f.path}/hello.txt`, "all absorbed\n");
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.prompt("@");
     t.screen.resize(80, 24);
-    t.screen.mockInput.pressKey("a");
+    t.screen.mockInput.pressKey("A");
     await t.until("Absorb from");
     t.screen.mockInput.pressEnter();
     await t.until("absorb completed");
@@ -101,7 +101,7 @@ test("evolution menu and shortcut browse description patches without changing re
   const t = await setup();
   try {
     await t.f.jj("describe", "-m", "Evolution rename");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Evolution rename");
     await t.until("Ready.");
     const operation = await t.repo.operationId();
@@ -141,7 +141,7 @@ for (const close of [false, true]) test(`late evolution previews are ignored, ov
   };
   try {
     await t.f.jj("describe", "-m", "Newest evolution version");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Newest evolution version");
     await t.until("Ready.");
     const current = (await t.repo.snapshot("@")).revisions[0];
@@ -165,7 +165,7 @@ test("evolution loads older versions through the picker after an external rewrit
   const t = await setup();
   try {
     for (let version = 0; version < 51; version++) await t.f.jj("describe", "-m", `History version ${version}`);
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("History version 50");
     await t.until("Ready.");
     t.screen.mockInput.pressKey("v");
@@ -191,21 +191,21 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
     await t.until("Empty change.");
     t.screen.mockInput.pressKey("j");
     await t.until("+ hello from jj-evolved");
-    t.screen.mockInput.pressKey("s");
+    t.screen.mockInput.pressKey("w");
     await t.until("Working-copy status");
     await t.until("Working copy");
     t.screen.mockInput.pressKey("?");
     await t.until("Keyboard reference");
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.until("Esc cancel");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
     await t.screen.renderOnce();
     expect(t.screen.captureCharFrame()).not.toContain("Esc cancel");
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.prompt("none()");
     await t.until("No revisions match");
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.prompt("");
     await t.until("3 revisions");
     t.screen.resize(80, 24);
@@ -224,7 +224,7 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
 test("keyboard describe, cancelled new, confirmed new and external refresh", async () => {
   const t = await setup();
   try {
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     await t.until("Describe");
     await t.prompt("Renamed in the TUI");
     expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Renamed in the TUI");
@@ -242,7 +242,7 @@ test("keyboard describe, cancelled new, confirmed new and external refresh", asy
     expect((await t.repo.snapshot("all()")).revisions).toHaveLength(4);
     expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("");
     await t.f.jj("describe", "-m", "External edit");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("External edit");
   } finally { await t.cleanup(); }
 }, 15_000);
@@ -281,7 +281,7 @@ test("e switches the working copy immediately without a confirmation prompt", as
 test("invalid revset preserves history and cancelling description preserves multiline text", async () => {
   const t = await setup();
   try {
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     t.screen.mockInput.pressKey("a", { ctrl: true });
     t.screen.mockInput.pressKey("k", { ctrl: true });
     await t.screen.mockInput.typeText("invalid(((");
@@ -292,9 +292,9 @@ test("invalid revset preserves history and cancelling description preserves mult
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
     await t.f.jj("describe", "-m", "First line\nSecond line");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     await t.until("Shift/Alt+Enter newline");
     expect((t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable).plainText).toBe("First line\nSecond line");
     t.screen.mockInput.pressEscape();
@@ -412,7 +412,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
   try {
     await Bun.write(`${t.f.path}/one.txt`, "one\n");
     await Bun.write(`${t.f.path}/two.txt`, "two\n");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
     const original = (await t.repo.snapshot("@")).revisions[0];
     if (!original) throw new Error("Missing original");
@@ -536,7 +536,7 @@ test("inline squash reviews a graph destination before applying", async () => {
   const t = await setup();
   try {
     await Bun.write(`${t.f.path}/inline.txt`, "inline squash\n");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
     const before = await t.repo.operationId();
     t.screen.resize(80, 24);
@@ -602,7 +602,7 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     await t.f.jj("new", "root()", "-m", "Unrelated destination");
     const destination = (await t.repo.snapshot("@")).revisions[0];
     if (!merge || !destination) throw new Error("Missing merge or destination");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
     const snapshot = await t.repo.snapshot("all()");
     const marked = (commitId: string) => {
@@ -612,15 +612,15 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
       return label.content.chunks.map(chunk => chunk.text).join("").startsWith("● ");
     };
     const before = await t.repo.operationId();
-    t.screen.mockInput.pressKey("R");
+    t.screen.mockInput.pressKey("r");
     await t.until("Selected change only");
     expect(marked(source.commitId)).toBe(true);
     expect(marked(left.commitId)).toBe(false);
-    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("s");
     await t.until("Change and descendants: 4 changes");
     for (const item of [source, left, right, merge]) expect(marked(item.commitId)).toBe(true);
     expect(marked(destination.commitId)).toBe(false);
-    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("r");
     await t.until("Selected change only");
     for (const item of [left, right, merge]) expect(marked(item.commitId)).toBe(false);
     t.screen.mockInput.pressEscape();
@@ -639,12 +639,12 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     t.screen.mockInput.pressEscape();
     await t.until("Change preview");
 
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.prompt(source.changeId);
     t.screen.resize(80, 24);
-    t.screen.mockInput.pressKey("R");
+    t.screen.mockInput.pressKey("r");
     await t.until("Selected change only");
-    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("s");
     await t.until("3 outside view");
     expect(t.screen.captureCharFrame()).toContain("4 changes");
     t.screen.mockInput.pressEscape();
@@ -659,23 +659,23 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     const source = (await t.repo.snapshot("@")).revisions[0];
     if (!source) throw new Error("Missing source");
     const before = await t.repo.operationId();
-    t.screen.mockInput.pressKey("R");
+    t.screen.mockInput.pressKey("r");
     await t.until("Rebase from ●");
-    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("s");
     await t.until("Change and descendants");
     t.screen.mockInput.pressEscape();
     await t.until("Cancelled.");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressKey("j");
-    t.screen.mockInput.pressKey("R");
+    t.screen.mockInput.pressKey("r");
     await t.until("Selected change only");
-    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("s");
     t.screen.mockInput.pressKey("k");
     t.screen.mockInput.pressEnter();
     await t.until("Error");
     expect(t.screen.captureCharFrame()).toContain("Rebase from ●");
     expect(await t.repo.operationId()).toBe(before);
-    t.screen.mockInput.pressTab();
+    t.screen.mockInput.pressKey("r");
     t.screen.mockInput.pressEnter();
     await t.until("Confirm operation");
     await t.until("Current tree");
@@ -712,7 +712,7 @@ test("dragging an individual bookmark highlights a change and moves only after c
   const t = await setup();
   try {
     await t.f.jj("bookmark", "create", "aaa", "-r", "feature");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
     const { badge, target, destination } = await bookmarkDragTargets(t);
     const before = await t.repo.bookmarks();
@@ -946,7 +946,7 @@ test("split second-description choice cancels without writes and preserves multi
     await t.f.jj("describe", "-m", description);
     await Bun.write(`${t.f.path}/one.txt`, "one\n");
     await Bun.write(`${t.f.path}/two.txt`, "two\n");
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
     const original = (await t.repo.snapshot("@")).revisions[0]!;
     const before = await t.repo.operationId();
@@ -984,7 +984,7 @@ for (const kitty of [false, true]) {
   test(`description supports newlines, paste, reopen and cancel, Kitty=${kitty}`, async () => {
     const t = await setup(kitty);
     try {
-      t.screen.mockInput.pressKey("d");
+      t.screen.mockInput.pressEnter();
       await t.until("Shift/Alt+Enter newline");
       const editor = t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable;
       t.screen.mockInput.pressKey("a", { ctrl: true });
@@ -999,7 +999,7 @@ for (const kitty of [false, true]) {
       t.screen.mockInput.pressEnter();
       await t.until("Ready.");
       expect((await t.repo.snapshot("@")).revisions[0]?.description).toBe("Title\n\nFirst paragraph\nSecond line\n");
-      t.screen.mockInput.pressKey("d");
+      t.screen.mockInput.pressEnter();
       await t.until("Shift/Alt+Enter newline");
       expect(editor.plainText).toBe("Title\n\nFirst paragraph\nSecond line");
       await t.screen.mockInput.typeText("Discard this");
@@ -1013,7 +1013,7 @@ test("description editor scrolls long text and retains it after a failed save", 
   const t = await setup();
   try {
     const description = Array.from({ length: 40 }, (_, index) => `Line ${index + 1}`).join("\n");
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     await t.until("Shift/Alt+Enter newline");
     const editor = t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable;
     t.screen.mockInput.pressKey("a", { ctrl: true });
@@ -1057,7 +1057,7 @@ test("preview toggle expands the graph, keeps focus visible, and preserves selec
     expect(graph.width).toBeLessThan(t.screen.renderer.width);
     expect(t.screen.captureCharFrame()).toContain("┬");
     t.screen.mockInput.pressKey("p");
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     await t.until("Shift/Alt+Enter newline");
     const editor = t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable;
     await t.screen.mockInput.typeText("p");
@@ -1069,7 +1069,7 @@ test("preview toggle expands the graph, keeps focus visible, and preserves selec
     t.screen.resize(80, 24);
     await t.screen.renderOnce();
     expect(graph.width).toBe(80);
-    for (const key of ["?", "s", "RETURN"]) {
+    for (const key of ["?", "w", "d"]) {
       t.screen.mockInput.pressKey(key);
       await t.screen.renderOnce();
       expect({ key, visible: pane.visible }).toEqual({ key, visible: true });
@@ -1082,7 +1082,7 @@ test("preview toggle expands the graph, keeps focus visible, and preserves selec
 test("terminal focus refreshes external edits and status while preserving selection and revset", async () => {
   const t = await setup();
   try {
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.prompt("@ | feature");
     t.screen.mockInput.pressKey("j");
     await t.until("+ hello from jj-evolved");
@@ -1092,7 +1092,7 @@ test("terminal focus refreshes external edits and status while preserving select
     await t.until("Ready.");
     expect(t.screen.captureCharFrame()).toContain("revset: @ | feature");
     expect(t.screen.captureCharFrame()).toContain("+ hello from jj-evolved");
-    t.screen.mockInput.pressKey("s");
+    t.screen.mockInput.pressKey("w");
     await t.until("Working-copy status");
     await Bun.write(`${t.f.path}/external.txt`, "external edit\n");
     t.screen.renderer.emit("focus");
@@ -1105,7 +1105,7 @@ test("focus refresh keeps input drafts, coalesces deferred events, and detaches 
   const t = await setup();
   const snapshot = spyOn(t.repo, "snapshot");
   try {
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     await t.screen.mockInput.typeText(" draft kept");
     await t.f.jj("bookmark", "create", "external");
     t.screen.renderer.emit("focus");
@@ -1157,7 +1157,7 @@ for (const view of ["selection", "help", "status"] as const) {
     try {
       t.screen.renderer.emit("focus");
       await started.promise;
-      t.screen.mockInput.pressKey(view === "selection" ? "j" : view === "help" ? "?" : "s");
+      t.screen.mockInput.pressKey(view === "selection" ? "j" : view === "help" ? "?" : "w");
       const text = view === "selection" ? "+ hello from jj-evolved" : view === "help" ? "Keyboard reference" : "Working-copy status";
       await t.until(text);
       gate.resolve();
@@ -1204,7 +1204,7 @@ test("focus preserves help and defers refresh while a filtered target is tempora
     await Promise.resolve();
     await t.until("Ready.");
     expect(t.screen.captureCharFrame()).toContain("Keyboard reference");
-    t.screen.mockInput.pressKey("/");
+    t.screen.mockInput.pressKey("L");
     await t.prompt("@");
     t.screen.mockInput.pressKey("[");
     await t.until("temporary view");
@@ -1248,10 +1248,10 @@ test("focus refresh preserves accepted search and preview scroll", async () => {
   const gate = Promise.withResolvers<void>();
   try {
     await Bun.write(`${t.f.path}/long.txt`, Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"));
-    t.screen.mockInput.pressKey("r");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("+ line 0");
     await t.until("Ready.");
-    t.screen.mockInput.pressKey("f", { ctrl: true });
+    t.screen.mockInput.pressKey("/");
     await t.until("Type to search");
     await t.screen.mockInput.typeText("Next change");
     t.screen.mockInput.pressEnter();

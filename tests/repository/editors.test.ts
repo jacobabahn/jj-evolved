@@ -47,7 +47,7 @@ for (const kind of ["describe", "resolve"] as const) {
         app = createApp(screen.renderer, repo);
         await app.start();
         // Use a filtered view of a non-working-copy revision to verify it stays selected.
-        screen.mockInput.pressKey("/");
+        screen.mockInput.pressKey("L");
         screen.mockInput.pressKey("a", { ctrl: true });
         screen.mockInput.pressKey("k", { ctrl: true });
         await screen.mockInput.typeText(target.changeId);

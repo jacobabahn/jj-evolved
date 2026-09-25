@@ -76,7 +76,7 @@ test("destination search reaches old revisions in bookmark, history form and inl
       expect(t.node<SelectRenderable>("history-fields").options[0]?.name).toContain(target.changeId.slice(0, 8));
       await t.escape();
     }
-    t.screen.mockInput.pressKey("R");
+    t.screen.mockInput.pressKey("r");
     await t.text("Ready.");
     await t.searchDestination("Initial feature");
     t.screen.mockInput.pressEnter();
@@ -102,7 +102,7 @@ test("auto-refresh detects commands and file edits, preserving selection, search
   const t = await setup();
   try {
     await t.app.checkForUpdates();
-    t.screen.mockInput.pressKey("f", { ctrl: true });
+    t.screen.mockInput.pressKey("/");
     await t.until(() => t.node<InputRenderable>("search-input").visible);
     await t.screen.mockInput.typeText("Next");
     t.screen.mockInput.pressEnter();
@@ -116,7 +116,7 @@ test("auto-refresh detects commands and file edits, preserving selection, search
     expect(t.screen.captureCharFrame()).toContain("| Next");
     const editorTarget = (await t.repo.navigationRevisions("@"))[0]!;
     expect(editorTarget.changeId).toBe(before.changeId);
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     expect(t.node<TextareaRenderable>("description-input").plainText).toBe("Next externally edited");
     await t.escape();
     await Bun.write(`${t.f.path}/hello.txt`, "edited outside the app\n");
@@ -130,7 +130,7 @@ test("auto-refresh defers during editing and rejects a late result after user in
   const t = await setup();
   try {
     await t.app.checkForUpdates();
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     const editor = t.node<TextareaRenderable>("description-input");
     await t.screen.mockInput.typeText("Draft ");
     const draft = editor.plainText;
@@ -149,7 +149,7 @@ test("auto-refresh defers during editing and rejects a late result after user in
     });
     const pending = t.app.checkForUpdates();
     await started.promise;
-    t.screen.mockInput.pressKey("d");
+    t.screen.mockInput.pressEnter();
     const original = editor.plainText;
     gate.resolve();
     await pending;

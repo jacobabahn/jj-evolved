@@ -11,7 +11,7 @@ for (const mode of ["save", "unchanged", "fail"] as const) {
     const editor = await descriptionEditor(ui.f, replacement);
     try {
       await Bun.write(editor.mode, mode);
-      ui.key("/");
+      ui.key("L");
       await ui.prompt("feature");
       const before = await ui.repo.operationId();
       ui.key(" ");
@@ -21,7 +21,7 @@ for (const mode of ["save", "unchanged", "fail"] as const) {
       expect((await ui.repo.snapshot("feature")).revisions[0]?.description).toBe(mode === "save" ? replacement : original);
       expect(ui.screen.captureCharFrame()).toContain("revset: feature");
       if (mode !== "save") expect(await ui.repo.operationId()).toBe(before);
-      ui.key("d");
+      ui.key("RETURN");
       await ui.until("Shift/Alt+Enter newline");
       expect((ui.node("description-input") as TextareaRenderable).plainText).toBe((mode === "save" ? replacement : original).trimEnd());
       ui.key("ESCAPE");
@@ -41,4 +41,18 @@ test("description editor rejects stale selection before launching the editor", (
     expect(await Bun.file(editor.original).exists()).toBe(false);
     expect((await ui.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Changed externally");
   } finally { await editor.cleanup(); }
+}), 15_000);
+
+test("inline describe opens with the cursor at the end of the existing description", () => withUiFixture("description-cursor", async ui => {
+  await ui.f.jj("describe", "feature", "-m", "Initial feature\n");
+  ui.key("L");
+  await ui.prompt("feature");
+  ui.key("RETURN");
+  await ui.until("Shift/Alt+Enter newline");
+  const input = ui.node("description-input") as TextareaRenderable;
+  expect(input.cursorOffset).toBe("Initial feature".length);
+  ui.key("!");
+  await Bun.sleep(30);
+  expect(input.plainText).toBe("Initial feature!");
+  ui.key("ESCAPE");
 }), 15_000);

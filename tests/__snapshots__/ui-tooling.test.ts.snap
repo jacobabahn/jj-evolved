@@ -27,23 +27,23 @@ j/down / k/up      Move through revisions    │
 Tab                Switch revisions / preview│
 focus                                        │
 p                  Toggle preview pane       │
-PgUp / PgDn        Scroll preview            │
-s                  Working-copy status       │
-r                  Refresh history           │
-/                  Enter a revset; empty     │
+PgUp / PgDn        Scroll preview by page    │
+^P / ^N            Scroll preview by line,   │
+keeping graph focus                          │
+^U / ^D            Scroll preview by half pag│
+w                  Working-copy status       │
+^R                 Refresh history           │
+L                  Enter a revset; empty     │
 restores all()                               │
-^F                 Search descriptions,      │
+/                  Search descriptions,      │
 bookmarks and ID prefixes in revset          │
-^N / ^P            Next / previous search    │
+' / "              Next / previous search    │
 match, wrapping                              │
 @ / [ / ]          Jump to working copy /    │
 parent / child                               │
 ^O                 Return from temporary     │
 reveal                                       │
 Esc                Clear accepted search     │
-* / +             Search match / revision    │
-outside active revset                        │
-d                  Describe selected change, │
 ─────────────────────────────────────────────┘"
 `;
 
@@ -53,8 +53,8 @@ exports[`styled selection and help layout at 80 columns: footer styles 80 1`] = 
     "attributes": 0,
     "bg": "#101820",
     "fg": "#6ed6bd",
-    "text": "j/k move  / filter  ^F search  ^N/^P match  @ work  [/] ancestry",
-    "width": 64,
+    "text": "j/k move  L revset  / search  '/" match  @ work  [/] ancestry  ^O return",
+    "width": 72,
   },
 ]
 `;
@@ -85,24 +85,24 @@ Keyboard reference                                                   │
 j/down / k/up      Move through revisions                            │
 Tab                Switch revisions / preview focus                  │
 p                  Toggle preview pane                               │
-PgUp / PgDn        Scroll preview                                    │
-s                  Working-copy status                               │
-r                  Refresh history                                   │
-/                  Enter a revset; empty restores all()              │
-^F                 Search descriptions, bookmarks and ID prefixes in │
+PgUp / PgDn        Scroll preview by page                            │
+^P / ^N            Scroll preview by line, keeping graph focus       │
+^U / ^D            Scroll preview by half page                       │
+w                  Working-copy status                               │
+^R                 Refresh history                                   │
+L                  Enter a revset; empty restores all()              │
+/                  Search descriptions, bookmarks and ID prefixes in │
 revset                                                               │
-^N / ^P            Next / previous search match, wrapping            │
+' / "              Next / previous search match, wrapping            │
 @ / [ / ]          Jump to working copy / parent / child             │
 ^O                 Return from temporary reveal                      │
 Esc                Clear accepted search                             │
 * / +             Search match / revision outside active revset      │
-d                  Describe selected change, including multiline     │
+Enter              Describe selected change in the app, including    │
+multiline                                                            │
+D                  Describe selected change in JJ's configured editor│
 e                  Make selection the working copy immediately       │
-R / S              Choose rebase / squash destination in the graph   │
-a                  Preview absorb into mutable ancestors             │
-v                  Browse selected change's evolution                │
-Drag change       Drop onto another change to preview rebase         │
-n                  Create an empty child of selection                │
+r / S              Choose rebase / squash destination in the graph   │
 ─────────────────────────────────────────────────────────────────────┘"
 `;
 
@@ -112,8 +112,8 @@ exports[`styled selection and help layout at 120 columns: footer styles 120 1`] 
     "attributes": 0,
     "bg": "#101820",
     "fg": "#6ed6bd",
-    "text": "j/k move  / filter  ^F search  ^N/^P match  @ work  [/] ancestry",
-    "width": 64,
+    "text": "j/k move  L revset  / search  '/" match  @ work  [/] ancestry  ^O return",
+    "width": 72,
   },
 ]
 `;
