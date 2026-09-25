@@ -11,13 +11,18 @@ export const jjuiBindings = {
   status: ["w"], refresh: ["ctrl+r"], loadMore: ["ctrl+l"],
   filter: ["L"], search: ["/"], nextMatch: ["'"], previousMatch: ['"'],
   workingCopy: ["@"], parent: ["["], child: ["]"], return: ["ctrl+o"], clearSearch: ["escape"],
-  describe: ["return"], describeExternal: ["D"], edit: ["e"], rebase: ["r"], squash: ["S"],
+  describe: ["return"], describeExternal: ["D"], edit: ["e"], rebase: ["r"], squash: ["S"], rebaseScope: ["tab"],
   abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
   new: ["n"], actions: ["space"], bookmarks: ["b"], git: ["g"], operations: ["o"], undo: ["u"], files: ["l", "right"],
   diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], quit: ["q"],
 } satisfies Record<string, string[]>;
 export type Action = keyof typeof jjuiBindings;
 export type Keybindings = Record<Action, string[]>;
+// Actions that stay live while choosing an inline rebase or squash destination; rebaseScope exists only there,
+// so it may share a key with any browse action outside this list (Tab is focus while browsing).
+export const inlineActions: Action[] = ["rebaseScope", "loadMore", "togglePreview"];
+const browseActions = (Object.keys(jjuiBindings) as Action[]).filter(action => action !== "rebaseScope");
+const sameMode = (a: Action, b: Action) => (a !== "rebaseScope" && b !== "rebaseScope") || (inlineActions.includes(a) && inlineActions.includes(b));
 
 // The keys jj-evolved shipped before adopting jjui's defaults.
 export const legacyBindings: Keybindings = {
@@ -50,12 +55,15 @@ export function parseKeybindings(value: unknown): Keybindings {
     }
     result[action as Action] = [...keys];
   }
-  const owners = new Map<string, Action>();
+  for (const action of inlineActions) for (const key of result[action]) {
+    if (["j", "k", "up", "down", "pageup", "pagedown", "/", "return", "escape"].includes(key)) throw new Error(`Key ${key} is reserved for inline destination controls; choose another key for ${action}.`);
+  }
+  const owners = new Map<string, Action[]>();
   for (const [action, keys] of Object.entries(result) as [Action, string[]][]) {
     for (const key of keys) {
-      const owner = owners.get(key);
+      const owner = owners.get(key)?.find(other => sameMode(other, action));
       if (owner) throw new Error(`Key ${key} conflicts between ${owner} and ${action}. Override both actions to resolve the conflict.`);
-      owners.set(key, action);
+      owners.set(key, [...(owners.get(key) ?? []), action]);
     }
   }
   return result;
@@ -72,13 +80,13 @@ export async function readKeybindings(path = keybindingsPath()): Promise<Keybind
   }
 }
 
-export function actionForKey(bindings: Keybindings, key: Pick<KeyEvent, "name" | "sequence" | "ctrl" | "shift" | "meta" | "option">): Action | undefined {
+export function actionForKey(bindings: Keybindings, key: Pick<KeyEvent, "name" | "sequence" | "ctrl" | "shift" | "meta" | "option">, actions: Action[] = browseActions): Action | undefined {
   if (key.meta || key.option) return;
   let name = key.ctrl ? `ctrl+${key.name.toLowerCase()}` : key.name;
   if (!key.ctrl && key.sequence.length === 1 && /^[!-~]$/.test(key.sequence)) name = key.sequence;
   else if (!key.ctrl && key.shift && /^[a-z]$/.test(name)) name = name.toUpperCase();
   else if (!key.ctrl && key.shift) return;
-  return (Object.keys(bindings) as Action[]).find(action => bindings[action].includes(name));
+  return actions.find(action => bindings[action].includes(name));
 }
 export function keyLabel(bindings: Keybindings, action: Action, firstOnly = false) {
   return (firstOnly ? bindings[action].slice(0, 1) : bindings[action]).map(key => key.startsWith("ctrl+") ? `^${key.slice(5).toUpperCase()}` : ({ space: "Space", return: "Enter", escape: "Esc", tab: "Tab", pageup: "PgUp", pagedown: "PgDn", left: "Left", right: "Right" }[key] ?? key)).join("/") || "unbound";
