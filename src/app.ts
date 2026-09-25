@@ -874,6 +874,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     });
   }
   function fitTitle(text: string, width: number, keepEnd = false) {
+    text = terminalText(text).replace(/\n/g, " ");
     const max = Math.max(6, width - 6);
     return text.length <= max ? text : keepEnd ? `…${text.slice(text.length - max + 1)}` : `${text.slice(0, max - 1)}…`;
   }
@@ -1145,7 +1146,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const action = actionForKey(bindings, key);
       if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
       if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
-      if (action === "focus" || key.name === "return") { key.preventDefault(); setFocus(action === "focus" && focus === "preview" ? "list" : "preview"); return; }
+      if (action === "focus" || key.name === "return") {
+        key.preventDefault();
+        if (key.name === "return" && !preview.visible) setPreviewVisible(true);
+        setFocus(action === "focus" && focus === "preview" ? "list" : "preview");
+        return;
+      }
       if (action === "down" || action === "up") {
         key.preventDefault();
         const direction = action === "up" ? -1 : 1;

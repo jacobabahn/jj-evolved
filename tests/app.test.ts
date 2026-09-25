@@ -1358,3 +1358,25 @@ test("files mode reports an empty change and Escape returns", async () => {
     expect(t.screen.captureCharFrame()).not.toContain("Files ·");
   } finally { await t.cleanup(); }
 }, 15_000);
+
+test("Enter in files mode reveals a hidden diff and focuses it", async () => {
+  const t = await setup();
+  try {
+    await Bun.write(`${t.f.path}/hello.txt`, "file focus regression\n");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("+ file focus regression");
+    await t.until("Ready.");
+    const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
+    t.screen.mockInput.pressKey("p");
+    expect(preview.visible).toBe(false);
+    t.screen.mockInput.pressKey("l");
+    await t.until("M hello.txt");
+    t.screen.mockInput.pressEnter();
+    await t.until("+ file focus regression");
+    expect(preview.visible).toBe(true);
+    expect(preview.focused).toBe(true);
+    t.screen.mockInput.pressKey("h");
+    await t.until("Change preview");
+    expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(true);
+  } finally { await t.cleanup(); }
+}, 15_000);
