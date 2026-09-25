@@ -10,20 +10,21 @@ export function matchingRevisions(revisions: Revision[], bookmarks: Bookmark[], 
     || revision.bookmarks.toLowerCase().includes(needle) || targets.has(revision.commitId));
 }
 
-/** Adds / filtering to a revision chooser without taking over its accept/cancel actions. */
-export class RevisionSearch {
+type Chooser = Pick<SelectRenderable, "moveUp" | "moveDown" | "focus">;
+
+/** Adds / filtering to a chooser without taking over its accept/cancel actions. */
+export class ListSearch<T> {
   readonly input: InputRenderable;
-  matches: Revision[];
+  matches: T[];
   private editing = false;
 
-  constructor(ctx: RenderContext, id: string, private readonly choices: SelectRenderable,
-    private readonly revisions: Revision[], private readonly bookmarks: Bookmark[],
-    private readonly render: (matches: Revision[]) => void) {
+  constructor(ctx: RenderContext, id: string, private readonly choices: Chooser, private readonly items: T[],
+    private readonly filter: (items: T[], query: string) => T[], private readonly render: (matches: T[]) => void, placeholder: string) {
     const colors = getTheme(ctx);
-    this.matches = revisions;
-    this.input = new InputRenderable(ctx, { id, visible: false, width: "100%", placeholder: "Search descriptions, bookmarks or ID prefixes", textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+    this.matches = items;
+    this.input = new InputRenderable(ctx, { id, visible: false, width: "100%", placeholder, textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
     this.input.on("input", () => {
-      this.matches = matchingRevisions(this.revisions, this.bookmarks, this.input.value);
+      this.matches = this.filter(this.items, this.input.value);
       this.render(this.matches);
     });
   }
@@ -47,7 +48,7 @@ export class RevisionSearch {
       this.input.visible = false;
       this.input.blur();
       this.input.value = "";
-      this.matches = this.revisions;
+      this.matches = this.items;
       this.render(this.matches);
       this.choices.focus();
       return true;
@@ -59,4 +60,10 @@ export class RevisionSearch {
   }
 
   dispose() { this.input.destroyRecursively(); }
+}
+
+export class RevisionSearch extends ListSearch<Revision> {
+  constructor(ctx: RenderContext, id: string, choices: Chooser, revisions: Revision[], bookmarks: Bookmark[], render: (matches: Revision[]) => void) {
+    super(ctx, id, choices, revisions, (items, query) => matchingRevisions(items, bookmarks, query), render, "Search descriptions, bookmarks or ID prefixes");
+  }
 }
