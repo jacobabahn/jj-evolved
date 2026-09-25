@@ -71,7 +71,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `Ctrl+R` | Refresh immediately |
 | `@`, `[` / `]` | Jump to the working copy, a parent, or a child |
 | `Space` | Open actions for the selected revision |
-| Enter / `D` | Edit a multiline description in the app / in JJ's editor |
+| Enter / `D` | Edit a multiline description in the app (Enter adds a line, `Ctrl+S` or `Ctrl+D` saves) / in JJ's editor |
 | `e` | Immediately make the selected revision the working copy |
 | `n` | Create a child change after confirmation |
 | `r` / `S` | Choose a rebase / squash destination in the graph |

@@ -44,6 +44,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `Ctrl+R` | Refresh repository data |
 | `Ctrl+L` | Load 200 more revisions |
 | Enter | Edit a multiline description in the app |
+| `Ctrl+S` / `Ctrl+D` | Save the description editor (Enter inserts a newline) |
 | `D` | Edit the description in JJ's configured editor |
 | `e` | Switch the working copy to the selected revision immediately |
 | `n` | Confirm creation of a child of the selected revision |
@@ -108,7 +109,7 @@ Drag a local `[bookmark]` label in the log onto another change to preview a move
 
 ## Search, navigation, and descriptions
 
-The initial revision graph loads 200 revisions. Press `Ctrl+L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `Ctrl+R` remains available for an immediate reload. Press Enter to edit the full description in the app. Shift+Enter inserts a newline, Enter saves, and Escape cancels. Alt+Enter also inserts a newline when your terminal does not distinguish Shift+Enter. Pasting preserves line breaks. `D`, or **Edit description in editor** in the Space menu, opens JJ’s configured external editor.
+The initial revision graph loads 200 revisions. Press `Ctrl+L` to load 200 more while preserving selection and scroll. Refresh retains the expanded limit; changing the revset resets it. Search covers the full active revset, including full multiline descriptions and local and remote bookmark names. Text matching ignores case; change and commit IDs match by prefix. Typing previews the first match. Enter keeps the query for next and previous navigation; Escape restores the previous search and selection. Clearing an accepted search keeps the selection and revset. Matching revisions have a `*` marker. Distant targets open a temporary view of up to 40 revisions, including immediate parents and children. A `+` marks context outside the active revset. `Ctrl+O` restores the original selection and scroll position, including after repeated jumps. Search and navigation leave repository state unchanged. Operation history starts with 50 entries and offers **Load older operations**. The app checks for external changes automatically; `Ctrl+R` remains available for an immediate reload. Press Enter to edit the full description in the app. Inside the editor, Enter inserts a newline (Shift+Enter and Alt+Enter do the same), `Ctrl+S` saves, and Escape cancels; if you changed the text, the editor warns and a second Escape discards the edits. `Ctrl+D` also saves, because some terminals reserve `Ctrl+S` for XON/XOFF flow control (`stty -ixon` frees it). Pasting preserves line breaks. `D`, or **Edit description in editor** in the Space menu, opens JJ’s configured external editor.
 
 Destination pickers for bookmark moves, rebase, and squash include the full history. Press `/` in a picker to search descriptions, local or remote bookmarks, and ID prefixes; use arrows to move and Enter to choose. Escape clears search first, then cancels the picker. Press `/` during inline rebase or squash to find a distant destination and reveal it in the graph before previewing.
 
@@ -183,7 +184,8 @@ Unbound actions stay reachable from the Space menu. Inline rebase uses fixed
 
 Overrides apply while browsing, including movement in the preview pane. Prompts,
 menus, destination selection, and history forms retain their displayed fixed
-controls: `j`/`k` or arrows to choose, Enter to submit, Escape to cancel, and their
+controls: `j`/`k` or arrows to choose, Enter to submit (Ctrl-S or Ctrl-D in the
+description editor, where Enter adds a line), Escape to cancel, and their
 existing field/preview controls. Text inputs retain normal editing keys; typing a
 custom browse shortcut inserts text. Ctrl-C remains available everywhere.
 

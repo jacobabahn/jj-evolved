@@ -24,7 +24,7 @@ async function setup(kittyKeyboard = false) {
     screen.mockInput.pressKey("a", { ctrl: true });
     screen.mockInput.pressKey("k", { ctrl: true });
     await screen.mockInput.typeText(value);
-    screen.mockInput.pressEnter();
+    if (screen.renderer.root.findDescendantById("description-input")?.visible) screen.mockInput.pressKey("s", { ctrl: true }); else screen.mockInput.pressEnter();
     await until("Ready.");
   }
   function choose(name: string) {
@@ -295,7 +295,7 @@ test("invalid revset preserves history and cancelling description preserves mult
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
     t.screen.mockInput.pressEnter();
-    await t.until("Shift/Alt+Enter newline");
+    await t.until("Enter newline");
     expect((t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable).plainText).toBe("First line\nSecond line");
     t.screen.mockInput.pressEscape();
     expect((await t.repo.snapshot("@")).revisions[0]?.description).toContain("Second line");
@@ -985,7 +985,7 @@ for (const kitty of [false, true]) {
     const t = await setup(kitty);
     try {
       t.screen.mockInput.pressEnter();
-      await t.until("Shift/Alt+Enter newline");
+      await t.until("Enter newline");
       const editor = t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable;
       t.screen.mockInput.pressKey("a", { ctrl: true });
       t.screen.mockInput.pressKey("k", { ctrl: true });
@@ -997,13 +997,29 @@ for (const kitty of [false, true]) {
       expect(editor.plainText).toBe("Title\n\nFirst paragraph\nSecond line");
       expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Next change");
       t.screen.mockInput.pressEnter();
+      await Bun.sleep(30);
+      expect(editor.plainText).toBe("Title\n\nFirst paragraph\nSecond line\n");
+      expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Next change");
+      t.screen.mockInput.pressKey("BACKSPACE");
+      t.screen.mockInput.pressKey("s", { ctrl: true });
       await t.until("Ready.");
       expect((await t.repo.snapshot("@")).revisions[0]?.description).toBe("Title\n\nFirst paragraph\nSecond line\n");
       t.screen.mockInput.pressEnter();
-      await t.until("Shift/Alt+Enter newline");
+      await t.until("Enter newline");
       expect(editor.plainText).toBe("Title\n\nFirst paragraph\nSecond line");
+      t.screen.mockInput.pressEscape();
+      await Bun.sleep(30);
+      expect(editor.visible).toBe(false);
+      t.screen.mockInput.pressEnter();
+      await t.until("Enter newline");
       await t.screen.mockInput.typeText("Discard this");
       t.screen.mockInput.pressEscape();
+      await t.until("Unsaved changes");
+      expect(editor.visible).toBe(true);
+      expect(editor.plainText).toBe("Title\n\nFirst paragraph\nSecond lineDiscard this");
+      t.screen.mockInput.pressEscape();
+      await Bun.sleep(30);
+      expect(editor.visible).toBe(false);
       expect((await t.repo.snapshot("@")).revisions[0]?.description).toBe("Title\n\nFirst paragraph\nSecond line\n");
     } finally { await t.cleanup(); }
   });
@@ -1014,7 +1030,7 @@ test("description editor scrolls long text and retains it after a failed save", 
   try {
     const description = Array.from({ length: 40 }, (_, index) => `Line ${index + 1}`).join("\n");
     t.screen.mockInput.pressEnter();
-    await t.until("Shift/Alt+Enter newline");
+    await t.until("Enter newline");
     const editor = t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable;
     t.screen.mockInput.pressKey("a", { ctrl: true });
     t.screen.mockInput.pressKey("k", { ctrl: true });
@@ -1023,12 +1039,12 @@ test("description editor scrolls long text and retains it after a failed save", 
     expect(editor.scrollY).toBeGreaterThan(0);
     const prepare = spyOn(t.repo, "prepare").mockRejectedValueOnce(new Error("Description save failed"));
     try {
-      t.screen.mockInput.pressEnter();
+      t.screen.mockInput.pressKey("s", { ctrl: true });
       await t.until("Description save failed");
       expect(editor.plainText).toBe(description);
       expect(editor.focused).toBe(true);
     } finally { prepare.mockRestore(); }
-    t.screen.mockInput.pressEnter();
+    t.screen.mockInput.pressKey("d", { ctrl: true });
     await t.until("Ready.");
     expect((await t.repo.snapshot("@")).revisions[0]?.description).toBe(description + "\n");
   } finally { await t.cleanup(); }
@@ -1058,11 +1074,13 @@ test("preview toggle expands the graph, keeps focus visible, and preserves selec
     expect(t.screen.captureCharFrame()).toContain("┬");
     t.screen.mockInput.pressKey("p");
     t.screen.mockInput.pressEnter();
-    await t.until("Shift/Alt+Enter newline");
+    await t.until("Enter newline");
     const editor = t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable;
     await t.screen.mockInput.typeText("p");
     expect(editor.plainText).toContain("p");
     expect(pane.visible).toBe(false);
+    t.screen.mockInput.pressEscape();
+    await t.until("Unsaved changes");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
     expect(pane.visible).toBe(false);
@@ -1112,6 +1130,9 @@ test("focus refresh keeps input drafts, coalesces deferred events, and detaches 
     t.screen.renderer.emit("focus");
     await t.until("refresh pending");
     expect(t.screen.captureCharFrame()).toContain("draft kept");
+    expect(snapshot).toHaveBeenCalledTimes(0);
+    t.screen.mockInput.pressEscape();
+    await t.until("Unsaved changes");
     expect(snapshot).toHaveBeenCalledTimes(0);
     t.screen.mockInput.pressEscape();
     await t.until("external");

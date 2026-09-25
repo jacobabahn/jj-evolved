@@ -141,6 +141,7 @@ test("auto-refresh defers during editing and rejects a late result after user in
     status.mockRestore();
     expect(editor.plainText).toBe(draft);
     await t.escape();
+    await t.escape();
     const gate = Promise.withResolvers<void>();
     const started = Promise.withResolvers<void>();
     const snapshot = t.repo.snapshot.bind(t.repo);

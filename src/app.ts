@@ -28,7 +28,7 @@ type Prompt =
   | { kind: "form"; form: HistoryForm }
   | { kind: "search"; view: NavigationView; previous: Search; returnPoint: NavigationView | null }
   | { kind: "revset" }
-  | { kind: "describe"; revision: Revision }
+  | { kind: "describe"; revision: Revision; original: string; discard: boolean }
   | { kind: "new"; parent: Revision }
   | { kind: "picker"; choices: Choice[] }
   | { kind: "files"; revision: Revision; files: ChangedFile[] }
@@ -80,9 +80,9 @@ ${keyLabel(bindings, "quit")} / Ctrl-C  Quit
 
 In prompts (fixed keys; browse overrides do not apply)
 j/k or arrows     Choose an item
-Enter             Apply / confirm
-Shift/Alt-Enter   Newline in description
-Escape            Cancel
+Enter             Apply / confirm; newline in the description editor
+Ctrl-S or Ctrl-D  Save the description
+Escape            Cancel; press twice to discard description edits
 
 @ marks the working copy. ! marks a conflict.
 Drag a local [bookmark] onto another change to preview a move.
@@ -614,7 +614,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlayPreview.visible = false;
     }
     if (next.kind === "describe" || next.kind === "new" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
-    promptLabel.content = terminalText(`${label}  [Enter apply · Esc cancel]`);
+    promptLabel.content = terminalText(`${label}  [${next.kind === "describe" ? "^S save" : "Enter apply"} · Esc cancel]`);
     promptLabel.visible = true;
     input.placeholder = "";
     input.value = terminalText(value);
@@ -628,7 +628,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       descriptionInput.setText(terminalText(value));
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
-      overlay.hints.content = "Enter save · Shift/Alt+Enter newline · Esc cancel";
+      next.original = descriptionInput.plainText;
+      overlay.hints.content = "^S save · Enter newline · Esc cancel";
     }
     if (next.kind === "revset") {
       overlay.height = 15;
@@ -1019,7 +1020,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     preview.blur();
   }
   function describe(revision: Revision) {
-    openPrompt({ kind: "describe", revision }, `Describe ${revision.changeId.slice(0, 8)}`, revision.description.replace(/\n$/, ""));
+    openPrompt({ kind: "describe", revision, original: "", discard: false }, `Describe ${revision.changeId.slice(0, 8)}`, revision.description.replace(/\n$/, ""));
   }
   function editInteractively(action: InteractiveAction) {
     const editor = action.kind === "describe" ? "description editor" : action.kind === "resolve" ? "merge tool" : "diff editor";
@@ -1210,8 +1211,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind !== "browse") {
       if (!isBusy() && prompt.kind === "picker" && destinationSearch?.handleKey(key)) return;
       if (isBusy()) { key.preventDefault(); return; }
-      if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
-      else if (prompt.kind === "describe" && key.name === "return" && (key.shift || key.meta)) { key.preventDefault(); descriptionInput.newLine(); }
+      if (prompt.kind === "describe" && prompt.discard && key.name !== "escape") { prompt.discard = false; overlay.report(""); }
+      if (prompt.kind === "describe" && key.name === "escape" && !prompt.discard && descriptionInput.plainText !== prompt.original) { key.preventDefault(); prompt.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
+      else if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) prompt.back(); else closePrompt(); void loadPreview(); }
+      else if (prompt.kind === "describe" && key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
+      else if (prompt.kind === "describe" && key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
       else if (prompt.kind !== "describe" && (key.name === "pageup" || key.name === "pagedown")) { key.preventDefault(); overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3)); }
       else if (prompt.kind === "picker") {
         key.preventDefault();

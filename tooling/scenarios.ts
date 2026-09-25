@@ -1,4 +1,5 @@
 import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
+import type { TextareaRenderable } from "@opentui/core";
 import { strict as assert } from "node:assert";
 import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
@@ -29,7 +30,7 @@ export const scenarios: Scenario[] = [
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.type("xhD stay text in prompts");
       await ui.capture("Browse shortcuts remain text in the description prompt");
-      ui.key("RETURN");
+      ui.key("s", { ctrl: true });
       await ui.until("Ready.");
       assert.equal((await ui.repo.snapshot("@-")).revisions[0]?.description.trim(), "xhD stay text in prompts");
     },
@@ -54,6 +55,8 @@ export const scenarios: Scenario[] = [
       ui.screen.renderer.emit("focus");
       await ui.until("refresh pending");
       await ui.capture("Open description draft is preserved while refresh waits");
+      ui.key("ESCAPE");
+      await ui.until("Unsaved changes");
       ui.key("ESCAPE");
       await ui.until("Ready.");
     },
@@ -325,10 +328,44 @@ export const scenarios: Scenario[] = [
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.paste(description);
       await ui.capture("Pasted Unicode description");
-      ui.key("RETURN");
+      ui.key("s", { ctrl: true });
       await ui.until("Ready.");
       assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description.trim(), description);
       await ui.capture("Saved Unicode description");
+    },
+  },
+  {
+    name: "describe-keys", title: "Enter adds description lines; Ctrl+S saves; Escape guards edits",
+    async run(ui) {
+      const editor = () => ui.node("description-input") as TextareaRenderable;
+      ui.key("RETURN");
+      await ui.until("^S save · Enter newline · Esc cancel");
+      await ui.capture("Description editor opens with save and newline hints");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+      await ui.type("Add login form");
+      ui.key("RETURN");
+      await ui.type("Validates the email field before submitting.");
+      await ui.until("Validates the email field");
+      assert.equal(editor().plainText, "Add login form\nValidates the email field before submitting.");
+      assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description.trim(), "Next change");
+      await ui.capture("Enter starts a second line without saving");
+      ui.key("s", { ctrl: true });
+      await ui.until("Ready.");
+      assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description, "Add login form\nValidates the email field before submitting.\n");
+      await ui.until("Add login form");
+      await ui.capture("Ctrl+S saved both lines; the graph shows the new subject");
+      ui.key("RETURN");
+      await ui.until("Enter newline");
+      await ui.type(" (draft)");
+      ui.key("ESCAPE");
+      await ui.until("Unsaved changes · Esc again discards · ^S saves");
+      assert.equal(editor().visible, true);
+      await ui.capture("First Escape warns about unsaved edits instead of discarding");
+      ui.key("ESCAPE");
+      for (let attempt = 0; attempt < 50 && ui.screen.renderer.root.findDescendantById("description-input")?.visible; attempt++) await Bun.sleep(10);
+      await ui.capture("Second Escape discarded the draft; the saved description is unchanged");
+      assert.equal(ui.screen.renderer.root.findDescendantById("description-input")?.visible, false);
+      assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description, "Add login form\nValidates the email field before submitting.\n");
     },
   },
   {

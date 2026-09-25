@@ -111,7 +111,7 @@ export async function createUiFixture(options: FixtureOptions = {}) {
           recording.mark(`replace prompt with ${value} and submit`);
           key("a", { ctrl: true }); key("k", { ctrl: true });
           await screen.mockInput.typeText(value);
-          screen.mockInput.pressEnter();
+          if (screen.renderer.root.findDescendantById("description-input")?.visible) key("s", { ctrl: true }); else screen.mockInput.pressEnter();
           await until("Ready.");
         },
         async resize(width: number, height: number) {
