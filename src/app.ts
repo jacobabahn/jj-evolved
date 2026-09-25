@@ -14,9 +14,10 @@ import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
 import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
+import { FileList } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
-import { shortChangeId, type InteractiveAction, type Mutation, type Revision, type Snapshot, type Bookmark } from "./repository/model";
+import { shortChangeId, type InteractiveAction, type Mutation, type Revision, type Snapshot, type Bookmark, type ChangedFile } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string> };
 
@@ -30,6 +31,7 @@ type Prompt =
   | { kind: "describe"; revision: Revision }
   | { kind: "new"; parent: Revision }
   | { kind: "picker"; choices: Choice[] }
+  | { kind: "files"; revision: Revision; files: ChangedFile[] }
   | { kind: "text"; accept: (value: string) => void }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
@@ -70,7 +72,7 @@ ${row(["bookmarks"])} Local and remote bookmarks
 ${row(["git"])} Git remotes: fetch and push
 ${row(["operations"])} Operation history, inspection and restore
 ${row(["undo"])} Preview undo of the latest operation
-${row(["files"])} Browse files changed in selected revision; h/Left returns
+${row(["files"])} Changed files in the left pane; j/k file, Enter focus diff, h/Left/Esc return
 ${row(["diff"])} Show the selected revision's diff preview
 ${row(["theme"])} Choose a theme, preview and save
 ${row(["help"])} Show this help
@@ -104,6 +106,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const list = new RevisionLog(renderer);
   list.height = 0;
   list.flexGrow = 1;
+  const fileList = new FileList(renderer);
+  fileList.height = 0;
+  fileList.flexGrow = 1;
+  fileList.visible = false;
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
@@ -114,7 +120,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} move  ${bindingLabel("filter")} revset  ${bindingLabel("search")} search  ${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} match  ${bindingLabel("workingCopy")} work  ${bindingLabel("parent")}/${bindingLabel("child")} ancestry  ${bindingLabel("return")} return\n${bindingLabel("diff")} diff  ${bindingLabel("describe")} describe  ${bindingLabel("rebase")}/${bindingLabel("squash")} rebase/squash  ${bindingLabel("actions")} actions  ${bindingLabel("help")} help  ${bindingLabel("quit")} quit` });
+  const browseShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} move  ${bindingLabel("filter")} revset  ${bindingLabel("search")} search  ${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} match  ${bindingLabel("workingCopy")} work  ${bindingLabel("parent")}/${bindingLabel("child")} ancestry  ${bindingLabel("return")} return\n${bindingLabel("diff")} diff  ${bindingLabel("describe")} describe  ${bindingLabel("rebase")}/${bindingLabel("squash")} rebase/squash  ${bindingLabel("actions")} actions  ${bindingLabel("help")} help  ${bindingLabel("quit")} quit`;
+  const filesShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} file  Enter focus diff  ${bindingLabel("focus")} focus  ${bindingLabel("togglePreview")} preview  ${bindingLabel("pageUp")}/${bindingLabel("pageDown")} scroll\nh/Left/Esc/${bindingLabel("files")} back to revisions  ${bindingLabel("quit")} quit`;
+  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent, content: browseShortcuts });
   const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
@@ -133,6 +141,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const result = new TextRenderable(renderer, { id: "action-result", height: 2, visible: false, fg: colors.accent });
   listBox.add(result);
   listBox.add(list);
+  listBox.add(fileList);
   preview.add(detail);
   body.add(listBox);
   body.add(preview);
@@ -198,7 +207,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     focus = next;
     listBox.borderColor = next === "list" ? colors.accent : colors.border;
     preview.borderColor = next === "preview" ? colors.accent : colors.border;
-    if (next === "list") list.focus(); else preview.focus();
+    if (next === "list") { if (prompt.kind === "files") fileList.focus(); else list.focus(); } else preview.focus();
   }
   function setPreviewVisible(visible: boolean) {
     preview.visible = visible;
@@ -207,6 +216,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       ? { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }
       : BorderChars.single;
     if (!visible) { preview.blur(); setFocus("list"); }
+    updateFilesTitle();
   }
   function showOverlay(text: string, title: string) {
     previews.show({ target: "overlay", text, title });
@@ -583,8 +593,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     descriptionInput.visible = false;
     chooser.blur();
     chooser.visible = false;
+    fileList.blur();
+    fileList.visible = false;
     list.visible = true;
     listBox.title = " Revisions ";
+    shortcuts.content = browseShortcuts;
     input.visible = false;
     promptLabel.visible = false;
     setFocus(focus);
@@ -718,6 +731,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.selectedBackgroundColor = colors.selected;
     chooser.selectedTextColor = chooser.selectedDescriptionColor = colors.selectedText;
     list.applyTheme();
+    fileList.applyTheme();
     detail.applyTheme();
     overlay.applyTheme();
     overlayText.applyTheme();
@@ -846,12 +860,41 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void run("Loading changed files…", async () => {
       const files = await repository.files(revision);
       if (stopped) return;
-      pick("Changed files", files.map(file => ({ name: file.path, description: file.status,
-        preview: () => repository.diff(revision, [file.path]),
-        choose: () => { void previews.load({ target: "overlay", title: "Change preview", loading: "Loading diff…", read: () => repository.diff(revision, [file.path]) }); },
-      })));
-      if (!files.length) showOverlay("Empty change. No changed files.", "Changed files");
+      closePrompt();
+      prompt = { kind: "files", revision, files };
+      list.mouseSelectionEnabled = false;
+      list.blur();
+      list.visible = false;
+      fileList.visible = true;
+      fileList.setFiles(files);
+      updateFilesTitle();
+      shortcuts.content = filesShortcuts;
+      setFocus("list");
+      if (files.length) void loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
     });
+  }
+  function fitTitle(text: string, width: number, keepEnd = false) {
+    const max = Math.max(6, width - 6);
+    return text.length <= max ? text : keepEnd ? `…${text.slice(text.length - max + 1)}` : `${text.slice(0, max - 1)}…`;
+  }
+  function paneWidth(total = renderer.width) { return preview.visible ? Math.max(26, Math.floor(total * 0.42)) : total; }
+  function updateFilesTitle(total?: number) {
+    if (prompt.kind !== "files") return;
+    const { revision } = prompt;
+    listBox.title = ` ${fitTitle(`Files · ${revision.changeId.slice(0, 8)} ${revision.description.split("\n")[0] || "(no description)"}`, paneWidth(total))} `;
+  }
+  async function loadFilePreview() {
+    if (prompt.kind !== "files") return;
+    const { revision } = prompt;
+    const file = fileList.selectedFile;
+    if (!file) return;
+    ++previewNavigation;
+    await previews.load({ target: "main", title: fitTitle(file.path, renderer.width - paneWidth(), true), loading: "Loading diff…", read: () => repository.diff(revision, [file.path]), empty: `No differences in ${file.path}.` });
+  }
+  function closeFiles() {
+    if (prompt.kind !== "files") return;
+    closePrompt();
+    void loadPreview();
   }
   function showRemotes() {
     void run("Loading remotes…", async () => {
@@ -1066,6 +1109,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       void loadPreview();
     }
   }
+  function onFileSelection() {
+    if (prompt.kind !== "files") return;
+    ++activity;
+    void loadFilePreview();
+  }
+  function onResize(width: number) { updateFilesTitle(width); }
   function onKey(key: KeyEvent) {
     if (stopped) return;
     ++activity;
@@ -1087,9 +1136,29 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (key.name === "return") void keepTheme();
       return;
     }
-    if (((prompt.kind === "browse" && actionForKey(bindings, key) === "togglePreview") || (prompt.kind === "inline" && key.name === "p" && !key.ctrl && !key.meta && !key.shift))) {
+    if ((((prompt.kind === "browse" || prompt.kind === "files") && actionForKey(bindings, key) === "togglePreview") || (prompt.kind === "inline" && key.name === "p" && !key.ctrl && !key.meta && !key.shift))) {
       key.preventDefault();
       setPreviewVisible(!preview.visible);
+      return;
+    }
+    if (prompt.kind === "files") {
+      const action = actionForKey(bindings, key);
+      if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
+      if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
+      if (action === "focus" || key.name === "return") { key.preventDefault(); setFocus(action === "focus" && focus === "preview" ? "list" : "preview"); return; }
+      if (action === "down" || action === "up") {
+        key.preventDefault();
+        const direction = action === "up" ? -1 : 1;
+        if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
+        else if (direction < 0) fileList.moveUp(); else fileList.moveDown();
+        return;
+      }
+      if (action === "pageUp" || action === "pageDown" || action === "previewHalfUp" || action === "previewHalfDown" || action === "previewUp" || action === "previewDown") {
+        key.preventDefault();
+        const direction = action === "pageUp" || action === "previewHalfUp" || action === "previewUp" ? -1 : 1;
+        ++previewNavigation;
+        preview.scrollBy(direction * (action === "previewUp" || action === "previewDown" ? 1 : action === "pageUp" || action === "pageDown" ? Math.max(1, preview.height - 3) : Math.max(1, Math.floor((preview.height - 2) / 2))));
+      }
       return;
     }
     if (prompt.kind === "inline") {
@@ -1228,9 +1297,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     previews.dispose();
     review.dispose();
     renderer.off("focus", onTerminalFocus);
+    renderer.off("resize", onResize);
     if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
     renderer.keyInput.off("keypress", onKey);
     list.off("selectionChanged", onSelection);
+    fileList.off("selectionChanged", onFileSelection);
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
@@ -1243,8 +1314,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   list.onDragHint = text => report(text || `Ready. ${bindingLabel("help")} shows all controls.`);
   app.onMouse = event => { ++activity; list.handleDragMouse(event); };
   renderer.on("focus", onTerminalFocus);
+  renderer.on("resize", onResize);
   renderer.keyInput.on("keypress", onKey);
   list.on("selectionChanged", onSelection);
+  fileList.on("selectionChanged", onFileSelection);
   chooser.on("selectionChanged", previewChoice);
   return { start: async () => {
     setFocus("list");

@@ -1306,3 +1306,55 @@ test("focus refresh does not restore scroll over help opened during a pending di
     expect(preview.scrollTop).toBe(top);
   } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);
+
+test("files mode lists changed files in the left pane, previews one file at a time, and returns to the graph", async () => {
+  const t = await setup();
+  try {
+    await Bun.write(`${t.f.path}/added.txt`, "brand new\n");
+    await Bun.write(`${t.f.path}/hello.txt`, "hello, changed\n");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("+ brand new");
+    await t.until("Ready.");
+    const listBox = t.screen.renderer.root.findDescendantById("revision-pane") as import("@opentui/core").BoxRenderable;
+    const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
+    const working = (await t.repo.snapshot("@")).revisions[0];
+    if (!working) throw new Error("Missing working copy");
+    t.screen.mockInput.pressKey("l");
+    const frame = await t.until("A added.txt");
+    expect(frame).toContain("M hello.txt");
+    expect(String(listBox.title)).toBe(` Files · ${working.changeId.slice(0, 8)} Next change `);
+    expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(false);
+    expect(t.screen.renderer.root.findDescendantById("changed-files")?.visible).toBe(true);
+    await t.until("── added.txt ──");
+    await t.until("+ brand new");
+    expect(String(preview.title)).toBe(" added.txt ");
+    expect(t.screen.captureCharFrame()).not.toContain("- hello from jj-evolved");
+    t.screen.mockInput.pressKey("j");
+    await t.until("── hello.txt ──");
+    await t.until("- hello from jj-evolved");
+    expect(String(preview.title)).toBe(" hello.txt ");
+    expect(t.screen.captureCharFrame()).not.toContain("+ brand new");
+    t.screen.mockInput.pressKey("h");
+    await t.until("Change preview");
+    await t.until("+ brand new");
+    expect(String(listBox.title)).toBe(" Revisions ");
+    expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(true);
+    expect(t.screen.renderer.root.findDescendantById("changed-files")?.visible).toBe(false);
+    expect(t.screen.captureCharFrame()).toContain(`▶ @  ${working.changeId.slice(0, 8)}`);
+    expect(t.screen.captureCharFrame()).toContain("- hello from jj-evolved");
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("files mode reports an empty change and Escape returns", async () => {
+  const t = await setup();
+  try {
+    await t.until("Empty change. No file differences.");
+    t.screen.mockInput.pressKey("\x1b[C");
+    await t.until("Empty change. No changed files.");
+    expect(t.screen.captureCharFrame()).toContain("Files ·");
+    t.screen.mockInput.pressEscape();
+    await t.until("Change preview");
+    expect(t.screen.captureCharFrame()).toContain(" Revisions ");
+    expect(t.screen.captureCharFrame()).not.toContain("Files ·");
+  } finally { await t.cleanup(); }
+}, 15_000);
