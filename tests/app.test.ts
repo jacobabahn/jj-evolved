@@ -1375,8 +1375,32 @@ test("Enter in files mode reveals a hidden diff and focuses it", async () => {
     await t.until("+ file focus regression");
     expect(preview.visible).toBe(true);
     expect(preview.focused).toBe(true);
+    expect(String(preview.title)).toBe(" hello.txt ");
     t.screen.mockInput.pressKey("h");
     await t.until("Change preview");
     expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(true);
   } finally { await t.cleanup(); }
 }, 15_000);
+
+test("reopening files mode scrolls the file list back to the first file", async () => {
+  const t = await setup();
+  try {
+    for (let index = 0; index < 60; index++) await Bun.write(`${t.f.path}/f${String(index).padStart(2, "0")}.txt`, `${index}\n`);
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("Ready.");
+    const files = t.screen.renderer.root.findDescendantById("changed-files") as import("@opentui/core").ScrollBoxRenderable;
+    t.screen.mockInput.pressKey("l");
+    await t.until("A f00.txt");
+    for (let index = 0; index < 55; index++) t.screen.mockInput.pressKey("j");
+    await t.until("A f55.txt");
+    await t.screen.renderOnce();
+    expect(files.scrollTop).toBeGreaterThan(0);
+    t.screen.mockInput.pressKey("h");
+    await t.until("Change preview");
+    t.screen.mockInput.pressKey("l");
+    await t.until("── f00.txt ──");
+    await t.screen.renderOnce();
+    expect(files.scrollTop).toBe(0);
+    expect(t.screen.captureCharFrame()).toContain("▶ A f00.txt");
+  } finally { await t.cleanup(); }
+}, 20_000);
