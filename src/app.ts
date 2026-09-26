@@ -878,11 +878,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const max = Math.max(6, width - 6);
     return text.length <= max ? text : keepEnd ? `…${text.slice(text.length - max + 1)}` : `${text.slice(0, max - 1)}…`;
   }
-  function paneWidth(total = renderer.width) { return preview.visible ? Math.max(26, Math.floor(total * 0.42)) : total; }
+  function paneWidth(total = renderer.width, previewVisible = preview.visible) { return previewVisible ? Math.max(26, Math.floor(total * 0.42)) : total; }
+  function fileTitle(path: string, total = renderer.width) { return fitTitle(path, total - paneWidth(total, true), true); }
   function updateFilesTitle(total?: number) {
     if (prompt.kind !== "files") return;
     const { revision } = prompt;
     listBox.title = ` ${fitTitle(`Files · ${revision.changeId.slice(0, 8)} ${revision.description.split("\n")[0] || "(no description)"}`, paneWidth(total))} `;
+    const file = fileList.selectedFile;
+    if (file) preview.title = ` ${fileTitle(file.path, total)} `;
   }
   async function loadFilePreview() {
     if (prompt.kind !== "files") return;
@@ -890,10 +893,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const file = fileList.selectedFile;
     if (!file) return;
     ++previewNavigation;
-    await previews.load({ target: "main", title: fitTitle(file.path, renderer.width - paneWidth(), true), loading: "Loading diff…", read: () => repository.diff(revision, [file.path]), empty: `No differences in ${file.path}.` });
+    await previews.load({ target: "main", title: fileTitle(file.path), loading: "Loading diff…", read: () => repository.diff(revision, [file.path]), empty: `No differences in ${file.path}.` });
   }
   function closeFiles() {
     if (prompt.kind !== "files") return;
+    const { revision } = prompt;
+    const index = revisions.findIndex(item => item.commitId === revision.commitId);
+    if (index >= 0) list.setSelectedIndex(index);
     closePrompt();
     void loadPreview();
   }
