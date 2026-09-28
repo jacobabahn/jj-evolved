@@ -161,3 +161,64 @@ test("rebase drag highlights the source change ID until cancelled", async () => 
     expect(screen.captureCharFrame()).not.toContain("→ ○");
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
 });
+
+test("partial repaints restore conflicted bookmark badges, drop targets and source markers", async () => {
+  const { RGBA } = await import("@opentui/core");
+  const { RevisionLog } = await import("../../src/revisions/revision-log");
+  const { darkTheme, setTheme } = await import("../../src/ui/theme");
+  const screen = await createTestRenderer({ width: 90, height: 10 });
+  setTheme(screen.renderer, darkTheme);
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  const revisions = ["a", "b", "c"].map(id => ({
+    changeId: `${id}qwertyu`, changePrefix: id, commitId: id.repeat(40), description: id,
+    author: "Test User", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+  }));
+  const [panel, drop, selected] = [darkTheme.panel, darkTheme.drop, darkTheme.graphSelected].map(color => RGBA.fromHex(color));
+  try {
+    log.setSnapshot({ root: "/test", revisions, graph: revisions.map(revision => ({ kind: "revision", revision, prefix: "○  " })) },
+      [{ name: "bm", remote: "", conflict: true, targets: ["a".repeat(40), "b".repeat(40)] }]);
+    log.canDrag = () => true;
+    screen.renderer.root.onMouse = event => log.handleDragMouse(event);
+    await screen.waitForVisualIdle();
+    const node = (id: string) => {
+      const found = screen.renderer.root.findDescendantById(id);
+      if (!found) throw new Error(`Missing ${id}`);
+      return found;
+    };
+    const lines = () => screen.captureSpans().lines;
+    const badges = () => [0, 1].map(row => lines()[node(`revision-label-${row}`).y]?.spans.findLast(span => span.text.trim() === "[bm!]")?.bg);
+    const rowBg = (row: number) => lines()[node(`revision-label-${row}`).y]?.spans.at(-1)?.bg;
+    expect(badges()).toEqual([selected, panel]);
+    const badge = node("bookmark-0-0");
+    await screen.mockMouse.pressDown(badge.x + 1, badge.y);
+    await screen.mockMouse.emitMouseEvent("drag", node("revision-label-1").x + 5, node("revision-label-1").y);
+    await screen.waitForVisualIdle();
+    expect(badges()).toEqual([drop, drop]);
+    expect(rowBg(1)).toEqual(drop);
+    await screen.mockMouse.emitMouseEvent("drag", node("revision-label-2").x + 5, node("revision-label-2").y);
+    await screen.waitForVisualIdle();
+    expect(badges()).toEqual([drop, drop]);
+    expect([rowBg(1), rowBg(2)]).toEqual([panel, drop]);
+    log.cancelDrag();
+    await screen.mockMouse.release(node("revision-label-2").x + 5, node("revision-label-2").y);
+    await screen.waitForVisualIdle();
+    expect(badges()).toEqual([selected, panel]);
+    expect([rowBg(0), rowBg(1), rowBg(2)]).toEqual([selected, panel, panel]);
+    await screen.mockMouse.pressDown(node("revision-label-1").x + 5, node("revision-label-1").y);
+    await screen.mockMouse.emitMouseEvent("drag", node("revision-label-2").x + 5, node("revision-label-2").y);
+    await screen.mockMouse.emitMouseEvent("drag", node("revision-label-0").x + 5, node("revision-label-0").y);
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame().match(/[●→] ○/g)).toEqual(["→ ○", "● ○"]);
+    expect([rowBg(0), rowBg(1), rowBg(2)]).toEqual([drop, selected, panel]);
+    log.cancelDrag();
+    await screen.mockMouse.release(node("revision-label-0").x + 5, node("revision-label-0").y);
+    log.markSource(2, new Set(["b".repeat(40)]));
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame().match(/[●→▶] ○/g)).toEqual(["● ○", "● ○"]);
+    log.markSource(null);
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame().match(/[●→▶] ○/g)).toEqual(["▶ ○"]);
+    expect([rowBg(0), rowBg(1), rowBg(2)]).toEqual([panel, selected, panel]);
+  } finally { log.destroyRecursively(); screen.renderer.destroy(); }
+});

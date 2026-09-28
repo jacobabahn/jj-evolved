@@ -278,3 +278,28 @@ test("loading more history preserves a selection made while loading and resets o
     await t.until("L load 200 more");
   } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);
+
+test("selection moves repaint only the affected rows and keep search markers", async () => {
+  const t = await setup();
+  try {
+    await t.search("FEATURE");
+    await t.until("1/1");
+    t.screen.mockInput.pressEnter();
+    await t.until("next/prev");
+    const list = t.list() as unknown as { paintRow: (row: { revisionIndex: number | null }) => void };
+    const paintRow = list.paintRow.bind(list);
+    const painted = new Set<number | null>();
+    list.paintRow = row => { painted.add(row.revisionIndex); paintRow(row); };
+    t.screen.mockInput.pressKey("k");
+    await t.screen.renderOnce();
+    const frame = t.screen.captureCharFrame();
+    expect([...painted].sort()).toEqual([0, 1]);
+    expect(frame.split("▶")).toHaveLength(2);
+    expect(frame).toContain("*  ");
+    expect(frame).not.toContain("*▶");
+    painted.clear();
+    t.screen.mockInput.pressKey("j");
+    expect([...painted].sort()).toEqual([0, 1]);
+    expect(await t.until("*▶")).toContain("1/1");
+  } finally { await t.cleanup(); }
+}, 15_000);
