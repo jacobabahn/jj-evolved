@@ -202,6 +202,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let replacing = false;
   let focusRefreshPending = false;
   let previewNavigation = 0;
+  let lastSelection = -Infinity;
   let restorePreviewScroll: (() => void) | undefined;
   let previewTitle = "Change preview";
   let lastError = "";
@@ -302,7 +303,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     ++previewNavigation;
     previews.show({ target: "main", text, title });
   }
-  async function loadPreview() {
+  async function loadPreview(debounce?: number) {
     ++previewNavigation;
     if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
     restorePreviewScroll = undefined;
@@ -310,7 +311,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (!revision) { show(`No revisions match this revset. Press ${bindingLabel("filter")} to change it.`, "No revisions"); return; }
     const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\n${bindingLabel("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
-      prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences." });
+      prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences.",
+      cached: repository.cachedDiff(revision), delay: debounce });
   }
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
   async function refresh(nextRevset = revset, workingCopy = false, preserveView = false) {
@@ -374,6 +376,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
 
   function onTerminalFocus() {
     if (stopped) return;
+    repository.clearDiffs();
     focusRefreshPending = true;
     if (!idle() && !review.applying) {
       review.cancel();
@@ -1293,7 +1296,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       ++activity;
       updateInlineHint();
       updateSearchStatus();
-      void loadPreview();
+      // Uncached diffs load at once for an isolated move and wait out a run of rapid moves.
+      const now = performance.now();
+      void loadPreview(now - lastSelection < 150 ? 75 : 0);
+      lastSelection = now;
     }
   }
   function onFileSelection() {
@@ -1483,7 +1489,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (action === "diff") { key.preventDefault(); setPreviewVisible(true); void loadPreview(); return; }
-    if (action === "refresh") { key.preventDefault(); void run("Refreshing history…", () => refresh()); }
+    if (action === "refresh") { key.preventDefault(); repository.clearDiffs(); void run("Refreshing history…", () => refresh()); }
     else if (action === "filter") { key.preventDefault(); openPrompt({ kind: "revset" }, "Revset", revset); }
     else if (action === "describe" || action === "new" || action === "edit") {
       key.preventDefault();

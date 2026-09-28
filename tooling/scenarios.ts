@@ -585,7 +585,8 @@ export const scenarios: Scenario[] = [
           try {
             await release.promise;
             if (outcome === "failure") throw new Error("Obsolete diff failure");
-            return await originalDiff(revision, files);
+            // A real diff would be cached and served next round without calling this mock.
+            return "Obsolete diff success";
           } finally { finished.resolve(); }
         };
         try {
@@ -602,7 +603,7 @@ export const scenarios: Scenario[] = [
           const frame = ui.screen.captureCharFrame();
           assert(frame.includes("Empty change."));
           assert(!frame.includes("+ hello from jj-evolved"));
-          assert(!frame.includes("Obsolete diff failure"));
+          assert(!frame.includes(`Obsolete diff ${outcome}`));
         } finally {
           release.resolve();
           ui.repo.diff = originalDiff;
