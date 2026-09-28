@@ -55,6 +55,11 @@ export class Repository {
     return (await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "log", "--no-graph", "--limit", "1", "-T", "id"])).trim();
   }
 
+  // Snapshots pending working-copy edits first, so external file changes produce a new ID.
+  async snapshotOperationId(): Promise<string> {
+    return (await run(this.root, ["op", "log", "--no-graph", "--limit", "1", "-T", "id"])).trim();
+  }
+
   async operations(limit = 50): Promise<Operation[]> {
     const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "log", "--no-graph", "--limit", String(limit), "-T",
       `'[' ++ json(id) ++ ',' ++ json(description) ++ ',' ++ json(stringify(time)) ++ ',' ++ json(current_operation) ++ ']\n'`]);

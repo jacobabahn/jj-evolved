@@ -5,6 +5,7 @@ import { createApp } from "../src/app";
 import { Repository } from "../src/repository/repository";
 import { RevisionLog } from "../src/revisions/revision-log";
 import { fixture } from "./fixture";
+import { writeFileSync } from "node:fs";
 
 async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void> = async () => {}, interval = 0) {
   const f = await fixture();
@@ -135,6 +136,89 @@ test("auto-refresh detects commands and file edits, preserving selection, search
   } finally { await t.cleanup(); }
 });
 
+test("idle polls read only the operation ID after startup, refreshes, and mutations", async () => {
+  const t = await setup();
+  const spawn = spyOn(Bun, "spawn");
+  const snapshot = spyOn(t.repo, "snapshot");
+  const graph = spyOn(t.node<RevisionLog>("revisions"), "setSnapshot");
+  async function idlePoll() {
+    spawn.mockClear(); snapshot.mockClear(); graph.mockClear();
+    await t.app.checkForUpdates();
+    expect(spawn.mock.calls.map(call => (call[0] as string[]).slice(3))).toEqual([["op", "log", "--no-graph", "--limit", "1", "-T", "id"]]);
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(graph).not.toHaveBeenCalled();
+  }
+  try {
+    await idlePoll();
+    await idlePoll();
+    await t.f.jj("bookmark", "create", "external", "-r", "@-");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.text("external");
+    await t.text("Ready.");
+    await idlePoll();
+    t.screen.mockInput.pressEnter();
+    const editor = t.node<TextareaRenderable>("description-input");
+    editor.setText("Described in the app");
+    t.screen.mockInput.pressKey("s", { ctrl: true });
+    await t.text("describe completed");
+    await idlePoll();
+  } finally { spawn.mockRestore(); snapshot.mockRestore(); graph.mockRestore(); await t.cleanup(); }
+});
+
+test("idle polls detect external file edits and refresh an open status view", async () => {
+  const t = await setup();
+  try {
+    await t.app.checkForUpdates();
+    await Bun.write(`${t.f.path}/polled.txt`, "created outside the app\n");
+    await t.app.checkForUpdates();
+    await t.text("+ created outside the app");
+    t.screen.mockInput.pressKey("w");
+    await t.text("Working-copy status");
+    const status = spyOn(t.repo, "status");
+    await t.app.checkForUpdates();
+    expect(status).not.toHaveBeenCalled();
+    await Bun.write(`${t.f.path}/status-only.txt`, "status\n");
+    await t.app.checkForUpdates();
+    expect(status).toHaveBeenCalledTimes(1);
+    status.mockRestore();
+    await t.text("status-only.txt");
+  } finally { await t.cleanup(); }
+});
+
+test("status view updates while files keep changing during the poll's reads", async () => {
+  const t = await setup();
+  const snapshot = t.repo.snapshot.bind(t.repo);
+  try {
+    t.screen.mockInput.pressKey("w");
+    await t.text("Working-copy status");
+    await t.app.checkForUpdates();
+    await Bun.write(`${t.f.path}/first.txt`, "first\n");
+    let writes = 0;
+    t.repo.snapshot = (...args) => {
+      writeFileSync(`${t.f.path}/busy.txt`, `write ${++writes}\n`);
+      return snapshot(...args);
+    };
+    await t.app.checkForUpdates();
+    await t.text("first.txt");
+    expect(writes).toBeGreaterThan(0);
+  } finally { t.repo.snapshot = snapshot; await t.cleanup(); }
+});
+
+test("a status error pane recovers on the next reloading poll", async () => {
+  const t = await setup();
+  try {
+    await t.app.checkForUpdates();
+    const failed = spyOn(t.repo, "status").mockRejectedValueOnce(new Error("status unavailable"));
+    t.screen.mockInput.pressKey("w");
+    await t.text("Status error");
+    failed.mockRestore();
+    await Bun.write(`${t.f.path}/recovered.txt`, "recovered\n");
+    await t.app.checkForUpdates();
+    await t.text("recovered.txt");
+    expect(t.screen.captureCharFrame()).toContain("Working-copy status");
+  } finally { await t.cleanup(); }
+});
+
 test("auto-refresh defers during editing and rejects a late result after user input", async () => {
   const t = await setup();
   try {
@@ -144,10 +228,10 @@ test("auto-refresh defers during editing and rejects a late result after user in
     await t.screen.mockInput.typeText("Draft ");
     const draft = editor.plainText;
     await t.f.jj("describe", "-m", "External revision");
-    const status = spyOn(t.repo, "status");
+    const poll = spyOn(t.repo, "snapshotOperationId");
     await t.app.checkForUpdates();
-    expect(status).not.toHaveBeenCalled();
-    status.mockRestore();
+    expect(poll).not.toHaveBeenCalled();
+    poll.mockRestore();
     expect(editor.plainText).toBe(draft);
     await t.escape();
     await t.escape();
@@ -185,7 +269,7 @@ test("auto-refresh keeps scroll and help, retries errors, and stops polling on d
     const pane = t.node<ScrollBoxRenderable>("overlay-preview");
     pane.scrollTo(8);
     await t.f.jj("bookmark", "create", "external");
-    const failed = spyOn(t.repo, "status").mockRejectedValueOnce(new Error("temporary failure"));
+    const failed = spyOn(t.repo, "snapshotOperationId").mockRejectedValueOnce(new Error("temporary failure"));
     await t.app.checkForUpdates();
     await t.text("Auto-refresh failed");
     failed.mockRestore();
@@ -194,17 +278,17 @@ test("auto-refresh keeps scroll and help, retries errors, and stops polling on d
     expect(list.getSelectedIndex()).toBe(18);
     expect(pane.scrollTop).toBe(8);
     expect(pane.title).toContain("Keyboard reference");
-    const noChangeFailure = spyOn(t.repo, "status").mockRejectedValueOnce(new Error("retry without new operations"));
+    const noChangeFailure = spyOn(t.repo, "snapshotOperationId").mockRejectedValueOnce(new Error("retry without new operations"));
     await t.app.checkForUpdates();
     await t.text("Auto-refresh failed");
     noChangeFailure.mockRestore();
     await t.app.checkForUpdates();
     await t.text("Ready.");
-    const status = spyOn(t.repo, "status");
+    const poll = spyOn(t.repo, "snapshotOperationId");
     t.app.stop();
     await t.app.checkForUpdates();
-    expect(status).not.toHaveBeenCalled();
-    status.mockRestore();
+    expect(poll).not.toHaveBeenCalled();
+    poll.mockRestore();
   } finally { await t.cleanup(); }
 });
 

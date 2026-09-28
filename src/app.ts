@@ -320,10 +320,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const limit = nextRevset === revset ? historyLimit : 200;
     const query = preserveView ? search.query : "";
     list.cancelDrag();
-    const snapshot = await repository.snapshot(nextRevset, false, limit);
-    const bookmarks = await repository.bookmarks();
-    const candidates = query ? await repository.navigationRevisions(nextRevset) : [];
+    // Read the ID before the view so a concurrent change costs one extra reload, never a missed one.
+    const operation = await repository.snapshotOperationId();
+    const [snapshot, bookmarks, candidates] = await Promise.all([
+      repository.snapshot(nextRevset, true, limit), repository.bookmarks(),
+      query ? repository.navigationRevisions(nextRevset) : Promise.resolve([] as Revision[]),
+    ]);
     if (stopped || request !== refreshRequest) return;
+    observedOperation = operation;
     // Browsing stays available during reads; preserve the latest view when applying results.
     const previous = selected();
     const top = list.scrollTop;
@@ -403,7 +407,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const view = captureView();
     const request = ++refreshRequest;
     const limit = historyLimit + 200;
-    const snapshot = await repository.snapshot(revset, false, limit);
+    const snapshot = await repository.snapshot(revset, true, limit);
     if (stopped || request !== refreshRequest || currentSnapshot !== view.snapshot || returnPoint) return;
     historyLimit = limit;
     const current = captureView();
@@ -428,14 +432,16 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const generation = activity;
     const valid = () => !stopped && activity === generation && !isBusy() && idle() && !list.dragActive;
     try {
-      // status snapshots pending file edits, including edits made without a JJ command.
-      const status = await repository.status();
-      const operation = await repository.operationId();
+      let operation = await repository.snapshotOperationId();
       if (!valid()) return;
       if (operation === observedOperation) {
         if (refreshError) { report("Ready."); refreshError = ""; }
         return;
       }
+      // status snapshots too, so it must precede the ID that the re-check compares against.
+      const status = statusShown() ? await repository.status() : undefined;
+      if (status !== undefined) operation = await repository.operationId();
+      if (!valid()) return;
       const oldView = captureView();
       const oldReturn = returnPoint;
       const previous = selected();
@@ -465,10 +471,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       refreshError = "";
       const previewTop = preview.scrollTop;
       const title = previewTitle;
+      const statusView = statusShown();
       if (search.query) search = { query: search.query, matches: matchingRevisions(candidates, bookmarks, search.query) };
       returnPoint = restoredReturn;
       displayView(view);
-      if (title === "Working-copy status") show(status, "Working-copy status");
+      if (statusView) { if (status !== undefined) show(status, "Working-copy status"); }
       else if (title !== "Last error" && JSON.stringify(previous) !== JSON.stringify(selected())) await loadPreview();
       if (valid()) preview.scrollTo(previewTop);
     } catch (error) {
