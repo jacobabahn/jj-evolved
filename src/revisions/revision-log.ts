@@ -9,6 +9,8 @@ type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[
 type BookmarkSource = { bookmark: Bookmark; revision: Revision };
 type DragSource = ({ action: "bookmark" } & BookmarkSource) | { action: "rebase"; revision: Revision };
 type Drag = DragSource & { kind: "pressed" | "dragging" };
+const changedIds = (before: ReadonlySet<string>, after: ReadonlySet<string>) =>
+  [...before].filter(id => !after.has(id)).concat([...after].filter(id => !before.has(id)));
 
 export class RevisionLog extends ScrollBoxRenderable {
   mouseSelectionEnabled = true;
@@ -22,14 +24,17 @@ export class RevisionLog extends ScrollBoxRenderable {
   private outsideFilter: ReadonlySet<string> = new Set();
 
   markNavigation(matches: ReadonlySet<string>, outside: ReadonlySet<string>) {
+    const changed = [...changedIds(this.searchMatches, matches), ...changedIds(this.outsideFilter, outside)];
     this.searchMatches = matches;
     this.outsideFilter = outside;
-    this.paintSelection();
+    this.paintSelection(changed.map(id => this.revisionIndexes.get(id)));
   }
   private revisions: Revision[] = [];
   private sourceIndex: number | null = null;
   private movingCommits: ReadonlySet<string> = new Set();
   private rows: Row[] = [];
+  private revisionRows: Row[][] = [];
+  private revisionIndexes = new Map<string, number>();
   private bookmarkSources = new Map<Renderable, BookmarkSource>();
   private revisionSources = new Map<Renderable, Revision>();
   private drag: Drag | null = null;
@@ -57,6 +62,8 @@ export class RevisionLog extends ScrollBoxRenderable {
     this.cancelDrag();
     for (const row of this.rows) row.node.destroyRecursively();
     this.rows = [];
+    this.revisionRows = snapshot.revisions.map(() => []);
+    this.revisionIndexes = new Map(snapshot.revisions.map((revision, index) => [revision.commitId, index]));
     this.bookmarkSources.clear();
     this.revisionSources.clear();
     this.revisions = snapshot.revisions;
@@ -108,7 +115,9 @@ export class RevisionLog extends ScrollBoxRenderable {
         }));
       }
       this.add(node);
-      this.rows.push({ node, label, badges, bookmarkPreview, revisionIndex, heading, text, dragText });
+      const painted: Row = { node, label, badges, bookmarkPreview, revisionIndex, heading, text, dragText };
+      this.rows.push(painted);
+      if (revisionIndex !== null) this.revisionRows[revisionIndex]?.push(painted);
     }
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.revisions.length - 1));
     this.paintSelection();
@@ -129,12 +138,13 @@ export class RevisionLog extends ScrollBoxRenderable {
     if (!this.drag) return;
     if (!this.canDrag()) { this.cancelDrag(); return; }
     if (event.type === "drag" && event.button === 0) {
+      const previousDrop = this.dropIndex, started = this.drag.kind === "pressed";
       this.drag.kind = "dragging";
       this.dropIndex = this.destinationAt(event.x, event.y);
       const destination = this.dropIndex === null ? null : this.revisions[this.dropIndex];
       const operation = this.drag.action === "bookmark" ? `Move ${this.drag.bookmark.name}` : `Rebase ${this.drag.revision.changeId.slice(0, 8)} (only this change)`;
       this.onDragHint(`${operation} → ${destination?.changeId.slice(0, 8) || "choose another change"} · release to preview · Esc cancel`);
-      this.paintSelection();
+      this.paintSelection([previousDrop, this.dropIndex, ...started ? this.dragIndexes(this.drag) : []]);
     } else if (event.type === "up" && event.button === 0) {
       const drag = this.drag;
       const index = this.destinationAt(event.x, event.y);
@@ -149,11 +159,16 @@ export class RevisionLog extends ScrollBoxRenderable {
 
   cancelDrag() {
     if (!this.drag) return;
-    const wasDragging = this.drag.kind === "dragging";
+    const wasDragging = this.drag.kind === "dragging", dropIndex = this.dropIndex;
+    const sources = this.dragIndexes(this.drag);
     this.drag = null;
     this.dropIndex = null;
-    this.paintSelection();
-    if (wasDragging) this.onDragHint("");
+    if (wasDragging) { this.paintSelection([dropIndex, ...sources]); this.onDragHint(""); }
+  }
+
+  // A conflicted bookmark's badge appears on every row it targets, and all of them highlight while it is dragged.
+  private dragIndexes(drag: Drag) {
+    return [drag.revision.commitId, ...(drag.action === "bookmark" ? drag.bookmark.targets : [])].map(id => this.revisionIndexes.get(id));
   }
 
   private destinationAt(x: number, y: number): number | null {
@@ -167,9 +182,10 @@ export class RevisionLog extends ScrollBoxRenderable {
 
   getSelectedIndex() { return this.selectedIndex; }
   markSource(index: number | null, movingCommits: ReadonlySet<string> = new Set()) {
+    const changed = [this.sourceIndex, index, ...changedIds(this.movingCommits, movingCommits).map(id => this.revisionIndexes.get(id))];
     this.sourceIndex = index;
     this.movingCommits = movingCommits;
-    this.paintSelection();
+    this.paintSelection(changed);
   }
   moveUp() { this.setSelectedIndex(this.selectedIndex - 1); }
   moveDown() { this.setSelectedIndex(this.selectedIndex + 1); }
@@ -177,39 +193,43 @@ export class RevisionLog extends ScrollBoxRenderable {
   setSelectedIndex(index: number) {
     const previous = this.selectedIndex;
     this.selectedIndex = Math.max(0, Math.min(index, this.revisions.length - 1));
-    this.paintSelection();
+    this.paintSelection([previous, this.selectedIndex]);
     const heading = this.rows.find(row => row.heading && row.revisionIndex === this.selectedIndex);
     if (heading) this.scrollChildIntoView(heading.node.id);
     if (previous !== this.selectedIndex) this.emit("selectionChanged");
   }
 
-  private paintSelection() {
-    for (const row of this.rows) {
-      const selected = row.revisionIndex === this.selectedIndex;
-      const draggingSource = this.drag?.kind === "dragging" && this.drag.action === "rebase" &&
-        row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.drag.revision.commitId;
-      const moving = row.revisionIndex !== null && this.movingCommits.has(this.revisions[row.revisionIndex]?.commitId ?? "");
-      const source = (row.revisionIndex === this.sourceIndex || draggingSource || moving) && row.heading;
-      const drop = this.dropIndex !== null && row.revisionIndex === this.dropIndex;
-      const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : getTheme(this.ctx).panel;
-      const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
-      const match = this.searchMatches.has(id);
-      const outside = this.outsideFilter.has(id);
-      row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
-      row.node.backgroundColor = background;
-      row.label.bg = background;
-      if (row.bookmarkPreview) {
-        const bookmark = drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
-          ? this.drag.bookmark : null;
-        row.bookmarkPreview.visible = bookmark !== null;
-        row.bookmarkPreview.content = bookmark ? terminalText(`[${bookmark.name}${bookmark.conflict ? "!" : ""}]`) : "";
-        row.bookmarkPreview.bg = background;
-      }
-      for (const badge of row.badges) {
-        const bookmark = this.bookmarkSources.get(badge)?.bookmark;
-        badge.bg = this.drag?.kind === "dragging" && this.drag.action === "bookmark" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
-        badge.fg = getTheme(this.ctx).bookmark;
-      }
+  // Repaints every row, or only the rows of the given revision indexes when their visual state changed.
+  private paintSelection(indexes?: Iterable<number | null | undefined>) {
+    if (!indexes) { for (const row of this.rows) this.paintRow(row); return; }
+    for (const index of new Set(indexes)) if (index !== null && index !== undefined) for (const row of this.revisionRows[index] ?? []) this.paintRow(row);
+  }
+
+  private paintRow(row: Row) {
+    const selected = row.revisionIndex === this.selectedIndex;
+    const draggingSource = this.drag?.kind === "dragging" && this.drag.action === "rebase" &&
+      row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.drag.revision.commitId;
+    const moving = row.revisionIndex !== null && this.movingCommits.has(this.revisions[row.revisionIndex]?.commitId ?? "");
+    const source = (row.revisionIndex === this.sourceIndex || draggingSource || moving) && row.heading;
+    const drop = this.dropIndex !== null && row.revisionIndex === this.dropIndex;
+    const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : getTheme(this.ctx).panel;
+    const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
+    const match = this.searchMatches.has(id);
+    const outside = this.outsideFilter.has(id);
+    row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
+    row.node.backgroundColor = background;
+    row.label.bg = background;
+    if (row.bookmarkPreview) {
+      const bookmark = drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
+        ? this.drag.bookmark : null;
+      row.bookmarkPreview.visible = bookmark !== null;
+      row.bookmarkPreview.content = bookmark ? terminalText(`[${bookmark.name}${bookmark.conflict ? "!" : ""}]`) : "";
+      row.bookmarkPreview.bg = background;
+    }
+    for (const badge of row.badges) {
+      const bookmark = this.bookmarkSources.get(badge)?.bookmark;
+      badge.bg = this.drag?.kind === "dragging" && this.drag.action === "bookmark" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
+      badge.fg = getTheme(this.ctx).bookmark;
     }
   }
 }
