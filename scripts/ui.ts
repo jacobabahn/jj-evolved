@@ -3,9 +3,14 @@ import { scenarios } from "../tooling/scenarios";
 import { withUiFixture } from "../tooling/ui";
 import { writeRecording, type Recording } from "../tooling/recording";
 
-const [command = "gallery", name, destination, ...extra] = process.argv.slice(2);
-const usage = "Usage: bun run ui [list | gallery [output-directory] | record <scenario> [output-directory]]";
+const args = process.argv.slice(2);
+const sizeAt = args.indexOf("--size");
+const size = sizeAt < 0 ? undefined : args.splice(sizeAt, 2)[1];
+const [command = "gallery", name, destination, ...extra] = args;
+const usage = "Usage: bun run ui [list | gallery [output-directory] | record <scenario> [output-directory]] [--size <cols>x<rows>]";
 try {
+  const [width, height] = size?.match(/^(\d+)x(\d+)$/)?.slice(1).map(Number) ?? [];
+  if (size !== undefined && !width) throw new Error(usage);
   if (command === "list") {
     if (name || destination || extra.length) throw new Error(usage);
     for (const scenario of scenarios) console.log(`${scenario.name.padEnd(10)} ${scenario.title}`);
@@ -19,7 +24,7 @@ try {
       recordings.push(await withUiFixture(scenario.name, async ui => {
         await scenario.run(ui);
         return ui.recording.snapshot(scenario.title);
-      }, { theme: "dark", bindings: scenario.bindings }));
+      }, { theme: "dark", bindings: scenario.bindings, width, height }));
       console.log(`Recorded ${scenario.name}`);
     }
     console.log(`Open ${await writeRecording(directory, recordings)}`);

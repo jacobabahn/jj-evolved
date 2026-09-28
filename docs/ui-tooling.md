@@ -20,6 +20,22 @@ bun run ui record rebase artifacts/ui/rebase-before
 bun run ui gallery artifacts/ui/gallery-after
 ```
 
+Scenarios record at 100×30 by default. Pass `--size <cols>x<rows>` to record in a larger or smaller terminal:
+
+```bash
+bun run ui record readme --size 120x35
+```
+
+## Render screenshots
+
+`tooling/render.ts` turns a recording into PNG screenshots, one per checkpoint plus `final.png`. Add `--gif` for an animated GIF, which needs ffmpeg:
+
+```bash
+bun tooling/render.ts artifacts/ui/readme artifacts/ui/readme-png
+```
+
+Frames are drawn by xterm.js with its WebGL renderer in the Playwright headless Chrome from `~/.cache/ms-playwright`. xterm.js draws box-drawing characters itself, so borders and graph lines join like they do in Ghostty or another GPU terminal. The `readme` scenario produces the README's rebase preview image, `docs/images/rebase-preview.png`, from its `rebase-preview` checkpoint.
+
 The eight scenarios cover browsing, a diff, help at 80 columns, rebase review and cancellation, an empty revset, an editable bookmark error, bookmark dragging, live themes, Unicode paste, stale-review recovery, and late diff responses. They create and remove their own repositories. Theme scenarios use an in-memory save callback, so they do not change your saved theme.
 
 ## Verify review and preview lifetimes
@@ -103,6 +119,6 @@ The recorder listens to completed renderer frames, following OpenTUI's TestRecor
 
 These are styled screen recordings with browser playback, not native terminal captures or MP4/GIF files. The viewer preserves cell widths and common text attributes, but does not animate blinking or draw the recorded cursor. Browser fonts, Unicode shaping, and terminal-default color resolution can differ from a real terminal. Dark is the gallery's fixed starting theme; the JSON also preserves indexed/default color intent.
 
-Recordings retain fixture paths, generated IDs, and real timing. They are debugging artifacts rather than byte-stable snapshots. Generated output is ignored by Git. No OpenCode backend, Solid renderer, WebSocket server, or new dependency is required.
+Recordings retain fixture paths, generated IDs, and real timing. They are debugging artifacts rather than byte-stable snapshots. Generated output is ignored by Git. No OpenCode backend, Solid renderer, or WebSocket server is required. Only the screenshot renderer uses the `@xterm/xterm` and `@xterm/addon-webgl` dev dependencies.
 
 See [the upstream research](opencode-v2-tooling-research.md) for the OpenCode simulation, semantic-target, storybook, and recording designs that informed this tooling.
