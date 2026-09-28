@@ -309,6 +309,38 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "readme", title: "README rebase preview: move a login stack onto main",
+    async run(ui) {
+      const commit = async (file: string, message: string) => {
+        await Bun.write(`${ui.f.path}/${file}`, `${message}\n`);
+        await ui.f.jj("describe", "-m", message);
+      };
+      const initial = await ui.f.jj("log", "--no-graph", "-r", "feature", "-T", "change_id");
+      await ui.f.jj("new", "root()"); await commit("base.txt", "Shared base");
+      const base = await ui.f.jj("log", "--no-graph", "-r", "@", "-T", "change_id");
+      await ui.f.jj("new"); await commit("deps.txt", "Update dependencies");
+      await ui.f.jj("bookmark", "create", "main");
+      await ui.f.jj("new", base); await commit("login.txt", "Add login");
+      await ui.f.jj("bookmark", "set", "login");
+      await ui.f.jj("new"); await commit("login.test", "Test login");
+      await ui.f.jj("bookmark", "delete", "feature");
+      await ui.f.jj("abandon", `${initial}::`);
+      ui.key("r", { ctrl: true });
+      await ui.until("5 revisions");
+      await ui.until("Ready.");
+      ui.key("j");
+      ui.key("r");
+      await ui.until("include descendants");
+      ui.key("TAB");
+      await ui.until("[x] include descendants");
+      ui.key("j");
+      ui.key("RETURN");
+      await ui.until("After rebase");
+      await ui.until("Current tree");
+      await ui.capture("Rebase preview");
+    },
+  },
+  {
     name: "scope-toggle", title: "Tab toggles inline rebase scope and n creates a child immediately",
     async run(ui) {
       await ui.f.jj("new", "-m", "Follow-up on next change");
