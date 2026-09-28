@@ -379,6 +379,45 @@ test("an older diff cannot replace a newer selection", async () => {
   }
 }, 15_000);
 
+test("rapid selection moves read only the settled revision and revisits render cached diffs at once", async () => {
+  const f = await fixture();
+  const screen = await createTestRenderer({ width: 100, height: 30 });
+  const repo = await Repository.open(f.path);
+  const spawn = spyOn(Bun, "spawn");
+  const diffs = () => spawn.mock.calls.filter(([command]) => Array.isArray(command) && command.includes("--git")).map(([command]) => (command as string[])[(command as string[]).indexOf("--revision") + 1]);
+  const app = createApp(screen.renderer, repo, undefined, undefined, undefined, { refreshIntervalMs: 0 });
+  try {
+    await app.start();
+    const [current, initial, root] = (await repo.snapshot("all()")).revisions;
+    if (!current || !initial || !root) throw new Error("Expected fixture revisions");
+    expect(diffs()).toEqual([current.commitId]);
+    screen.mockInput.pressKey("j"); screen.mockInput.pressKey("j"); screen.mockInput.pressKey("k");
+    for (let attempt = 0; attempt < 100 && !screen.captureCharFrame().includes("+ hello from jj-evolved"); attempt++) { await Bun.sleep(10); await screen.renderOnce(); }
+    expect(screen.captureCharFrame()).toContain("+ hello from jj-evolved");
+    await Bun.sleep(100);
+    expect(diffs()).toEqual([current.commitId, initial.commitId]);
+    screen.mockInput.pressKey("k");
+    await screen.renderOnce();
+    expect(screen.captureCharFrame()).toContain("Empty change.");
+    screen.mockInput.pressKey("j");
+    await screen.renderOnce();
+    expect(screen.captureCharFrame()).toContain("+ hello from jj-evolved");
+    expect(diffs()).toHaveLength(2);
+    for (const refresh of [() => screen.mockInput.pressKey("r", { ctrl: true }), () => screen.renderer.emit("focus")]) {
+      const count = diffs().length;
+      refresh();
+      for (let attempt = 0; attempt < 100 && diffs().length === count; attempt++) await Bun.sleep(10);
+      expect(diffs().slice(count)).toEqual([initial.commitId]);
+      for (let attempt = 0; attempt < 100 && !screen.captureCharFrame().includes("Ready."); attempt++) { await Bun.sleep(10); await screen.renderOnce(); }
+    }
+  } finally {
+    spawn.mockRestore();
+    app.stop();
+    screen.renderer.destroy();
+    await f.cleanup();
+  }
+}, 15_000);
+
 test("action menu creates and renames a bookmark, then undo recovers the old name", async () => {
   const t = await setup();
   try {

@@ -55,3 +55,43 @@ test("current results retain metadata, empty text, and readable error details", 
   await session.load({ target: "main", title: "Status", loading: "Loading…", errorTitle: "Status error", read: async () => { throw new Error("Failed\u0007"); } });
   expect(frames.at(-1)).toEqual({ target: "main", title: "Status error", text: "Failed" });
 });
+
+test("cached text renders at once without reading or a loading frame", async () => {
+  const { session, frames } = fixture();
+  await session.load({ target: "main", title: "Diff", loading: "Loading…", prefix: "Change\n", cached: "Cached diff", delay: 50, read: async () => { throw new Error("Should not read"); } });
+  expect(frames).toEqual([{ target: "main", title: "Diff", text: "Change\nCached diff" }]);
+});
+
+test("debounced loads coalesce rapid selections into one read of the latest", async () => {
+  const { session, frames } = fixture();
+  const reads: string[] = [];
+  const load = (name: string) => session.load({ target: "main", title: name, loading: `Loading ${name}…`, delay: 20, read: async () => { reads.push(name); return `${name} diff`; } });
+  await Promise.all([load("first"), load("second"), load("third")]);
+  expect(reads).toEqual(["third"]);
+  expect(frames.map(frame => frame.text)).toEqual(["Loading first…", "Loading second…", "Loading third…", "third diff"]);
+});
+
+test("a cached selection supersedes an in-flight debounced read", async () => {
+  const { session, frames } = fixture();
+  const gate = Promise.withResolvers<string>();
+  let reads = 0;
+  const pending = session.load({ target: "main", title: "Old", loading: "Loading…", delay: 5, read: () => { reads++; return gate.promise; } });
+  await Bun.sleep(20);
+  await session.load({ target: "main", title: "New", loading: "Loading…", cached: "New diff", read: async () => "unused" });
+  gate.resolve("Old diff");
+  await pending;
+  expect(reads).toBe(1);
+  expect(frames.at(-1)).toEqual({ target: "main", title: "New", text: "New diff" });
+});
+
+for (const end of ["cancel", "dispose"] as const) {
+  test(`${end} ends a pending debounce without reading`, async () => {
+    const { session, frames } = fixture();
+    let reads = 0;
+    const pending = session.load({ target: "main", title: "Diff", loading: "Loading…", delay: 10_000, read: async () => { reads++; return "diff"; } });
+    session[end]();
+    await pending;
+    expect(reads).toBe(0);
+    expect(frames).toHaveLength(1);
+  });
+}

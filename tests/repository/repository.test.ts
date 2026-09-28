@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
@@ -43,6 +43,73 @@ test("describes literal text and creates a real child change", async () => {
     const child = (await repo.snapshot("@")).revisions[0];
     expect(child?.parents).toContain(described.commitId);
     expect(child?.changeId).not.toBe(described.changeId);
+  } finally { await f.cleanup(); }
+});
+
+test("diffs are cached by commit and file list, deduplicated in flight, and failures retry", async () => {
+  const f = await fixture();
+  const spawn = spyOn(Bun, "spawn");
+  try {
+    await Bun.write(join(f.path, "other.txt"), "other file\n");
+    await f.jj("describe", "-m", "Two files");
+    const repo = await Repository.open(f.path);
+    const current = (await repo.snapshot("@")).revisions[0];
+    if (!current) throw new Error("Expected current revision");
+    const diffs = () => spawn.mock.calls.filter(([command]) => Array.isArray(command) && command.includes("diff")).length;
+    spawn.mockClear();
+    const [all, again] = await Promise.all([repo.diff(current), repo.diff(current)]);
+    expect(all).toContain("+other file");
+    expect(again).toBe(all);
+    expect(diffs()).toBe(1);
+    expect(repo.cachedDiff(current)).toBe(all);
+    expect(await repo.diff(current)).toBe(all);
+    expect(diffs()).toBe(1);
+    expect(repo.cachedDiff(current, ["other.txt"])).toBeUndefined();
+    expect(await repo.diff(current, ["other.txt"])).toContain("+other file");
+    expect(await repo.diff(current, ["missing.txt"])).toBe("");
+    expect(diffs()).toBe(3);
+    const missing = { ...current, commitId: "f".repeat(40) };
+    await expect(repo.diff(missing)).rejects.toThrow();
+    await expect(repo.diff(missing)).rejects.toThrow();
+    expect(repo.cachedDiff(missing)).toBeUndefined();
+    expect(diffs()).toBe(5);
+    const pending = repo.diff(current, ["hello.txt"]);
+    repo.clearDiffs();
+    expect(repo.cachedDiff(current)).toBeUndefined();
+    await pending;
+    expect(repo.cachedDiff(current, ["hello.txt"])).toBeUndefined();
+    await repo.diff(current);
+    expect(diffs()).toBe(7);
+  } finally { spawn.mockRestore(); await f.cleanup(); }
+});
+
+test("the diff cache skips oversized diffs and evicts the oldest beyond its size budget", async () => {
+  const f = await fixture();
+  try {
+    await Bun.write(join(f.path, "other.txt"), "other file\n");
+    await Bun.write(join(f.path, "hello.txt"), "hello again\n");
+    const repo = await Repository.open(f.path);
+    const current = (await repo.snapshot("@")).revisions[0];
+    if (!current) throw new Error("Expected current revision");
+    const all = await repo.diff(current);
+    const other = await repo.diff(current, ["other.txt"]);
+    const hello = await repo.diff(current, ["hello.txt"]);
+    expect(other).toContain("+other file");
+    expect(hello).toContain("+hello again");
+    repo.clearDiffs();
+    repo.diffCacheLimits = { entries: 64, chars: other.length + hello.length, entryChars: all.length - 1 };
+    await repo.diff(current);
+    expect(repo.cachedDiff(current)).toBeUndefined();
+    await repo.diff(current, ["other.txt"]);
+    await repo.diff(current, ["hello.txt"]);
+    expect(repo.cachedDiff(current, ["other.txt"])).toBe(other);
+    expect(repo.cachedDiff(current, ["hello.txt"])).toBe(hello);
+    repo.clearDiffs();
+    repo.diffCacheLimits = { ...repo.diffCacheLimits, chars: other.length + hello.length - 1 };
+    await repo.diff(current, ["other.txt"]);
+    await repo.diff(current, ["hello.txt"]);
+    expect(repo.cachedDiff(current, ["other.txt"])).toBeUndefined();
+    expect(repo.cachedDiff(current, ["hello.txt"])).toBe(hello);
   } finally { await f.cleanup(); }
 });
 

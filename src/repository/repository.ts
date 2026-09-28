@@ -24,7 +24,14 @@ function array(value: unknown): unknown[] {
 function tuples(output: string): unknown[][] {
   return output.split("\n").filter(Boolean).map(line => array(JSON.parse(line)));
 }
+const diffKey = (revision: Revision, files: string[]) => [revision.commitId, ...files].join("\0");
 export class Repository {
+  // A commit ID fixes the diff against its parents, but config such as conflict-marker style can change the text; refreshes clear it.
+  diffCacheLimits = { entries: 64, chars: 16_000_000, entryChars: 2_000_000 };
+  private readonly diffs = new Map<string, string>();
+  private readonly pendingDiffs = new Map<string, Promise<string>>();
+  private diffChars = 0;
+  private diffGeneration = 0;
   private constructor(readonly root: string) {}
 
   static async open(path: string): Promise<Repository> {
@@ -44,7 +51,41 @@ export class Repository {
   }
 
   async diff(revision: Revision, files: string[] = []): Promise<string> {
-    return terminalText(await run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...files.map(literalPath)]));
+    const cached = this.cachedDiff(revision, files);
+    if (cached !== undefined) return cached;
+    const key = diffKey(revision, files);
+    const existing = this.pendingDiffs.get(key);
+    if (existing) return existing;
+    const generation = this.diffGeneration;
+    const pending: Promise<string> = run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...files.map(literalPath)]).then(output => {
+      const text = terminalText(output);
+      const { entries, chars, entryChars } = this.diffCacheLimits;
+      if (generation !== this.diffGeneration || text.length > entryChars) return text;
+      this.diffs.set(key, text);
+      this.diffChars += text.length;
+      for (const [oldest, value] of this.diffs) {
+        if (this.diffs.size <= entries && this.diffChars <= chars) break;
+        this.diffs.delete(oldest);
+        this.diffChars -= value.length;
+      }
+      return text;
+    }).finally(() => { if (this.pendingDiffs.get(key) === pending) this.pendingDiffs.delete(key); });
+    this.pendingDiffs.set(key, pending);
+    return pending;
+  }
+
+  clearDiffs() {
+    ++this.diffGeneration;
+    this.diffs.clear();
+    this.pendingDiffs.clear();
+    this.diffChars = 0;
+  }
+
+  cachedDiff(revision: Revision, files: string[] = []): string | undefined {
+    const key = diffKey(revision, files);
+    const cached = this.diffs.get(key);
+    if (cached !== undefined) { this.diffs.delete(key); this.diffs.set(key, cached); }
+    return cached;
   }
 
   async status(): Promise<string> {
