@@ -11,6 +11,7 @@
     "demo": "bun run scripts/demo.ts",
     "ui": "bun run scripts/ui.ts",
     "test:ui": "bun test tests/ui-tooling.test.ts",
+    "compare": "bun run scripts/compare.ts",
     "check:architecture": "bun run scripts/check-architecture.ts"
   },
   "devDependencies": {
