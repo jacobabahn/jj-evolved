@@ -191,6 +191,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let completionIndex = -1;
   let completing = false;
   let busy = false;
+  let running: Promise<void> | null = null;
   let stopped = false;
   let activity = 0;
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -397,7 +398,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         report(`Focus refresh pending: ${bindingLabel("return")} returns to the active revset and refreshes.`);
         return;
       }
-      void run("Refreshing after terminal focus…", () => refresh(revset, false, true));
+      void run(null, () => refresh(revset, false, true));
     });
   }
   function updateFilter() {
@@ -612,14 +613,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }, true);
   }
   // Quiet actions (navigation, overlay loads, previews) restore the message line instead of announcing completion.
-  async function run(label: string, action: () => Promise<void>, quiet = false) {
+  // Without a label the action is silent: the message line changes only to report an error or clear an old one.
+  async function run(label: string | null, action: () => Promise<void>, quiet = false) {
     if (isBusy() || stopped) return;
     busy = true;
+    const done = Promise.withResolvers<void>();
+    running = done.promise;
     const previous = shown, previousError = shownError;
-    report(label);
+    if (label !== null) report(label);
     try {
       await action();
-      if (!quiet) { if (overlay.visible) overlay.report(""); else report("Ready."); }
+      if (label === null) { if (shownError) report("Ready."); }
+      else if (!quiet) { if (overlay.visible) overlay.report(""); else report("Ready."); }
       else if (overlay.visible) overlay.report("");
       else if (shown === label) setMessage(previous, previousError);
     }
@@ -627,7 +632,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (prompt.kind === "confirm" && prompt.edit) prompt.edit();
       report(errorText(error), true);
     }
-    finally { busy = false; scheduleFocusRefresh(); }
+    finally { busy = false; running = null; done.resolve(); scheduleFocusRefresh(); }
   }
   function updateCompletions() {
     if (prompt.kind !== "revset" || completing) return;
@@ -1522,7 +1527,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (action === "diff") { key.preventDefault(); setPreviewVisible(true); void loadPreview(); return; }
-    if (action === "refresh") { key.preventDefault(); repository.clearDiffs(); void run("Refreshing history…", () => refresh()); }
+    if (action === "refresh") { key.preventDefault(); repository.clearDiffs(); void run(null, () => refresh()); }
     else if (action === "filter") { key.preventDefault(); openPrompt({ kind: "revset" }, "Revset", revset); }
     else if (action === "describe" || action === "new" || action === "edit") {
       key.preventDefault();
@@ -1582,5 +1587,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
     if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }
-  }, stop, checkForUpdates };
+  }, stop, checkForUpdates,
+  // Silent refreshes leave no message to wait for, so tests wait here instead, including for a focus refresh queued as a microtask.
+  async settled() { do { await Promise.resolve(); await running; } while (running); } };
 }

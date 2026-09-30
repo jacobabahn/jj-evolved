@@ -58,7 +58,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
     screen.mockInput.pressEnter();
     await until("Ready.");
   }
-  return { f, repo, screen, app, until, navigationFinished, list, search, filter, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
+  return { f, repo, screen, app, until, settled: async () => { await app.settled(); await screen.renderOnce(); }, navigationFinished, list, search, filter, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
 
 test("search previews, wraps, cancels and clears without changing the revset or repository", async () => {
@@ -266,7 +266,7 @@ test("loading more history preserves a selection made while loading and resets o
     const top = t.list().scrollTop;
     t.screen.renderer.emit("focus");
     await t.until("focus-expanded");
-    await t.until("Ready.");
+    await t.settled();
     expect(t.screen.captureCharFrame()).toContain("205 revisions");
     expect(t.screen.captureCharFrame()).not.toContain("L load 200 more");
     expect(t.list().getSelectedIndex()).toBe(index);

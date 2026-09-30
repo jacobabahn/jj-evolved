@@ -1,7 +1,12 @@
 import { getTheme } from "../ui/theme";
 import { highlightJjText } from "../ui/jj-highlighting";
-import { BoxRenderable, DiffRenderable, SyntaxStyle, TextRenderable, pathToFiletype, type RenderContext } from "@opentui/core";
+import { BoxRenderable, CodeRenderable, DiffRenderable, StyledText, SyntaxStyle, TextRenderable, pathToFiletype, type ColorInput, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
+
+// Each block is one child renderable; update returns false when the existing child cannot show the block.
+type Block = { id: string; create: () => Renderable; update: (existing: Renderable) => boolean };
+const signatures = new WeakMap<Renderable, string>();
+const styledSignature = (text: StyledText) => JSON.stringify(text.chunks.map(chunk => [chunk.text, chunk.fg?.toInts(), chunk.bg?.toInts(), chunk.attributes]));
 
 export class ChangePreview extends BoxRenderable {
   prefixes: ReadonlyMap<string, string> = new Map();
@@ -29,44 +34,89 @@ export class ChangePreview extends BoxRenderable {
   }
 
   get content() { return this.value; }
+  // Refreshes usually repeat the text on screen, so unchanged sections keep their renderables and changed hunks
+  // update in place; only cells whose content differs are redrawn.
   set content(value: string) {
     this.value = terminalText(value);
-    for (const child of this.getChildren()) child.destroyRecursively();
+    const blocks = this.blocks();
+    const wanted = new Set(blocks.map(block => block.id));
+    for (const child of this.getChildren()) if (!wanted.has(child.id)) child.destroyRecursively();
+    for (const [index, block] of blocks.entries()) {
+      const existing = this.getRenderable(block.id);
+      if (existing && block.update(existing)) continue;
+      existing?.destroyRecursively();
+      this.add(block.create(), index);
+    }
+  }
+
+  private blocks(): Block[] {
+    const theme = getTheme(this.ctx);
+    const blocks: Block[] = [];
+    const text = (id: string, content: string | StyledText, fg: ColorInput, options: { width?: "100%"; wrapMode?: "word" } = { width: "100%", wrapMode: "word" }) => {
+      // A theme change rebuilds every child, so the text alone decides whether a child needs repainting.
+      const signature = typeof content === "string" ? content : styledSignature(content);
+      blocks.push({
+        id,
+        create: () => { const renderable = new TextRenderable(this.ctx, { id, content, fg, flexShrink: 0, ...options }); signatures.set(renderable, signature); return renderable; },
+        update: existing => {
+          if (!(existing instanceof TextRenderable)) return false;
+          if (signatures.get(existing) !== signature) { existing.content = content; signatures.set(existing, signature); }
+          return true;
+        },
+      });
+    };
     const sections = this.value.split(/(?=^diff --git )/m);
     for (const [index, section] of sections.entries()) {
       const id = `${this.id}-${index}`;
       const path = /^\+\+\+ b\/(.+)$/m.exec(section)?.[1] ?? /^--- a\/(.+)$/m.exec(section)?.[1];
       if (!section.startsWith("diff --git ") || !/^@@ /m.test(section)) {
-        this.add(new TextRenderable(this.ctx, { id, width: "100%", content: highlightJjText(section.replace(/\n$/, ""), this.prefixes, getTheme(this.ctx)), fg: getTheme(this.ctx).text, wrapMode: "word", flexShrink: 0 }));
+        text(id, highlightJjText(section.replace(/\n$/, ""), this.prefixes, theme), theme.text);
         continue;
       }
       const headerEnd = section.search(/^@@ /m);
       const header = section.slice(0, headerEnd);
-      this.add(new TextRenderable(this.ctx, { id: `${id}-header`, width: "100%", content: header.trimEnd(), fg: getTheme(this.ctx).muted, wrapMode: "word", flexShrink: 0 }));
+      text(`${id}-header`, header.trimEnd(), theme.muted);
       for (const [hunkIndex, hunk] of section.slice(headerEnd).split(/(?=^@@ )/m).entries()) {
         const lines = hunk.split("\n");
         const end = lines.findIndex((line, index) => index > 0 && !/^(?:[ +\-]|\\ No newline at end of file)/.test(line));
         const patch = end < 0 ? hunk : lines.slice(0, end).join("\n") + "\n";
         const trailing = end < 0 ? "" : lines.slice(end).join("\n").trim();
-        const heading = lines[0] ?? "";
-        this.add(new TextRenderable(this.ctx, { id: `${id}-hunk-${hunkIndex}`, width: "100%", content: heading, fg: getTheme(this.ctx).hunk, wrapMode: "word", flexShrink: 0 }));
-        this.add(new DiffRenderable(this.ctx, {
-          id: `${id}-diff-${hunkIndex}`, width: "100%", diff: header + patch, filetype: pathToFiletype(path ?? ""), syntaxStyle: this.syntax,
-          lineNumberFg: getTheme(this.ctx).muted, lineNumberBg: getTheme(this.ctx).bg,
-          addedLineNumberBg: getTheme(this.ctx).addedGutter, removedLineNumberBg: getTheme(this.ctx).removedGutter,
-          view: "unified", showLineNumbers: true, wrapMode: "word", flexShrink: 0,
-          fg: getTheme(this.ctx).text, addedBg: getTheme(this.ctx).addedBg, removedBg: getTheme(this.ctx).removedBg, contextBg: getTheme(this.ctx).bg,
-          addedContentBg: getTheme(this.ctx).addedBg, removedContentBg: getTheme(this.ctx).removedBg, contextContentBg: getTheme(this.ctx).bg,
-          addedSignColor: getTheme(this.ctx).addedSign, removedSignColor: getTheme(this.ctx).removedSign,
-        }));
-        if (patch.includes("\\ No newline at end of file")) {
-          this.add(new TextRenderable(this.ctx, { id: `${id}-newline-${hunkIndex}`, content: "\\ No newline at end of file", fg: getTheme(this.ctx).muted, flexShrink: 0 }));
-        }
-        if (trailing) {
-          this.add(new TextRenderable(this.ctx, { id: `${id}-after-${hunkIndex}`, width: "100%", content: highlightJjText(trailing, this.prefixes, getTheme(this.ctx)), fg: getTheme(this.ctx).text, wrapMode: "word", flexShrink: 0 }));
-        }
+        text(`${id}-hunk-${hunkIndex}`, lines[0] ?? "", theme.hunk);
+        const diffId = `${id}-diff-${hunkIndex}`;
+        const diff = header + patch;
+        const filetype = pathToFiletype(path ?? "");
+        blocks.push({
+          id: diffId,
+          create: () => {
+            const renderable = new DiffRenderable(this.ctx, {
+              id: diffId, width: "100%", diff, filetype, syntaxStyle: this.syntax,
+              lineNumberFg: theme.muted, lineNumberBg: theme.bg,
+              addedLineNumberBg: theme.addedGutter, removedLineNumberBg: theme.removedGutter,
+              view: "unified", showLineNumbers: true, wrapMode: "word", flexShrink: 0,
+              fg: theme.text, addedBg: theme.addedBg, removedBg: theme.removedBg, contextBg: theme.bg,
+              addedContentBg: theme.addedBg, removedContentBg: theme.removedBg, contextContentBg: theme.bg,
+              addedSignColor: theme.addedSign, removedSignColor: theme.removedSign,
+            });
+            // Streaming code keeps its highlighted text on screen while a changed hunk is highlighted again.
+            const code = renderable.findDescendantById(`${diffId}-left-code`);
+            if (code instanceof CodeRenderable) code.streaming = true;
+            return renderable;
+          },
+          update: existing => {
+            if (!(existing instanceof DiffRenderable) || existing.filetype !== filetype) return false;
+            if (existing.diff === diff) return true;
+            const code = existing.findDescendantById(`${diffId}-left-code`);
+            // The first highlight has already drawn, so later text waits for its highlight instead of flashing unstyled.
+            if (code instanceof CodeRenderable) code.drawUnstyledText = false;
+            existing.diff = diff;
+            return true;
+          },
+        });
+        if (patch.includes("\\ No newline at end of file")) text(`${id}-newline-${hunkIndex}`, "\\ No newline at end of file", theme.muted, {});
+        if (trailing) text(`${id}-after-${hunkIndex}`, highlightJjText(trailing, this.prefixes, theme), theme.text);
       }
     }
+    return blocks;
   }
 
   override destroy() {
