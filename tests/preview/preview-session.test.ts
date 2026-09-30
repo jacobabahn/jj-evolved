@@ -95,3 +95,18 @@ for (const end of ["cancel", "dispose"] as const) {
     expect(frames).toHaveLength(1);
   });
 }
+
+test("reloading the key on screen keeps its text and scroll until the new text arrives", async () => {
+  const { session, frames } = fixture();
+  await session.load({ target: "main", title: "Diff", loading: "Loading…", read: async () => "Old diff", key: "change a" });
+  const gate = Promise.withResolvers<string>();
+  const pending = session.load({ target: "main", title: "Diff", loading: "Loading…", read: () => gate.promise, key: "change a" });
+  expect(frames.at(-1)?.text).toBe("Old diff");
+  gate.resolve("New diff");
+  await pending;
+  expect(frames.at(-1)).toEqual({ target: "main", title: "Diff", text: "New diff", keepScroll: true });
+  session.show({ target: "main", title: "Status", text: "Working copy" });
+  await session.load({ target: "main", title: "Diff", loading: "Loading…", read: async () => "Diff again", key: "change a" });
+  expect(frames.at(-2)?.text).toBe("Loading…");
+  expect(frames.at(-1)?.keepScroll).toBeUndefined();
+});

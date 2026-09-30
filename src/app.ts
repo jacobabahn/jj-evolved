@@ -208,7 +208,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let shown = "";
   let shownError = false;
   const review = new MutationReview(repository, refreshAfterMutation);
-  const previews = new PreviewSession(({ target, text, title }) => {
+  const previews = new PreviewSession(({ target, text, title, keepScroll }) => {
     if (target === "overlay") {
       comparison.setTrees(null);
       helpBox.visible = false;
@@ -219,7 +219,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     } else {
       setPreviewTitle(title);
       detail.content = text;
-      preview.scrollTo(0);
+      if (!keepScroll) preview.scrollTo(0);
     }
   });
   function isBusy() { return busy || review.applying; }
@@ -310,7 +310,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\n${bindingLabel("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
       prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences.",
-      cached: repository.cachedDiff(revision), delay: debounce });
+      cached: repository.cachedDiff(revision), delay: debounce, key: `change ${revision.changeId}` });
   }
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
   async function refresh(nextRevset = revset, workingCopy = false, preserveView = false) {
@@ -362,7 +362,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     replacing = false;
     updateSearchStatus();
     const previewRead = statusVisible
-      ? previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error" })
+      ? previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error", key: "status" })
       : prompt.kind === "files" ? followFiles()
       : !errorVisible ? loadPreview() : undefined;
     const navigation = previewNavigation;
@@ -477,7 +477,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (search.query) search = { query: search.query, matches: matchingRevisions(candidates, bookmarks, search.query) };
       returnPoint = restoredReturn;
       displayView(view);
-      if (statusView) { if (status !== undefined) show(status, "Working-copy status"); }
+      if (statusView) { if (status !== undefined) { ++previewNavigation; previews.show({ target: "main", text: status, title: "Working-copy status", keepScroll: true }, "status"); } }
       else if (prompt.kind === "files") await followFiles();
       else if (title !== "Last error" && JSON.stringify(previous) !== JSON.stringify(selected())) await loadPreview();
       if (valid()) preview.scrollTo(previewTop);
@@ -1044,7 +1044,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const file = fileList.selectedFile;
     if (!file) return;
     ++previewNavigation;
-    await previews.load({ target: "main", title: fileTitle(file.path), loading: "Loading diff…", read: () => repository.diff(revision, [file.path]), empty: `No differences in ${file.path}.` });
+    await previews.load({ target: "main", title: fileTitle(file.path), loading: "Loading diff…", read: () => repository.diff(revision, [file.path]), empty: `No differences in ${file.path}.`, key: `file ${revision.changeId} ${file.path}` });
   }
   function closeFiles() {
     if (prompt.kind !== "files") return;
@@ -1258,7 +1258,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     setPreviewVisible(true);
     ++previewNavigation;
     void previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…",
-      read: () => repository.status(), errorTitle: "Status error" });
+      read: () => repository.status(), errorTitle: "Status error", key: "status" });
   }
   function buildHelp() {
     for (const child of helpBox.getChildren()) child.destroyRecursively();
