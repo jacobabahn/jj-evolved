@@ -10,9 +10,9 @@ Choosing a JJ client is largely about how you like to work with history. jj-evol
 
 Select a change, choose where it should go, and compare the proposed graph with the current one. Rebase and squash previews include bookmarks and conflict markers. With descendant rebasing, the app marks the moving changes and shows the full scope, including revisions outside the visible graph. Menus and editing forms keep the graph visible behind them so you can retain your place. In nested menus, Escape steps back one level and restores the previous selection; at the top level it closes the menu.
 
-For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `r`, press Tab to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the proposed result on the left and the current tree on the right:
+For example, suppose `Add login` and its child `Test login` branch from an older revision of `main`. Select `Add login`, press `r`, press Tab to include descendants, and choose the newer `main` as the destination. Enter opens the preview, with the current tree on the left and the proposed result on the right:
 
-![Rebase preview showing Add login and Test login moving onto main, with the proposed tree on the left and current tree on the right.](docs/images/rebase-preview.png)
+![Rebase preview showing Add login and Test login moving onto main, with the current tree on the left and the proposed tree on the right.](docs/images/rebase-preview.png)
 
 *Captured from the app’s OpenTUI renderer using a disposable example repository.*
 

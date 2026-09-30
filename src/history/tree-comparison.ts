@@ -10,9 +10,9 @@ export class TreeComparisonView extends BoxRenderable {
 
   constructor(ctx: RenderContext, id: string) {
     super(ctx, { id, width: "100%", flexDirection: "row", flexShrink: 0, visible: false });
-    const column = (side: "before" | "after", title: string) => {
-      const column = new BoxRenderable(ctx, { id: `${id}-${side}-column`, title, border: side === "after" ? true : ["top", "right", "bottom"],
-        customBorderChars: side === "after" ? { ...BorderChars.single, topRight: "┬", bottomRight: "┴" } : BorderChars.single,
+    const column = (side: "before" | "after", title: string, first: boolean) => {
+      const column = new BoxRenderable(ctx, { id: `${id}-${side}-column`, title, border: first ? true : ["top", "right", "bottom"],
+        customBorderChars: first ? { ...BorderChars.single, topRight: "┬", bottomRight: "┴" } : BorderChars.single,
         borderColor: getTheme(this.ctx).accent, width: "50%", height: "100%", minWidth: 0 });
       const text = new TextRenderable(ctx, { id: `${id}-${side}`, width: "100%",
         fg: getTheme(this.ctx).text, wrapMode: "none", truncate: true, flexShrink: 0 });
@@ -22,10 +22,10 @@ export class TreeComparisonView extends BoxRenderable {
       this.add(column);
       return { column, text };
     };
-    const after = column("after", " Proposed tree ");
+    this.before = column("before", " Current tree ", true).text;
+    const after = column("after", " Proposed tree ", false);
     this.after = after.text;
     this.afterColumn = after.column;
-    this.before = column("before", " Current tree ").text;
   }
 
   applyTheme() {

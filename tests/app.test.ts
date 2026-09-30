@@ -689,18 +689,18 @@ test("inline squash reviews a graph destination before applying", async () => {
     const treeText = t.screen.renderer.root.findDescendantById("confirmation-trees-after");
     const beforeText = t.screen.renderer.root.findDescendantById("confirmation-trees-before");
     if (!treeText || !beforeText) throw new Error("Missing confirmation trees");
-    expect(treeText.x).toBeLessThan(beforeText.x);
+    expect(beforeText.x).toBeLessThan(treeText.x);
     expect(beforeText.y).toBe(treeText.y);
-    const afterColumn = t.screen.renderer.root.findDescendantById("confirmation-trees-after-column");
-    if (!afterColumn) throw new Error("Missing tree border");
-    expect(t.screen.captureCharFrame().split("\n")[afterColumn.y]?.[afterColumn.x + afterColumn.width - 1]).toBe("┬");
+    const beforeColumn = t.screen.renderer.root.findDescendantById("confirmation-trees-before-column");
+    if (!beforeColumn) throw new Error("Missing tree border");
+    expect(t.screen.captureCharFrame().split("\n")[beforeColumn.y]?.[beforeColumn.x + beforeColumn.width - 1]).toBe("┬");
     const treeFrame = t.screen.captureCharFrame().split("\n");
-    for (let y = afterColumn.y + 1; y < afterColumn.y + afterColumn.height - 1; y++) {
-      expect(treeFrame[y]?.[afterColumn.x + afterColumn.width - 1]).toBe("│");
+    for (let y = beforeColumn.y + 1; y < beforeColumn.y + beforeColumn.height - 1; y++) {
+      expect(treeFrame[y]?.[beforeColumn.x + beforeColumn.width - 1]).toBe("│");
     }
     t.screen.resize(120, 30);
     await t.screen.renderOnce();
-    expect(treeText.x).toBeLessThan(beforeText.x);
+    expect(beforeText.x).toBeLessThan(treeText.x);
     expect(beforeText.y).toBe(treeText.y);
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressEscape();

@@ -295,11 +295,11 @@ export const scenarios: Scenario[] = [
       await ui.until("Review before applying");
       await ui.until("Current tree");
       await ui.until("After rebase");
-      await ui.capture("Review proposed and current trees");
+      await ui.capture("Review current and proposed trees");
       assert.equal(await ui.repo.operationId(), before);
       await ui.resize(80, 24);
       await ui.capture("Preview at 80x24");
-      const left = ui.node("confirmation-trees-after"), right = ui.node("confirmation-trees-before");
+      const left = ui.node("confirmation-trees-before"), right = ui.node("confirmation-trees-after");
       assert(left.screenX < right.screenX);
       assert.equal(left.screenY, right.screenY);
       ui.key("ESCAPE");
