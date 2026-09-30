@@ -23,6 +23,8 @@ test("reads real history, bookmarks, parents, diffs, status and revsets", async 
     expect((await repo.snapshot("none()")).revisions).toEqual([]);
     expect((await repo.snapshot("@")).revisions).toHaveLength(1);
     await expect(repo.snapshot("invalid(((")).rejects.toThrow();
+    await f.jj("config", "set", "--repo", "revsets.log", "mine()");
+    expect(await repo.logRevset()).toBe("mine()");
   } finally { await f.cleanup(); }
 });
 

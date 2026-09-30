@@ -42,6 +42,12 @@ export class Repository {
     return logSnapshot(this.root, revset, readOnly, limit);
   }
 
+  // The revset `jj log` shows without -r, so the default view matches jj and jjui.
+  async logRevset(): Promise<string> {
+    const configured = await run(this.root, ["--ignore-working-copy", "config", "get", "revsets.log"]).catch(() => "");
+    return configured.trim() || "all()";
+  }
+
   async navigationRevisions(revset: string): Promise<Revision[]> {
     return logRevisions(this.root, revset);
   }
