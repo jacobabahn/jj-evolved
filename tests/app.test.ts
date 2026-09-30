@@ -315,6 +315,33 @@ test("e switches the working copy immediately without a confirmation prompt", as
   } finally { await t.cleanup(); }
 }, 15_000);
 
+test("opens on the jj log default revset and an empty filter restores it", async () => {
+  const f = await fixture();
+  await f.jj("config", "set", "--repo", "revsets.log", "@");
+  const screen = await createTestRenderer({ width: 100, height: 30 });
+  const app = createApp(screen.renderer, await Repository.open(f.path));
+  async function until(text: string) {
+    for (let attempt = 0; attempt < 150; attempt++) {
+      await screen.renderOnce();
+      if (screen.captureCharFrame().includes(text)) return;
+      await Bun.sleep(10);
+    }
+    throw new Error(`Expected screen to contain ${text}:\n${screen.captureCharFrame()}`);
+  }
+  try {
+    await app.start();
+    await until("revset: @  ·  1 revisions");
+    for (const value of ["all()", ""]) {
+      screen.mockInput.pressKey("L");
+      screen.mockInput.pressKey("a", { ctrl: true });
+      screen.mockInput.pressKey("k", { ctrl: true });
+      await screen.mockInput.typeText(value);
+      screen.mockInput.pressEnter();
+      await until(value ? "revset: all()  ·  3 revisions" : "revset: @  ·  1 revisions");
+    }
+  } finally { app.stop(); screen.renderer.destroy(); await f.cleanup(); }
+}, 15_000);
+
 test("invalid revset preserves history and cancelling description preserves multiline text", async () => {
   const t = await setup();
   try {
@@ -324,7 +351,7 @@ test("invalid revset preserves history and cancelling description preserves mult
     await t.screen.mockInput.typeText("invalid(((");
     t.screen.mockInput.pressEnter();
     await t.until("Error");
-    expect(t.screen.captureCharFrame()).toContain("revset: all()");
+    expect(t.screen.captureCharFrame()).toContain(`revset: ${await t.repo.logRevset()}`);
     expect(t.screen.captureCharFrame()).toContain("Next change");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);

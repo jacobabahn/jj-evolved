@@ -56,7 +56,7 @@ The design keeps both features in `Repository` and the existing overlays. A sepa
 
 `HistoryForm` owns rebase and squash drafts. Destination, scope or files, description, and Apply remain in one form. Editing a field returns to that form. Both the form and ordinary confirmations use the same `MutationReview` instance. The review module owns prepared-operation validity, ignores superseded preparation results, and requires fresh preparation after failure. Confirmation prompts retain the selected action for editing but do not hold a second prepared operation. Failed operations preserve the draft and require a refreshed preview. Quick-input failures return to the editable input with its value intact. Success closes the overlay and shows a short result message above the graph.
 
-After a successful write, `MutationReview` returns an applied result even if refresh fails. Both interaction paths close their overlay and report that the operation succeeded, directing the user to refresh instead of repeating the action. Working-copy-changing actions reset the filter to `all()` and select the working copy. Other actions preserve the active revset and recover selection by commit ID, then a unique change ID.
+After a successful write, `MutationReview` returns an applied result even if refresh fails. Both interaction paths close their overlay and report that the operation succeeded, directing the user to refresh instead of repeating the action. Working-copy-changing actions reset the filter to the default revset and select the working copy. Other actions preserve the active revset and recover selection by commit ID, then a unique change ID.
 
 ## Source organization
 

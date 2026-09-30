@@ -33,7 +33,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | Page Up / Page Down | Scroll preview by page |
 | `Ctrl+N` / `Ctrl+P` | Scroll preview by line without leaving the graph |
 | `Ctrl+D` / `Ctrl+U` | Scroll preview by half page |
-| `L` | Enter a revset; empty restores `all()` |
+| `L` | Enter a revset; empty restores the `jj log` default (`revsets.log`) |
 | `/` | Search descriptions, bookmarks, and ID prefixes throughout the active revset |
 | `'` / `"` | Next / previous accepted search match, wrapping at either end |
 | `@` | Select the working copy without editing it |

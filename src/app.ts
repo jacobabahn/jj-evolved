@@ -66,7 +66,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
     { title: "Search & revsets", rows: [
-      [keys(["filter"]), "Enter a revset; empty restores all(); Tab completes bookmarks and functions"],
+      [keys(["filter"]), "Enter a revset; empty restores the jj log default; Tab completes bookmarks and functions"],
       [keys(["search"]), "Search descriptions, bookmarks and ID prefixes in the active revset"],
       [keys(["nextMatch", "previousMatch"]), "Next / previous search match, wrapping"],
       [keys(["clearSearch"]), "Clear the accepted search"],
@@ -122,7 +122,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let colors = getTheme(renderer);
   const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg });
   const header = new TextRenderable(renderer, { id: "header", height: 1, fg: colors.accent, content: terminalText(`jj-evolved  /  ${repository.root}`) });
-  const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset: all()" });
+  const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset:" });
   const body = new BoxRenderable(renderer, { id: "body", flexDirection: "row", flexGrow: 1, minHeight: 1 });
   const listBox = new BoxRenderable(renderer, { id: "revision-pane", width: "42%", minWidth: 26, flexShrink: 0, border: true, customBorderChars: { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }, borderColor: colors.accent, title: " Revisions ", backgroundColor: colors.panel });
   const list = new RevisionLog(renderer);
@@ -171,7 +171,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let revisions: Revision[] = [];
   let historyLimit = 200;
   let refreshRequest = 0;
-  let revset = "all()";
+  let defaultRevset = "all()";
+  let revset = defaultRevset;
   let currentSnapshot: Snapshot = { root: repository.root, revisions: [], graph: [] };
   let currentBookmarks: Bookmark[] = [];
   let outsideFilter: ReadonlySet<string> = new Set();
@@ -751,7 +752,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const value = current.kind === "describe" ? descriptionInput.plainText : input.value;
     if (current.kind === "text") { current.accept(value); return; }
     if (current.kind === "confirm") { await run("Applying jj operation…", applyReviewed); return; }
-    if (current.kind === "revset") await run("Loading revset…", async () => { await refresh(value.trim() || "all()"); closePrompt(); });
+    if (current.kind === "revset") await run("Loading revset…", async () => { await refresh(value.trim() || defaultRevset); closePrompt(); });
     else if (current.kind === "describe") await run("Applying jj operation…", async () => {
       if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) await applyReviewed();
     });
@@ -759,7 +760,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   async function refreshAfterMutation(action: Mutation) {
     if (stopped) return;
     const followWorkingCopy = ["new", "edit", "restore", "undo", "split"].includes(action.kind);
-    await refresh(followWorkingCopy ? "all()" : revset, followWorkingCopy);
+    await refresh(followWorkingCopy ? defaultRevset : revset, followWorkingCopy);
     if (stopped) return;
     const target = action.kind === "squash" ? action.destination : "revision" in action ? action.revision : null;
     if (!followWorkingCopy && target) {
@@ -1181,7 +1182,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         await launch();
       } finally {
         renderer.resume();
-        await refresh(preserveSelection ? revset : "all()", !preserveSelection).catch(error => {
+        await refresh(preserveSelection ? revset : defaultRevset, !preserveSelection).catch(error => {
           throw new Error(`Refreshing after ${name} failed. Press ${bindingLabel("refresh")} to reload before repeating the action. ${errorText(error)}`);
         });
       }
@@ -1573,7 +1574,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   chooser.on("selectionChanged", previewChoice);
   return { start: async () => {
     setFocus("list");
-    await run("Loading history…", () => refresh());
+    await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
     if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }
   }, stop, checkForUpdates };
