@@ -59,7 +59,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `g` | Git remotes: fetch, push, and select a remote |
 | `o` | Browse operation history, inspect an operation, or restore its state |
 | `u` | Preview undo of the latest operation |
-| `l` / Right | Show the selected revision's changed files in the left pane; `j` / `k` preview one file at a time, `h` / Left / Escape returns |
+| `l` / Right | Expand the selected revision's changed files beneath it in the graph; `j` / `k` preview one file at a time, `h` / Left / Escape collapses |
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Open scrollable help; Escape or `?` closes it |
@@ -77,7 +77,7 @@ Menu actions open in overlays, leaving the graph and selected revision visible b
 
 ## Changed files
 
-Press `l` or Right, or choose **Browse changed files** from the Space menu, to replace the graph with the selected revision's changed files. The left pane is titled with the change ID and description, and each file shows a status letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied. `j` and `k` move through the files, and the preview shows only the selected file's diff with the path as its title. Enter reveals the diff if hidden and moves focus to it so `j` and `k` scroll it; Tab switches focus back. Page Up / Page Down, `Ctrl+N` / `Ctrl+P`, `Ctrl+D` / `Ctrl+U`, and `p` control the preview as usual. `h`, Left, Escape, or `l` again returns to the graph with the same revision selected and reloads its full diff. An empty change shows "Empty change. No changed files." in the pane. Automatic refresh pauses while the file list is open and resumes when you return; refresh from a terminal focus return runs then too.
+Press `l` or Right, or choose **Browse changed files** from the Space menu, to expand the selected revision's changed files beneath it in the graph. The rest of the graph stays in view, the revision is marked `▾`, and the pane is titled with its change ID. Each file shows a status letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied. A long list scrolls within a third of the pane. `j` and `k` move through the files, and the preview shows only the selected file's diff with the path as its title. Enter reveals the diff if hidden and moves focus to it so `j` and `k` scroll it; Tab switches focus back. Page Up / Page Down, `Ctrl+N` / `Ctrl+P`, `Ctrl+D` / `Ctrl+U`, and `p` control the preview as usual. `h`, Left, Escape, or `l` again collapses the list with the same revision selected and reloads its full diff. An empty change shows "Empty change. No changed files." beneath it. Automatic refresh continues while the list is open: when the change is rewritten, for example as you edit files in the working copy, the list reloads and keeps the selected file; when the change leaves the graph, the list collapses.
 
 ## Absorb
 
