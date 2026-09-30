@@ -61,7 +61,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["previewUp", "previewDown"]), "Scroll the preview by line, keeping graph focus"],
       [keys(["previewHalfUp", "previewHalfDown"]), "Scroll the preview by half page"],
       [keys(["diff"]), "Show the selected revision's diff"],
-      [keys(["files"]), "Changed files in the left pane; j/k file, Enter focus diff, h/Left/Esc return"],
+      [keys(["files"]), "Expand changed files under the revision; j/k file, Enter focus diff, h/Left/Esc collapse"],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -129,9 +129,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   list.height = 0;
   list.flexGrow = 1;
   const fileList = new FileList(renderer);
-  fileList.height = 0;
-  fileList.flexGrow = 1;
-  fileList.visible = false;
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
@@ -142,7 +139,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const filesShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} file  Enter focus diff  ${bindingLabel("focus")} focus  ${bindingLabel("togglePreview")} preview  ${bindingLabel("pageUp")}/${bindingLabel("pageDown")} scroll\nh/Left/Esc/${bindingLabel("files")} back to revisions  ${bindingLabel("quit")} quit`;
+  const filesShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} file  Enter focus diff  ${bindingLabel("focus")} focus  ${bindingLabel("togglePreview")} preview  ${bindingLabel("pageUp")}/${bindingLabel("pageDown")} scroll\nh/Left/Esc/${bindingLabel("files")} collapse  ${bindingLabel("quit")} quit`;
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent });
   const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
   const overlay = new ActionOverlay(renderer, "action-overlay");
@@ -164,7 +161,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const result = new TextRenderable(renderer, { id: "action-result", height: 2, visible: false, fg: colors.accent });
   listBox.add(result);
   listBox.add(list);
-  listBox.add(fileList);
   preview.add(detail);
   body.add(listBox);
   body.add(preview);
@@ -225,8 +221,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
   });
   function isBusy() { return busy || review.applying; }
-  // Help is a read-only overlay, so refreshes continue underneath it.
-  const idle = () => prompt.kind === "browse" || prompt.kind === "help";
+  // Help is a read-only overlay and expanded files stay in the graph, so refreshes continue underneath both.
+  const idle = () => prompt.kind === "browse" || prompt.kind === "help" || prompt.kind === "files";
   const statusShown = () => ["Working-copy status", "Status error"].includes(previewTitle);
   let focus: "list" | "preview" = "list";
 
@@ -365,6 +361,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     updateSearchStatus();
     const previewRead = statusVisible
       ? previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error" })
+      : prompt.kind === "files" ? followFiles()
       : !errorVisible ? loadPreview() : undefined;
     const navigation = previewNavigation;
     await previewRead;
@@ -479,6 +476,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       returnPoint = restoredReturn;
       displayView(view);
       if (statusView) { if (status !== undefined) show(status, "Working-copy status"); }
+      else if (prompt.kind === "files") await followFiles();
       else if (title !== "Last error" && JSON.stringify(previous) !== JSON.stringify(selected())) await loadPreview();
       if (valid()) preview.scrollTo(previewTop);
     } catch (error) {
@@ -701,8 +699,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.blur();
     chooser.visible = false;
     fileList.blur();
-    fileList.visible = false;
-    list.visible = true;
+    list.collapse();
     listBox.title = " Revisions ";
     input.visible = false;
     promptLabel.visible = false;
@@ -993,14 +990,37 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       prompt = { kind: "files", revision, files };
       list.mouseSelectionEnabled = false;
       list.blur();
-      list.visible = false;
-      fileList.visible = true;
-      fileList.setFiles(files);
-      updateFilesTitle();
+      expandFiles(revision, files);
       shortcuts.content = filesShortcuts;
       setFocus("list");
       if (files.length) void loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
     }, true);
+  }
+  function expandFiles(revision: Revision, files: ChangedFile[], selectPath?: string) {
+    const index = revisions.findIndex(item => item.commitId === revision.commitId);
+    fileList.setFiles(files, list.continuationPrefix(index), maxFileRows(), selectPath);
+    list.expand(index, fileList);
+    list.scrollChildIntoView(fileList.id);
+    updateFilesTitle();
+  }
+  // A third of the graph, so a large change scrolls within its list and the surrounding history stays in view.
+  function maxFileRows() { return Math.max(3, Math.floor(list.viewport.height / 3)); }
+  // Keeps expanded files on their change across refreshes: a rewritten commit reloads its files, a vanished change collapses them.
+  async function followFiles() {
+    if (prompt.kind !== "files") return;
+    const current = prompt;
+    const revision = selected();
+    if (!revision || revision.changeId !== current.revision.changeId) {
+      closeFiles();
+      report("Collapsed changed files: the change left the graph.");
+      return;
+    }
+    if (revision.commitId === current.revision.commitId) return;
+    const files = await repository.files(revision);
+    if (stopped || prompt !== current) return;
+    prompt = { kind: "files", revision, files };
+    expandFiles(revision, files, fileList.selectedFile?.path);
+    if (files.length) await loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
   }
   function fitTitle(text: string, width: number, keepEnd = false) {
     text = terminalText(text).replace(/\n/g, " ");
@@ -1012,7 +1032,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function updateFilesTitle(total?: number) {
     if (prompt.kind !== "files") return;
     const { revision } = prompt;
-    listBox.title = ` ${fitTitle(`Files · ${revision.changeId.slice(0, 8)} ${revision.description.split("\n")[0] || "(no description)"}`, paneWidth(total))} `;
+    listBox.title = ` ${fitTitle(`Revisions · files of ${revision.changeId.slice(0, 8)}`, paneWidth(total))} `;
     const file = fileList.selectedFile;
     if (file) setPreviewTitle(fileTitle(file.path, total));
   }
@@ -1314,7 +1334,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     ++activity;
     void loadFilePreview();
   }
-  function onResize(width: number) { updateFilesTitle(width); }
+  function onResize(width: number) {
+    updateFilesTitle(width);
+    // The graph's new height is known once layout runs, so the cap follows on the next frame.
+    if (prompt.kind === "files") renderer.once("frame", () => { if (prompt.kind === "files") fileList.setMaxRows(maxFileRows()); });
+  }
   function onKey(key: KeyEvent) {
     if (stopped) return;
     ++activity;

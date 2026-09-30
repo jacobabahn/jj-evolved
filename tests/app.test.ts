@@ -1526,7 +1526,7 @@ test("focus refresh does not restore scroll over help opened during a pending di
   } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);
 
-test("files mode lists changed files in the left pane, previews one file at a time, and returns to the graph", async () => {
+test("files expand beneath the revision in the graph, preview one file at a time, and collapse back", async () => {
   const t = await setup();
   try {
     await Bun.write(`${t.f.path}/added.txt`, "brand new\n");
@@ -1539,11 +1539,15 @@ test("files mode lists changed files in the left pane, previews one file at a ti
     const working = (await t.repo.snapshot("@")).revisions[0];
     if (!working) throw new Error("Missing working copy");
     t.screen.mockInput.pressKey("l");
-    const frame = await t.until("A added.txt");
+    await t.until("A added.txt");
+    await t.screen.renderOnce();
+    const frame = t.screen.captureCharFrame();
     expect(frame).toContain("M hello.txt");
-    expect(String(listBox.title)).toBe(` Files · ${working.changeId.slice(0, 8)} Next change `);
-    expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(false);
-    expect(t.screen.renderer.root.findDescendantById("changed-files")?.visible).toBe(true);
+    expect(frame).toContain(`▾ @  ${working.changeId.slice(0, 8)}`);
+    expect(frame).toContain("Initial feature");
+    expect(String(listBox.title)).toBe(` Revisions · files of ${working.changeId.slice(0, 8)} `);
+    expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(true);
+    expect(t.screen.renderer.root.findDescendantById("revisions")?.findDescendantById("changed-files")).toBeDefined();
     await t.until("── added.txt ──");
     await t.until("+ brand new");
     expect(String(preview.title)).toBe(" added.txt ");
@@ -1557,8 +1561,8 @@ test("files mode lists changed files in the left pane, previews one file at a ti
     await t.until("Change preview");
     await t.until("+ brand new");
     expect(String(listBox.title)).toBe(" Revisions ");
-    expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(true);
-    expect(t.screen.renderer.root.findDescendantById("changed-files")?.visible).toBe(false);
+    expect(t.screen.renderer.root.findDescendantById("changed-files")).toBeUndefined();
+    expect(t.screen.captureCharFrame()).not.toContain("A added.txt");
     expect(t.screen.captureCharFrame()).toContain(`▶ @  ${working.changeId.slice(0, 8)}`);
     expect(t.screen.captureCharFrame()).toContain("- hello from jj-evolved");
   } finally { await t.cleanup(); }
@@ -1570,11 +1574,11 @@ test("files mode reports an empty change and Escape returns", async () => {
     await t.until("Empty change. No file differences.");
     t.screen.mockInput.pressKey("\x1b[C");
     await t.until("Empty change. No changed files.");
-    expect(t.screen.captureCharFrame()).toContain("Files ·");
+    expect(t.screen.captureCharFrame()).toContain("Revisions · files of");
     t.screen.mockInput.pressEscape();
     await t.until("Change preview");
     expect(t.screen.captureCharFrame()).toContain(" Revisions ");
-    expect(t.screen.captureCharFrame()).not.toContain("Files ·");
+    expect(t.screen.captureCharFrame()).not.toContain("Revisions · files of");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -1601,15 +1605,27 @@ test("Enter in files mode reveals a hidden diff and focuses it", async () => {
   } finally { await t.cleanup(); }
 }, 15_000);
 
-test("reopening files mode scrolls the file list back to the first file", async () => {
+test("a large change scrolls within a height cap that follows resizes, and reopening starts at the first file", async () => {
   const t = await setup();
   try {
     for (let index = 0; index < 60; index++) await Bun.write(`${t.f.path}/f${String(index).padStart(2, "0")}.txt`, `${index}\n`);
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Ready.");
-    const files = t.screen.renderer.root.findDescendantById("changed-files") as import("@opentui/core").ScrollBoxRenderable;
+    const graph = t.screen.renderer.root.findDescendantById("revisions") as import("@opentui/core").ScrollBoxRenderable;
     t.screen.mockInput.pressKey("l");
     await t.until("A f00.txt");
+    const files = t.screen.renderer.root.findDescendantById("changed-files") as import("@opentui/core").ScrollBoxRenderable;
+    expect(files.height).toBe(Math.floor(graph.viewport.height / 3));
+    expect(t.screen.captureCharFrame()).toContain("Initial feature");
+    const tall = files.height;
+    t.screen.resize(100, 20);
+    await t.screen.renderOnce();
+    await t.screen.renderOnce();
+    expect(files.height).toBe(Math.max(3, Math.floor(graph.viewport.height / 3)));
+    expect(files.height).toBeLessThan(tall);
+    t.screen.resize(100, 30);
+    await t.screen.renderOnce();
+    await t.screen.renderOnce();
     for (let index = 0; index < 55; index++) t.screen.mockInput.pressKey("j");
     await t.until("A f55.txt");
     await t.screen.renderOnce();

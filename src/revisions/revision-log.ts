@@ -40,6 +40,7 @@ export class RevisionLog extends ScrollBoxRenderable {
   private drag: Drag | null = null;
   get dragActive() { return this.drag !== null; }
   private dropIndex: number | null = null;
+  private expansion: { commitId: string; child: Renderable } | null = null;
 
   constructor(context: RenderContext) {
     super(context, {
@@ -121,6 +122,43 @@ export class RevisionLog extends ScrollBoxRenderable {
     }
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.revisions.length - 1));
     this.paintSelection();
+    if (this.expansion) this.placeExpansion();
+  }
+
+  // Shows a renderable beneath a revision's rows, in the graph, until collapsed; false when the revision is not loaded.
+  expand(index: number, child: Renderable) {
+    const revision = this.revisions[index];
+    if (!revision) return false;
+    this.collapse();
+    this.expansion = { commitId: revision.commitId, child };
+    if (!this.placeExpansion()) return false;
+    this.paintSelection([index]);
+    return true;
+  }
+
+  collapse() {
+    if (!this.expansion) return;
+    const index = this.revisionIndexes.get(this.expansion.commitId);
+    if (this.expansion.child.parent) this.remove(this.expansion.child);
+    this.expansion = null;
+    this.paintSelection([index]);
+  }
+
+  // The graph lanes that continue below the revision, so expanded rows keep the graph's lines unbroken.
+  continuationPrefix(index: number) {
+    const row = this.snapshot?.data.graph.findLast(row => row.kind !== "edge" && row.revision === this.revisions[index]);
+    if (!row || row.kind === "edge") return "";
+    return row.kind === "description" ? row.prefix : row.prefix.replace(/[^\s│]/gu, " ");
+  }
+
+  private placeExpansion() {
+    const expansion = this.expansion!;
+    const index = this.revisionIndexes.get(expansion.commitId);
+    const last = index === undefined ? undefined : this.revisionRows[index]?.at(-1);
+    if (expansion.child.parent) this.remove(expansion.child);
+    if (!last) { this.expansion = null; return false; }
+    this.add(expansion.child, this.rows.indexOf(last) + 1);
+    return true;
   }
 
   handleDragMouse(event: MouseEvent) {
@@ -206,7 +244,9 @@ export class RevisionLog extends ScrollBoxRenderable {
   }
 
   private paintRow(row: Row) {
-    const selected = row.revisionIndex === this.selectedIndex;
+    // An expanded revision yields the highlight to its file list and marks itself open instead.
+    const expanded = row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.expansion?.commitId;
+    const selected = row.revisionIndex === this.selectedIndex && !expanded;
     const draggingSource = this.drag?.kind === "dragging" && this.drag.action === "rebase" &&
       row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.drag.revision.commitId;
     const moving = row.revisionIndex !== null && this.movingCommits.has(this.revisions[row.revisionIndex]?.commitId ?? "");
@@ -216,7 +256,7 @@ export class RevisionLog extends ScrollBoxRenderable {
     const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
     const match = this.searchMatches.has(id);
     const outside = this.outsideFilter.has(id);
-    row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
+    row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : expanded && row.heading ? "▾ " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
     row.node.backgroundColor = background;
     row.label.bg = background;
     if (row.bookmarkPreview) {

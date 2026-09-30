@@ -299,3 +299,28 @@ test("refresh timer updates the graph without a manual refresh", async () => {
     await t.text("Timer refreshed this change");
   } finally { await t.cleanup(); }
 });
+
+test("expanded files follow a rewritten change, keep the selected file, and collapse when the change leaves the graph", async () => {
+  const t = await setup(async f => { await Bun.write(`${f.path}/hello.txt`, "edited\n"); });
+  try {
+    await t.app.checkForUpdates();
+    t.screen.mockInput.pressKey("l");
+    await t.text("▶ M hello.txt");
+    await Bun.write(`${t.f.path}/aaa.txt`, "late\n");
+    await t.app.checkForUpdates();
+    await t.text("A aaa.txt");
+    expect(t.screen.captureCharFrame()).toContain("▶ M hello.txt");
+    expect(t.screen.captureCharFrame()).toContain("Revisions · files of");
+    t.screen.mockInput.pressKey("h");
+    await t.text("Change preview");
+    t.screen.mockInput.pressKey("j");
+    t.screen.mockInput.pressKey("l");
+    await t.text("▾ ○");
+    await t.text("▶ A hello.txt");
+    await t.f.jj("abandon", "feature");
+    await t.app.checkForUpdates();
+    await t.text("Collapsed changed files: the change left the graph.");
+    expect(t.screen.captureCharFrame()).not.toContain("Revisions · files of");
+    expect(t.screen.renderer.root.findDescendantById("changed-files")).toBeUndefined();
+  } finally { await t.cleanup(); }
+}, 20_000);

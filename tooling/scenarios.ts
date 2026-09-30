@@ -245,7 +245,7 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    name: "files-pane", title: "Changed files drill-down in the left pane",
+    name: "files", title: "Changed files expanded beneath the revision",
     async run(ui) {
       await ui.f.jj("describe", "-m", "Rework greeting and add notes");
       await Bun.write(`${ui.f.path}/hello.txt`, "hello from the files pane\n");
@@ -258,11 +258,13 @@ export const scenarios: Scenario[] = [
       await ui.until("── hello.txt ──");
       await ui.until("+ hello from the files pane");
       const frame = ui.screen.captureCharFrame();
-      assert(frame.includes("Files ·"));
+      assert(frame.includes("Revisions · files of"));
+      assert(frame.includes("▾ @  "));
+      assert(frame.includes("Rework greeting and add notes"));
       assert(frame.includes("A notes.md"));
+      assert(frame.includes("Initial feature"));
       assert(!frame.includes("# Notes"));
-      assert.equal(ui.screen.renderer.root.findDescendantById("revisions")?.visible, false);
-      await ui.capture("Files mode: first file selected with its diff");
+      await ui.capture("Files expand beneath the revision with the graph in view");
       ui.key("j");
       await ui.until("── notes.md ──");
       await ui.until("+ # Notes");
@@ -270,16 +272,16 @@ export const scenarios: Scenario[] = [
       await ui.capture("j selects the second file and the preview follows");
       await ui.resize(80, 24);
       await ui.until("A notes.md");
-      await ui.capture("Files mode at 80x24");
+      await ui.capture("Expanded files at 80x24");
       await ui.resize(100, 30);
       ui.key("h");
       await ui.until("Change preview");
       await ui.until("+ # Notes");
       assert(ui.screen.captureCharFrame().includes("+ hello from the files pane"));
-      assert.equal(ui.node("revisions").visible, true);
-      assert.equal(ui.screen.renderer.root.findDescendantById("changed-files")?.visible, false);
+      assert(!ui.screen.captureCharFrame().includes("A notes.md"));
+      assert.equal(ui.screen.renderer.root.findDescendantById("changed-files"), undefined);
       assert(ui.screen.captureCharFrame().includes("▶ @  "));
-      await ui.capture("h returns to the graph with the same revision and its full diff");
+      await ui.capture("h collapses the files and restores the full diff");
     },
   },
   {
