@@ -94,7 +94,7 @@ export const scenarios: Scenario[] = [
       await ui.f.jj("bookmark", "create", "external-review", "-r", "feature");
       ui.screen.renderer.emit("focus");
       await ui.until("Description edited in another terminal");
-      await ui.until("Ready.");
+      await ui.settled();
       assert(ui.screen.captureCharFrame().includes("revset: @ | feature"));
       await ui.capture("Focus return updates history and preserves selection and filter");
       ui.key("RETURN");
@@ -105,7 +105,8 @@ export const scenarios: Scenario[] = [
       ui.key("ESCAPE");
       await ui.until("Unsaved changes");
       ui.key("ESCAPE");
-      await ui.until("Ready.");
+      await ui.until("external-review");
+      await ui.settled();
     },
   },
   {
@@ -115,7 +116,7 @@ export const scenarios: Scenario[] = [
       for (let i = 0; i < 202; i++) await ui.f.jj("new", "-m", `History change ${i + 1}`);
       ui.key("r", { ctrl: true });
       await ui.until("x load 200 more");
-      await ui.until("Ready.");
+      await ui.settled();
       await ui.capture("First 200 revisions with load more available");
       const first = await ui.repo.snapshot("all()", true);
       assert.equal(first.revisions.length, 200);
@@ -252,7 +253,7 @@ export const scenarios: Scenario[] = [
       await Bun.write(`${ui.f.path}/notes.md`, "# Notes\n\nFiles mode lists each changed file.\n");
       ui.key("r", { ctrl: true });
       await ui.until("+ hello from the files pane");
-      await ui.until("Ready.");
+      await ui.settled();
       ui.key("l");
       await ui.until("M hello.txt");
       await ui.until("── hello.txt ──");
@@ -329,7 +330,7 @@ export const scenarios: Scenario[] = [
       await ui.f.jj("abandon", `${initial}::`);
       ui.key("r", { ctrl: true });
       await ui.until("5 revisions");
-      await ui.until("Ready.");
+      await ui.settled();
       ui.key("j");
       ui.key("r");
       await ui.until("include descendants");
@@ -348,7 +349,7 @@ export const scenarios: Scenario[] = [
       await ui.f.jj("new", "-m", "Follow-up on next change");
       ui.key("r", { ctrl: true });
       await ui.until("4 revisions");
-      await ui.until("Ready.");
+      await ui.settled();
       const snapshot = await ui.repo.snapshot("all()");
       const marked = (description: string) => {
         const index = snapshot.graph.findIndex(row => row.kind === "revision" && row.revision.description.startsWith(description));

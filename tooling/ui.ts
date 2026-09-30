@@ -104,6 +104,7 @@ export async function createUiFixture(options: FixtureOptions = {}) {
 
       return {
         f, screen, repo, app, recording, key, until, choose, node, cleanup,
+        async settled() { await app!.settled(); await screen.renderOnce(); },
         [Symbol.asyncDispose]: cleanup,
         target(id: string): Target { return { id, instance: node(id).num }; },
         async type(text: string) { recording.mark(`type ${text}`); await screen.mockInput.typeText(text); },

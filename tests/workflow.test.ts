@@ -37,7 +37,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
     await screen.mockInput.typeText(query);
     await screen.renderOnce();
   }
-  return { f, repo, screen, app, node, until, text, choose, escape, searchDestination,
+  return { f, repo, screen, app, node, until, settled: async () => { await app.settled(); await screen.renderOnce(); }, text, choose, escape, searchDestination,
     cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
 
@@ -154,7 +154,7 @@ test("idle polls read only the operation ID after startup, refreshes, and mutati
     await t.f.jj("bookmark", "create", "external", "-r", "@-");
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.text("external");
-    await t.text("Ready.");
+    await t.settled();
     await idlePoll();
     t.screen.mockInput.pressEnter();
     const editor = t.node<TextareaRenderable>("description-input");

@@ -83,3 +83,38 @@ test("unknown files, binary changes and terminal controls remain readable", asyn
     expect(preview.height).toBe(2);
   } finally { preview.destroyRecursively(); screen.renderer.destroy(); }
 });
+
+test("repeated text keeps every child, and a changed hunk updates in place without dropping its highlighting", async () => {
+  const screen = await createTestRenderer({ width: 90, height: 35 });
+  const preview = new ChangePreview(screen.renderer, "reconcile", `A change\n\n${patch}`);
+  screen.renderer.root.add(preview);
+  const code = (diff: DiffRenderable) => {
+    const value = diff.findDescendantById(`${diff.id}-left-code`);
+    if (!(value instanceof CodeRenderable)) throw new Error("Missing highlighted code");
+    return value;
+  };
+  try {
+    await screen.renderOnce();
+    const [first, second] = preview.getChildren().filter(child => child instanceof DiffRenderable);
+    await code(first!).highlightingDone;
+    await code(second!).highlightingDone;
+    await screen.waitForVisualIdle();
+    const children = preview.getChildren();
+    const before = JSON.stringify(screen.captureSpans());
+    preview.content = `A change\n\n${patch}`;
+    await screen.renderOnce();
+    expect(preview.getChildren()).toEqual(children);
+    expect(JSON.stringify(screen.captureSpans())).toBe(before);
+
+    preview.content = `A change\n\n${patch.replace("const end = true;", "const end = 1;")}`;
+    expect(preview.getChildren()).toEqual(children);
+    expect(first!.diff).not.toContain("const end = 1;");
+    expect(second!.diff).toContain("const end = 1;");
+    await screen.renderOnce();
+    // Until the new highlight lands, the hunk keeps its previous styled text instead of drawing it unstyled.
+    expect(code(second!).getLineHighlights(1).length).toBeGreaterThan(0);
+    await code(second!).highlightingDone;
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).toContain("+ const end = 1;");
+  } finally { preview.destroyRecursively(); screen.renderer.destroy(); }
+}, 20_000);

@@ -59,7 +59,7 @@ async function setup(kittyKeyboard = false, bindings?: Keybindings) {
     for (let attempt = 0; attempt < 150 && overlay?.visible; attempt++) { await screen.renderOnce(); await Bun.sleep(10); }
     if (overlay?.visible) throw new Error(`Expected the overlay to close:\n${screen.captureCharFrame()}`);
   }
-  return { f, screen, repo, app, until, overlayReady, prompt, chooser, choose, closed, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
+  return { f, screen, repo, app, until, settled: async () => { await app.settled(); await screen.renderOnce(); }, overlayReady, prompt, chooser, choose, closed, cleanup: async () => { app.stop(); screen.renderer.destroy(); await f.cleanup(); } };
 }
 
 test("absorb menu preview cancels, rejects stale state, refreshes and applies", async () => {
@@ -130,7 +130,7 @@ test("evolution menu and shortcut browse description patches without changing re
     await t.f.jj("describe", "-m", "Evolution rename");
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Evolution rename");
-    await t.until("Ready.");
+    await t.settled();
     const operation = await t.repo.operationId();
     t.screen.mockInput.pressKey(" ");
     t.choose("Change evolution");
@@ -175,7 +175,7 @@ for (const close of [false, true]) test(`late evolution previews are ignored, ov
     await t.f.jj("describe", "-m", "Newest evolution version");
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("Newest evolution version");
-    await t.until("Ready.");
+    await t.settled();
     const current = (await t.repo.snapshot("@")).revisions[0];
     if (!current) throw new Error("Missing working copy");
     blockedCommit = current.commitId;
@@ -199,7 +199,7 @@ test("evolution loads older versions through the picker after an external rewrit
     for (let version = 0; version < 51; version++) await t.f.jj("describe", "-m", `History version ${version}`);
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("History version 50");
-    await t.until("Ready.");
+    await t.settled();
     t.screen.mockInput.pressKey("v");
     await t.until("Change evolution");
     await t.overlayReady("Change evolution");
@@ -357,7 +357,7 @@ test("invalid revset preserves history and cancelling description preserves mult
     await Bun.sleep(50);
     await t.f.jj("describe", "-m", "First line\nSecond line");
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     t.screen.mockInput.pressEnter();
     await t.until("Enter newline");
     expect((t.screen.renderer.root.findDescendantById("description-input") as TextareaRenderable).plainText).toBe("First line\nSecond line");
@@ -574,7 +574,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await Bun.write(`${t.f.path}/one.txt`, "one\n");
     await Bun.write(`${t.f.path}/two.txt`, "two\n");
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     const original = (await t.repo.snapshot("@")).revisions[0];
     if (!original) throw new Error("Missing original");
     t.screen.mockInput.pressKey(" ");
@@ -698,7 +698,7 @@ test("inline squash reviews a graph destination before applying", async () => {
   try {
     await Bun.write(`${t.f.path}/inline.txt`, "inline squash\n");
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     const before = await t.repo.operationId();
     t.screen.resize(80, 24);
     t.screen.mockInput.pressKey("S");
@@ -764,7 +764,7 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     const destination = (await t.repo.snapshot("@")).revisions[0];
     if (!merge || !destination) throw new Error("Missing merge or destination");
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     const snapshot = await t.repo.snapshot("all()");
     const marked = (commitId: string) => {
       const index = snapshot.graph.findIndex(row => row.kind === "revision" && row.revision.commitId === commitId);
@@ -914,7 +914,7 @@ test("dragging an individual bookmark highlights a change and moves only after c
   try {
     await t.f.jj("bookmark", "create", "aaa", "-r", "feature");
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     const { badge, target, destination } = await bookmarkDragTargets(t);
     const before = await t.repo.bookmarks();
     await t.screen.mockMouse.pressDown(badge.x + 2, badge.y);
@@ -1148,7 +1148,7 @@ test("split second-description choice cancels without writes and preserves multi
     await Bun.write(`${t.f.path}/one.txt`, "one\n");
     await Bun.write(`${t.f.path}/two.txt`, "two\n");
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     const original = (await t.repo.snapshot("@")).revisions[0]!;
     const before = await t.repo.operationId();
     for (const cancel of [true, false]) {
@@ -1321,7 +1321,7 @@ test("terminal focus refreshes external edits and status while preserving select
     await t.f.jj("describe", "-r", "feature", "-m", "Renamed outside the app");
     t.screen.renderer.emit("focus");
     await t.until("Renamed outside the app");
-    await t.until("Ready.");
+    await t.settled();
     expect(t.screen.captureCharFrame()).toContain("revset: @ | feature");
     expect(t.screen.captureCharFrame()).toContain("+ hello from jj-evolved");
     t.screen.mockInput.pressKey("w");
@@ -1350,7 +1350,7 @@ test("focus refresh keeps input drafts, coalesces deferred events, and detaches 
     expect(snapshot).toHaveBeenCalledTimes(0);
     t.screen.mockInput.pressEscape();
     await t.until("external");
-    await t.until("Ready.");
+    await t.settled();
     expect(snapshot).toHaveBeenCalledTimes(1);
     t.app.stop();
     t.screen.renderer.emit("focus");
@@ -1423,7 +1423,7 @@ test("focus events during refresh produce one follow-up", async () => {
     t.screen.renderer.emit("focus");
     gate.resolve();
     for (let attempt = 0; calls < 2 && attempt < 150; attempt++) await Bun.sleep(10);
-    await t.until("Ready.");
+    await t.settled();
     expect(calls).toBe(2);
     t.app.stop();
     t.screen.renderer.emit("focus");
@@ -1460,7 +1460,7 @@ test("focus preserves help and defers refresh while a filtered target is tempora
     expect(t.screen.captureCharFrame()).toContain("Initial feature");
     t.screen.mockInput.pressKey("o", { ctrl: true });
     await t.until("fresh-working-copy");
-    await t.until("Ready.");
+    await t.settled();
     expect(t.screen.captureCharFrame()).toContain("revset: @");
     expect(t.screen.captureCharFrame()).not.toContain("temporary view");
   } finally { snapshot.mockRestore(); await t.cleanup(); }
@@ -1493,7 +1493,7 @@ test("focus refresh preserves accepted search and preview scroll", async () => {
     await Bun.write(`${t.f.path}/long.txt`, Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"));
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("+ line 0");
-    await t.until("Ready.");
+    await t.settled();
     t.screen.mockInput.pressKey("/");
     await t.until("Type to search");
     await t.screen.mockInput.typeText("Next change");
@@ -1560,7 +1560,7 @@ test("files expand beneath the revision in the graph, preview one file at a time
     await Bun.write(`${t.f.path}/hello.txt`, "hello, changed\n");
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("+ brand new");
-    await t.until("Ready.");
+    await t.settled();
     const listBox = t.screen.renderer.root.findDescendantById("revision-pane") as import("@opentui/core").BoxRenderable;
     const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
     const working = (await t.repo.snapshot("@")).revisions[0];
@@ -1615,7 +1615,7 @@ test("Enter in files mode reveals a hidden diff and focuses it", async () => {
     await Bun.write(`${t.f.path}/hello.txt`, "file focus regression\n");
     t.screen.mockInput.pressKey("r", { ctrl: true });
     await t.until("+ file focus regression");
-    await t.until("Ready.");
+    await t.settled();
     const preview = t.screen.renderer.root.findDescendantById("preview") as import("@opentui/core").ScrollBoxRenderable;
     t.screen.mockInput.pressKey("p");
     expect(preview.visible).toBe(false);
@@ -1637,7 +1637,7 @@ test("a large change scrolls within a height cap that follows resizes, and reope
   try {
     for (let index = 0; index < 60; index++) await Bun.write(`${t.f.path}/f${String(index).padStart(2, "0")}.txt`, `${index}\n`);
     t.screen.mockInput.pressKey("r", { ctrl: true });
-    await t.until("Ready.");
+    await t.settled();
     const graph = t.screen.renderer.root.findDescendantById("revisions") as import("@opentui/core").ScrollBoxRenderable;
     t.screen.mockInput.pressKey("l");
     await t.until("A f00.txt");
@@ -1741,4 +1741,26 @@ test("going back to a filtered action menu restores the full list and the chosen
     expect(chooser.getSelectedOption()?.value).toBe("Create bookmark");
     expect(t.screen.renderer.root.findDescendantById("action-search")?.visible).toBe(false);
   } finally { await t.cleanup(); }
+}, 15_000);
+
+test("refreshing an unchanged repository repaints no cells", async () => {
+  const t = await setup();
+  const snapshot = spyOn(t.repo, "snapshot");
+  try {
+    await t.until("Ready.");
+    t.screen.mockInput.pressKey("j");
+    await t.until("+ hello from jj-evolved");
+    for (let attempt = 0; attempt < 50; attempt++) { await Bun.sleep(10); await t.screen.renderOnce(); }
+    const before = JSON.stringify(t.screen.captureSpans());
+    for (const refresh of [() => t.screen.mockInput.pressKey("r", { ctrl: true }), () => t.screen.renderer.emit("focus")]) {
+      const reads = snapshot.mock.calls.length;
+      refresh();
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await Bun.sleep(10);
+        await t.screen.renderOnce();
+        expect(JSON.stringify(t.screen.captureSpans())).toBe(before);
+      }
+      expect(snapshot.mock.calls.length).toBeGreaterThan(reads);
+    }
+  } finally { snapshot.mockRestore(); await t.cleanup(); }
 }, 15_000);
