@@ -338,9 +338,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     historyLimit = limit;
     ++searchRequest;
     clearTimeout(searchTimer);
-    const needle = query.toLowerCase();
-    const bookmarkIds = new Set(bookmarks.filter(item => `${item.name}${item.remote ? `@${item.remote}` : ""}`.toLowerCase().includes(needle)).flatMap(item => item.targets));
-    search = { query, matches: candidates.filter(item => item.description.toLowerCase().includes(needle) || item.changeId.startsWith(needle) || item.commitId.startsWith(needle) || bookmarkIds.has(item.commitId)) };
+    search = { query, matches: matchingRevisions(candidates, bookmarks, query) };
     returnPoint = null;
     outsideFilter = new Set();
     currentSnapshot = snapshot;
