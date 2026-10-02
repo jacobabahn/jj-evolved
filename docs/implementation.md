@@ -65,7 +65,7 @@ After a successful write, `MutationReview` returns an applied result even if ref
 | `src/app.ts` | Navigation, focus, selection recovery, and connecting modules |
 | `src/history/` | Mutation review, editable history forms, and tree comparison |
 | `src/preview/` | Preview request lifetime and text or diff rendering |
-| `src/revisions/` | Revision graph rendering, selection, and dragging |
+| `src/revisions/` | Revision graph rendering, selection, and dragging; loading history and keeping the user's place across reloads |
 | `src/repository/` | Repository operations and their internal jj implementation |
 | `src/ui/` | Shared overlays, highlighting, themes, and theme preferences |
 | `src/terminal-text.ts` | Terminal-control filtering shared by command output and rendering |
