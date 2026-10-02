@@ -1303,7 +1303,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const scope = prompt.action.kind === "rebase"
       ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""} · ${bindingLabel("rebaseScope")} toggle`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · / search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · ${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} destination · ${bindingLabel("search")} search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
@@ -1344,6 +1344,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // The graph's new height is known once layout runs, so the cap follows on the next frame.
     if (prompt.kind === "files") renderer.once("frame", () => { if (prompt.kind === "files") fileList.setMaxRows(maxFileRows()); });
   }
+  // Arrow keys always move; the bound up/down keys move too.
+  function moveKey(key: KeyEvent): -1 | 0 | 1 {
+    const action = actionForKey(bindings, key, ["down", "up"]);
+    return key.name === "down" || action === "down" ? 1 : key.name === "up" || action === "up" ? -1 : 0;
+  }
   function onKey(key: KeyEvent) {
     if (stopped) return;
     ++activity;
@@ -1357,19 +1362,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind === "theme") {
       key.preventDefault();
       if (isBusy()) return;
+      const move = moveKey(key);
       if (key.name === "escape") {
         applyTheme(prompt.original);
         closePrompt();
-      } else if (key.name === "j" || key.name === "down") chooser.moveDown();
-      else if (key.name === "k" || key.name === "up") chooser.moveUp();
+      } else if (move > 0) chooser.moveDown();
+      else if (move < 0) chooser.moveUp();
       else if (key.name === "return") void keepTheme();
       return;
     }
     if (prompt.kind === "help") {
       key.preventDefault();
+      const move = moveKey(key);
       if (key.name === "escape" || actionForKey(bindings, key) === "help") closePrompt();
-      else if (key.name === "j" || key.name === "down") overlayPreview.scrollBy(1);
-      else if (key.name === "k" || key.name === "up") overlayPreview.scrollBy(-1);
+      else if (move) overlayPreview.scrollBy(move);
       else if (key.name === "pageup" || key.name === "pagedown") overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3));
       return;
     }
@@ -1410,16 +1416,16 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (isBusy()) return;
       if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
       else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
-      else if (key.name === "/" || key.sequence === "/") {
+      else if (action === "search") {
         const state = prompt;
         destination("Choose destination", state.source, target => {
           resumeInline(state);
           void run("Loading destination…", async () => { await navigate(target); updateInlineHint(); }, true);
         }, true);
       }
-      else if (key.name === "j" || key.name === "down") list.moveDown();
-      else if (key.name === "k" || key.name === "up") list.moveUp();
-      else if (key.name === "pageup" || key.name === "pagedown") preview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, preview.height - 3));
+      else if (action === "down") list.moveDown();
+      else if (action === "up") list.moveUp();
+      else if (action === "pageUp" || action === "pageDown") preview.scrollBy((action === "pageUp" ? -1 : 1) * Math.max(1, preview.height - 3));
       else if (action === "rebaseScope" && prompt.action.kind === "rebase") {
         prompt.action.descendants = !prompt.action.descendants;
         updateInlineHint();
@@ -1449,8 +1455,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else if (prompt.kind === "picker") {
         key.preventDefault();
         if (isBusy()) return;
-        if (key.name === "j" || key.name === "down") moveChoice(1);
-        else if (key.name === "k" || key.name === "up") moveChoice(-1);
+        const move = moveKey(key);
+        if (move) moveChoice(move);
         else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
       }
       else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.action); }
