@@ -3,12 +3,12 @@ import { actionForKey, defaultBindings, inlineActions, keyLabel, presetNames, ty
 import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
-import { getTheme, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
+import { setTerminalColors, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
 import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
 import { ChangePreview } from "./preview/change-preview";
 import {
   BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable,
-  TextRenderable, TextareaRenderable, type CliRenderer, type KeyEvent,
+  TextRenderable, TextareaRenderable, type CliRenderer, type KeyEvent, type TerminalColors,
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
@@ -119,7 +119,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const bindingLabel = (action: Action) => keyLabel(bindings, action);
   const presetLabel = options.preset ?? (bindings === defaultBindings ? "jjui" : "custom");
   setTheme(renderer, theme);
-  let colors = getTheme(renderer);
+  let colors = theme;
+  const applyTerminalColors = (detected: TerminalColors) => { setTerminalColors(renderer, detected); applyTheme(colors); };
   const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg });
   const header = new TextRenderable(renderer, { id: "header", height: 1, fg: colors.accent, content: terminalText(`jj-evolved  /  ${repository.root}`) });
   const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset:" });
@@ -1537,6 +1538,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function stop() {
     if (stopped) return;
     stopped = true;
+    renderer.off("palette", applyTerminalColors);
     clearInterval(refreshTimer);
     clearTimeout(resultTimer);
     clearTimeout(searchTimer);
@@ -1574,6 +1576,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   chooser.on("selectionChanged", previewChoice);
   return { start: async () => {
     setFocus("list");
+    // Palette reports arrive after startup and again when the terminal switches between light and dark.
+    renderer.on("palette", applyTerminalColors);
+    void renderer.getPalette().catch(() => {});
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
     if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }
