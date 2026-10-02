@@ -1,4 +1,4 @@
-import { RGBA, type ColorInput, type RenderContext } from "@opentui/core";
+import { RGBA, hexToRgb, type ColorInput, type RenderContext, type TerminalColors } from "@opentui/core";
 
 export const darkTheme = {
   bg: "#101820", panel: "#15212c", text: "#d6e2eb", muted: "#91a6b7",
@@ -82,12 +82,32 @@ export function parseThemeName(value: string): ThemeName {
   throw new Error(`Unknown theme "${value}". Choose ${Object.keys(themes).join(", ")}.`);
 }
 
-const contextThemes = new WeakMap<RenderContext, Theme>();
+const contextThemes = new WeakMap<RenderContext, { selected: Theme; resolved: Theme }>();
+const contextTerminalColors = new WeakMap<RenderContext, TerminalColors>();
+
+// The terminal palette has no faint shades, so diff line tints mix the terminal's reported background toward
+// its own green and red. A terminal that does not report its colors keeps untinted lines beside the gutter.
+function withTerminalTints(theme: Theme, colors: TerminalColors | undefined): Theme {
+  const background = colors?.defaultBackground, red = colors?.palette[1], green = colors?.palette[2];
+  if (theme !== themes.terminal || !background || !red || !green) return theme;
+  return { ...theme, addedBg: mix(background, green, 0.2), removedBg: mix(background, red, 0.2) };
+}
+
+function mix(from: string, to: string, amount: number) {
+  const a = hexToRgb(from), b = hexToRgb(to);
+  return RGBA.fromValues(a.r + (b.r - a.r) * amount, a.g + (b.g - a.g) * amount, a.b + (b.b - a.b) * amount);
+}
 
 export function setTheme(context: RenderContext, theme: Theme) {
-  contextThemes.set(context, theme);
+  contextThemes.set(context, { selected: theme, resolved: withTerminalTints(theme, contextTerminalColors.get(context)) });
+}
+
+export function setTerminalColors(context: RenderContext, colors: TerminalColors) {
+  contextTerminalColors.set(context, colors);
+  const theme = contextThemes.get(context);
+  if (theme) setTheme(context, theme.selected);
 }
 
 export function getTheme(context: RenderContext): Theme {
-  return contextThemes.get(context) ?? themes.terminal;
+  return contextThemes.get(context)?.resolved ?? themes.terminal;
 }

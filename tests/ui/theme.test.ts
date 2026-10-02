@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { TextRenderable, DiffRenderable, parseColor } from "@opentui/core";
+import { TextRenderable, DiffRenderable, RGBA, parseColor, type TerminalColors } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { ActionOverlay } from "../../src/ui/action-overlay";
 import { ChangePreview } from "../../src/preview/change-preview";
-import { getTheme, setTheme, themes, themeNames } from "../../src/ui/theme";
+import { getTheme, setTerminalColors, setTheme, themes, themeNames } from "../../src/ui/theme";
 
 test("terminal defaults retain terminal color intent", () => {
   expect(themes.terminal.bg.intent).toBe("default");
@@ -54,6 +54,25 @@ test("themes belong to each renderer", async () => {
   } finally {
     first.renderer.destroy();
     second.renderer.destroy();
+  }
+});
+
+test("the terminal theme tints diff lines from the colors the terminal reports", async () => {
+  const screen = await createTestRenderer({ width: 40, height: 10 });
+  const reported = { palette: ["#000000", "#ff0000", "#00ff00"], defaultBackground: "#000000" } as TerminalColors;
+  try {
+    setTheme(screen.renderer, themes.terminal);
+    expect(getTheme(screen.renderer)).toBe(themes.terminal);
+    setTerminalColors(screen.renderer, reported);
+    expect(getTheme(screen.renderer).addedBg).toEqual(RGBA.fromInts(0, 51, 0));
+    expect(getTheme(screen.renderer).removedBg).toEqual(RGBA.fromInts(51, 0, 0));
+    setTheme(screen.renderer, themes.dark);
+    expect(getTheme(screen.renderer)).toBe(themes.dark);
+    setTerminalColors(screen.renderer, { ...reported, defaultBackground: null });
+    setTheme(screen.renderer, themes.terminal);
+    expect(getTheme(screen.renderer)).toBe(themes.terminal);
+  } finally {
+    screen.renderer.destroy();
   }
 });
 
