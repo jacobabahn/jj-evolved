@@ -1,4 +1,5 @@
 import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
+import { contextView, loadHistory, searchScope, type LoadedHistory, type NavigationView, type Search } from "./revisions/history-view";
 import { actionForKey, defaultBindings, inlineActions, keyLabel, presetNames, type Keybindings, type Action } from "./ui/keybindings";
 import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { MutationReview } from "./history/mutation-review";
@@ -35,8 +36,6 @@ type Prompt =
   | { kind: "help" }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
-type Search = { query: string; matches: Revision[] };
-type NavigationView = { snapshot: Snapshot; bookmarks: Bookmark[]; index: number; top: number; outside: ReadonlySet<string> };
 
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(bindings: Keybindings): { title: string; rows: [string, string][] }[] {
@@ -325,61 +324,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     focusRefreshPending = false;
     const request = ++refreshRequest;
     const limit = nextRevset === revset ? historyLimit : 200;
-    const query = preserveView ? search.query : "";
     list.cancelDrag();
     // Read the ID before the view so a concurrent change costs one extra reload, never a missed one.
     const operation = await repository.snapshotOperationId();
-    const [snapshot, bookmarks, candidates] = await Promise.all([
-      repository.snapshot(nextRevset, true, limit), repository.bookmarks(),
-      query ? repository.navigationRevisions(nextRevset) : Promise.resolve([] as Revision[]),
-    ]);
+    const loaded = await loadHistory(repository, { revset: nextRevset, limit, previous: captureView, selectWorkingCopy: workingCopy, query: preserveView ? search.query : "" });
     if (stopped || request !== refreshRequest) return;
     observedOperation = operation;
-    // Browsing stays available during reads; preserve the latest view when applying results.
     const previous = selected();
-    const top = list.scrollTop;
-    const previewTop = preview.scrollTop;
-    const errorVisible = preserveView && previewTitle === "Last error";
-    const statusVisible = preserveView && previewTitle === "Working-copy status";
-    historyLimit = limit;
-    ++searchRequest;
-    clearTimeout(searchTimer);
-    search = { query, matches: matchingRevisions(candidates, bookmarks, query) };
-    returnPoint = null;
-    outsideFilter = new Set();
-    currentSnapshot = snapshot;
-    currentBookmarks = bookmarks;
-    revisions = snapshot.revisions;
-    updateSearchStatus();
-    detail.prefixes = overlayText.prefixes = revisionPrefixes(revisions);
     revset = nextRevset;
-    updateFilter();
-    let index = workingCopy ? revisions.findIndex(item => item.workingCopy) : -1;
-    if (index < 0 && previous) index = revisions.findIndex(item => item.commitId === previous.commitId);
-    if (index < 0 && previous) {
-      const matches = revisions.filter(item => item.changeId === previous.changeId);
-      if (matches.length === 1) index = revisions.findIndex(item => item.changeId === previous.changeId);
-    }
-    replacing = true;
-    list.setSnapshot(snapshot, bookmarks);
-    if (revisions.length) list.setSelectedIndex(Math.max(0, index));
-    if (preserveView) list.scrollTop = top;
-    replacing = false;
-    updateSearchStatus();
-    const previewRead = statusVisible
-      ? previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error", key: "status" })
-      : prompt.kind === "files" ? followFiles()
-      : !errorVisible ? loadPreview() : undefined;
-    const navigation = previewNavigation;
-    await previewRead;
-    if (preserveView && !stopped && navigation === previewNavigation) {
-      // New diff content gets its scroll extent during layout, after this read completes.
-      restorePreviewScroll = () => {
-        restorePreviewScroll = undefined;
-        if (!stopped && navigation === previewNavigation) preview.scrollTo(previewTop);
-      };
-      renderer.once("frame", restorePreviewScroll);
-    }
+    historyLimit = limit;
+    showHistory(loaded, preserveView);
+    await followPreview(previous, { keepPane: preserveView, force: true });
   }
 
   function onTerminalFocus() {
@@ -411,27 +366,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   async function loadMoreHistory() {
     if (returnPoint) { report(`Press ${bindingLabel("return")} to return to history before loading more.`); return; }
     if (!currentSnapshot.hasMore) { report("All revisions in this revset are loaded."); return; }
-    const view = captureView();
+    const before = currentSnapshot;
     const request = ++refreshRequest;
     const limit = historyLimit + 200;
-    const snapshot = await repository.snapshot(revset, true, limit);
-    if (stopped || request !== refreshRequest || currentSnapshot !== view.snapshot || returnPoint) return;
+    const { view } = await loadHistory(repository, { revset, limit, previous: captureView, bookmarks: currentBookmarks });
+    if (stopped || request !== refreshRequest || currentSnapshot !== before || returnPoint) return;
     historyLimit = limit;
-    const current = captureView();
-    const selectedId = current.snapshot.revisions[current.index]?.commitId;
-    const index = snapshot.revisions.findIndex(item => item.commitId === selectedId);
-    displayView({ ...current, snapshot, index: Math.max(0, index) });
+    displayView(view);
     updateInlineHint();
-  }
-  function refreshedView(snapshot: Snapshot, bookmarks: Bookmark[], previous: NavigationView): NavigationView {
-    const selected = previous.snapshot.revisions[previous.index];
-    let index = snapshot.revisions.findIndex(item => item.commitId === selected?.commitId);
-    if (index < 0 && selected) {
-      const matches = snapshot.revisions.filter(item => item.changeId === selected.changeId);
-      if (matches.length === 1) index = snapshot.revisions.indexOf(matches[0]!);
-    }
-    if (index < 0) index = Math.max(0, Math.min(previous.index, snapshot.revisions.length - 1));
-    return { snapshot, bookmarks, index, top: previous.top, outside: new Set() };
   }
   async function checkForUpdates() {
     if (stopped || checkingUpdates || isBusy() || !idle() || list.dragActive) return;
@@ -449,43 +391,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const status = statusShown() ? await repository.status() : undefined;
       if (status !== undefined) operation = await repository.operationId();
       if (!valid()) return;
-      const oldView = captureView();
-      const oldReturn = returnPoint;
       const previous = selected();
-      const [snapshot, bookmarks, candidates] = await Promise.all([
-        repository.snapshot(revset, true, historyLimit), repository.bookmarks(),
-        search.query ? repository.navigationRevisions(revset) : Promise.resolve([] as Revision[]),
-      ]);
-      const base = refreshedView(snapshot, bookmarks, oldReturn ?? oldView);
-      let view = base;
-      let restoredReturn: NavigationView | null = null;
-      if (oldReturn && previous) {
-        const targets = await repository.navigationRevisions(`present(${previous.changeId})`);
-        const target = targets.find(item => item.commitId === previous.commitId) ?? (targets.length === 1 ? targets[0] : undefined);
-        if (target) {
-          const context = `${target.commitId} | latest(parents(${target.commitId}) | children(${target.commitId}), 39)`;
-          const [nearby, included] = await Promise.all([repository.snapshot(context, true), repository.navigationRevisions(`(${context}) & (${revset})`)]);
-          view = refreshedView(nearby, bookmarks, oldView);
-          const ids = new Set(included.map(item => item.commitId));
-          view.outside = new Set(nearby.revisions.filter(item => !ids.has(item.commitId)).map(item => item.commitId));
-          restoredReturn = base;
-        }
-      }
+      const loaded = await loadHistory(repository, {
+        revset, limit: historyLimit, previous: captureView, keepPosition: true, query: search.query,
+        context: returnPoint && previous ? { returnPoint, revision: previous } : null,
+      });
       // A command or user interaction during the read invalidates this result.
       if (await repository.operationId() !== operation || !valid()) return;
       observedOperation = operation;
       if (refreshError) report("Ready.");
       refreshError = "";
-      const previewTop = preview.scrollTop;
-      const title = previewTitle;
-      const statusView = statusShown();
-      if (search.query) search = { query: search.query, matches: matchingRevisions(candidates, bookmarks, search.query) };
-      returnPoint = restoredReturn;
-      displayView(view);
-      if (statusView) { if (status !== undefined) { ++previewNavigation; previews.show({ target: "main", text: status, title: "Working-copy status", keepScroll: true }, "status"); } }
-      else if (prompt.kind === "files") await followFiles();
-      else if (title !== "Last error" && JSON.stringify(previous) !== JSON.stringify(selected())) await loadPreview();
-      if (valid()) preview.scrollTo(previewTop);
+      showHistory(loaded, true);
+      await followPreview(previous, { keepPane: true, force: false, status });
     } catch (error) {
       const text = errorText(error);
       if (valid() && text !== refreshError) {
@@ -494,10 +411,38 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       }
     } finally { checkingUpdates = false; }
   }
+  // The one place a reload replaces the view, the search and the return point.
+  function showHistory(loaded: LoadedHistory, keepScroll: boolean) {
+    ++searchRequest;
+    clearTimeout(searchTimer);
+    if (loaded.search) search = loaded.search;
+    returnPoint = loaded.returnPoint;
+    displayView(loaded.view, keepScroll);
+  }
+  // After a reload, brings the preview up to date. keepPane keeps a status or error pane and the scroll position.
+  async function followPreview(previous: Revision | undefined, { keepPane, force, status }: { keepPane: boolean; force: boolean; status?: string }) {
+    const previewTop = preview.scrollTop;
+    let read: Promise<void> | undefined;
+    if (keepPane && statusShown()) {
+      if (status === undefined) read = previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error", key: "status" });
+      else { ++previewNavigation; previews.show({ target: "main", text: status, title: "Working-copy status", keepScroll: true }, "status"); }
+    } else if (prompt.kind === "files") read = followFiles();
+    else if (keepPane && previewTitle === "Last error") return;
+    else if (force || JSON.stringify(previous) !== JSON.stringify(selected())) read = loadPreview();
+    const navigation = previewNavigation;
+    await read;
+    if (!keepPane || stopped || navigation !== previewNavigation) return;
+    // New diff content gets its scroll extent during layout, after this read completes.
+    restorePreviewScroll = () => {
+      restorePreviewScroll = undefined;
+      if (!stopped && navigation === previewNavigation) preview.scrollTo(previewTop);
+    };
+    renderer.once("frame", restorePreviewScroll);
+  }
   function captureView(): NavigationView {
     return { snapshot: currentSnapshot, bookmarks: currentBookmarks, index: list.getSelectedIndex(), top: list.scrollTop, outside: outsideFilter };
   }
-  function displayView(view: NavigationView) {
+  function displayView(view: NavigationView, keepScroll = true) {
     currentSnapshot = view.snapshot;
     currentBookmarks = view.bookmarks;
     outsideFilter = view.outside;
@@ -506,7 +451,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     replacing = true;
     list.setSnapshot(currentSnapshot, currentBookmarks);
     list.setSelectedIndex(view.index);
-    list.scrollTop = view.top;
+    if (keepScroll) list.scrollTop = view.top;
     replacing = false;
     updateFilter();
     updateSearchStatus();
@@ -523,16 +468,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   async function navigate(target: Revision, request?: number) {
     let index = revisions.findIndex(item => item.commitId === target.commitId);
     if (index < 0) {
-      const context = `${target.commitId} | latest(parents(${target.commitId}) | children(${target.commitId}), 39)`;
-      const [snapshot, included, bookmarks] = await Promise.all([
-        repository.snapshot(context, true), repository.navigationRevisions(`(${context}) & (${revset})`), repository.bookmarks(),
-      ]);
+      const context = await contextView(repository, target, revset, repository.bookmarks());
       if (stopped || (request !== undefined && request !== searchRequest)) return;
-      index = snapshot.revisions.findIndex(item => item.commitId === target.commitId);
+      index = context.snapshot.revisions.findIndex(item => item.commitId === target.commitId);
       if (index < 0) throw new Error("Target no longer exists. Refresh history.");
       returnPoint ??= captureView();
-      const ids = new Set(included.map(item => item.commitId));
-      displayView({ snapshot, bookmarks, index, top: 0, outside: new Set(snapshot.revisions.filter(item => !ids.has(item.commitId)).map(item => item.commitId)) });
+      displayView({ ...context, index, top: 0 });
     }
     replacing = true;
     list.setSelectedIndex(index);
@@ -559,7 +500,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function beginSearch() {
     void run("Loading search scope…", async () => {
-      const [candidates, bookmarks] = await Promise.all([repository.navigationRevisions(revset), repository.bookmarks()]);
+      const { candidates, bookmarks } = await searchScope(repository, revset);
       if (stopped) return;
       searchCandidates = candidates;
       searchBookmarks = bookmarks;
