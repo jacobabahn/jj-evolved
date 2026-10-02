@@ -45,7 +45,12 @@ function parseRevision(value: unknown): Revision {
 
 export async function logSnapshot(root: string, revset: string, readOnly = false, limit = 200): Promise<Snapshot> {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("History limit must be a positive integer.");
-  const output = await run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", String(limit), "--revisions", revset, "--template", LOG_TEMPLATE]);
+  const log = run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", String(limit), "--revisions", revset, "--template", LOG_TEMPLATE]);
+  const countMore = () => run(root, ["--ignore-working-copy", "--at-op=@", "log", "--no-graph", "--limit", String(limit + 1), "-r", revset, "-T", '"x"']);
+  // A snapshotting log may create a new operation, so only a read-only log can race the probe.
+  const probe = readOnly ? countMore() : undefined;
+  probe?.catch(() => {});
+  const output = await log;
   const revisions: Revision[] = [];
   const graph: GraphRow[] = [];
   for (const line of output.split("\n").filter(Boolean)) {
@@ -63,7 +68,7 @@ export async function logSnapshot(root: string, revset: string, readOnly = false
       graph.push({ kind: "edge", text: terminalText(line) });
     }
   }
-  const more = revisions.length === limit && (await run(root, ["--ignore-working-copy", "--at-op=@", "log", "--no-graph", "--limit", String(limit + 1), "-r", revset, "-T", '"x"'])).length > limit;
+  const more = revisions.length === limit && (await (probe ?? countMore())).length > limit;
   return { root, revisions, graph, hasMore: more };
 }
 
@@ -79,7 +84,7 @@ export function parsePrefixes(output: string): ReadonlyMap<string, string> {
   return prefixes;
 }
 
-export async function logRevisions(root: string, revset: string, operationId = "@"): Promise<Revision[]> {
-  const output = await run(root, ["--ignore-working-copy", "--at-op", operationId, "log", "--no-graph", "-r", revset, "-T", REVISION_TEMPLATE]);
+export async function logRevisions(root: string, revset: string, operationId = "@", limit?: number): Promise<Revision[]> {
+  const output = await run(root, ["--ignore-working-copy", "--at-op", operationId, "log", "--no-graph", ...(limit ? ["--limit", String(limit)] : []), "-r", revset, "-T", REVISION_TEMPLATE]);
   return output.split("\n").filter(Boolean).map(line => parseRevision(JSON.parse(line)));
 }
