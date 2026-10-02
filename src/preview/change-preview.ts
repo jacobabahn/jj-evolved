@@ -53,11 +53,11 @@ export class ChangePreview extends BoxRenderable {
         this.add(new DiffRenderable(this.ctx, {
           id: `${id}-diff-${hunkIndex}`, width: "100%", diff: header + patch, filetype: pathToFiletype(path ?? ""), syntaxStyle: this.syntax,
           lineNumberFg: getTheme(this.ctx).muted, lineNumberBg: getTheme(this.ctx).bg,
-          addedLineNumberBg: getTheme(this.ctx).addedBg, removedLineNumberBg: getTheme(this.ctx).removedBg,
+          addedLineNumberBg: getTheme(this.ctx).addedGutter, removedLineNumberBg: getTheme(this.ctx).removedGutter,
           view: "unified", showLineNumbers: true, wrapMode: "word", flexShrink: 0,
           fg: getTheme(this.ctx).text, addedBg: getTheme(this.ctx).addedBg, removedBg: getTheme(this.ctx).removedBg, contextBg: getTheme(this.ctx).bg,
           addedContentBg: getTheme(this.ctx).addedBg, removedContentBg: getTheme(this.ctx).removedBg, contextContentBg: getTheme(this.ctx).bg,
-          addedSignColor: getTheme(this.ctx).added, removedSignColor: getTheme(this.ctx).conflict,
+          addedSignColor: getTheme(this.ctx).addedSign, removedSignColor: getTheme(this.ctx).removedSign,
         }));
         if (patch.includes("\\ No newline at end of file")) {
           this.add(new TextRenderable(this.ctx, { id: `${id}-newline-${hunkIndex}`, content: "\\ No newline at end of file", fg: getTheme(this.ctx).muted, flexShrink: 0 }));

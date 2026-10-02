@@ -31,6 +31,8 @@ for (const name of themeNames) {
       const diff = preview.getChildren().find(child => child instanceof DiffRenderable);
       if (!(diff instanceof DiffRenderable)) throw new Error("Missing diff");
       expect(diff.lineNumberBg).toEqual(parseColor(theme.bg));
+      expect(diff.addedLineNumberBg).toEqual(parseColor(theme.addedGutter));
+      expect(diff.removedLineNumberBg).toEqual(parseColor(theme.removedGutter));
       expect(screen.captureCharFrame()).toContain("const a = 2;");
       preview.content = "Change qwrtyuok";
       await screen.waitForVisualIdle();
