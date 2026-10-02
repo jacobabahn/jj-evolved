@@ -115,6 +115,12 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
   ];
 }
 
+function fieldColors(colors: Theme) {
+  return { textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel };
+}
+function chooserColors(colors: Theme) {
+  return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
+}
 export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, bindings: Keybindings = defaultBindings, options: { refreshIntervalMs?: number; preset?: string } = {}) {
   const bindingLabel = (action: Action) => keyLabel(bindings, action);
   const presetLabel = options.preset ?? (bindings === defaultBindings ? "jjui" : "custom");
@@ -133,16 +139,16 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
-  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text, placeholderColor: colors.muted });
-  const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, width: "100%", height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text });
-  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", ...fieldColors(colors), placeholderColor: colors.muted });
+  const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, width: "100%", height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
+  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
   const filesShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} file  Enter focus diff  ${bindingLabel("focus")} focus  ${bindingLabel("togglePreview")} preview  ${bindingLabel("pageUp")}/${bindingLabel("pageDown")} scroll\nh/Left/Esc/${bindingLabel("files")} collapse  ${bindingLabel("quit")} quit`;
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent });
-  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
+  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
   const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
@@ -823,32 +829,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function applyTheme(theme: Theme) {
     colors = theme;
     setTheme(renderer, theme);
-    app.backgroundColor = colors.bg;
-    suggestions.fg = colors.text;
-    header.fg = navigationStatus.fg = searchStatus.fg = promptLabel.fg = inlineHint.fg = shortcuts.fg = result.fg = colors.accent;
-    filter.fg = message.fg = colors.muted;
-    listBox.backgroundColor = colors.panel;
+    const themed: [object[], (colors: Theme) => object][] = [
+      [[app], c => ({ backgroundColor: c.bg })],
+      [[suggestions], c => ({ fg: c.text })],
+      [[header, navigationStatus, searchStatus, promptLabel, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
+      [[filter, message], c => ({ fg: c.muted })],
+      [[listBox], c => ({ backgroundColor: c.panel })],
+      [[overlayPreview], c => ({ borderColor: c.border })],
+      [[input, descriptionInput, searchInput], fieldColors],
+      [[input, searchInput], c => ({ placeholderColor: c.muted })],
+      [[chooser], chooserColors],
+    ];
+    for (const [widgets, style] of themed) for (const widget of widgets) Object.assign(widget, style(colors));
     paintPanes();
-    overlayPreview.borderColor = colors.border;
-    input.backgroundColor = input.focusedBackgroundColor = colors.panel;
-    input.textColor = input.focusedTextColor = colors.text;
-    input.placeholderColor = colors.muted;
-    descriptionInput.backgroundColor = descriptionInput.focusedBackgroundColor = colors.panel;
-    descriptionInput.textColor = descriptionInput.focusedTextColor = colors.text;
-    searchInput.backgroundColor = searchInput.focusedBackgroundColor = colors.panel;
-    searchInput.textColor = searchInput.focusedTextColor = colors.text;
-    searchInput.placeholderColor = colors.muted;
-    chooser.backgroundColor = chooser.focusedBackgroundColor = colors.panel;
-    chooser.textColor = chooser.focusedTextColor = colors.text;
-    chooser.descriptionColor = colors.muted;
-    chooser.selectedBackgroundColor = colors.selected;
-    chooser.selectedTextColor = chooser.selectedDescriptionColor = colors.selectedText;
-    list.applyTheme();
-    fileList.applyTheme();
-    detail.applyTheme();
-    overlay.applyTheme();
-    overlayText.applyTheme();
-    comparison.applyTheme();
+    for (const widget of [list, fileList, detail, overlay, overlayText, comparison]) widget.applyTheme();
   }
 
   function previewTheme() {
@@ -1349,121 +1343,133 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const action = actionForKey(bindings, key, ["down", "up"]);
     return key.name === "down" || action === "down" ? 1 : key.name === "up" || action === "up" ? -1 : 0;
   }
+  function scrollPage(key: KeyEvent, pane: ScrollBoxRenderable) {
+    pane.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, pane.height - 3));
+  }
+  type KeyHandlers = { [K in Prompt["kind"]]: (key: KeyEvent, state: Extract<Prompt, { kind: K }>) => void };
+  const keyHandlers: KeyHandlers = {
+    browse: browseKey, files: filesKey, inline: inlineKey, search: searchKey, theme: themeKey, help: helpKey,
+    form: (key, state) => { if (state.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); } },
+    picker: pickerKey, describe: describeKey, confirm: confirmKey, revset: revsetKey, text: dialogKey,
+  };
   function onKey(key: KeyEvent) {
     if (stopped) return;
     ++activity;
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
-    if (prompt.kind === "search") {
-      if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
-      else if (key.name === "return") { key.preventDefault(); void finishSearch(false).catch(error => report(errorText(error), true)); }
-      return;
-    }
-    if (prompt.kind === "theme") {
+    (keyHandlers[prompt.kind] as (key: KeyEvent, state: Prompt) => void)(key, prompt);
+  }
+  function searchKey(key: KeyEvent) {
+    if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
+    else if (key.name === "return") { key.preventDefault(); void finishSearch(false).catch(error => report(errorText(error), true)); }
+  }
+  function themeKey(key: KeyEvent, state: Extract<Prompt, { kind: "theme" }>) {
+    key.preventDefault();
+    if (isBusy()) return;
+    const move = moveKey(key);
+    if (key.name === "escape") {
+      applyTheme(state.original);
+      closePrompt();
+    } else if (move > 0) chooser.moveDown();
+    else if (move < 0) chooser.moveUp();
+    else if (key.name === "return") void keepTheme();
+  }
+  function helpKey(key: KeyEvent) {
+    key.preventDefault();
+    const move = moveKey(key);
+    if (key.name === "escape" || actionForKey(bindings, key) === "help") closePrompt();
+    else if (move) overlayPreview.scrollBy(move);
+    else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
+  }
+  function filesKey(key: KeyEvent) {
+    const action = actionForKey(bindings, key);
+    if (action === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
+    if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
+    if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (action === "focus" || key.name === "return") {
       key.preventDefault();
-      if (isBusy()) return;
-      const move = moveKey(key);
-      if (key.name === "escape") {
-        applyTheme(prompt.original);
-        closePrompt();
-      } else if (move > 0) chooser.moveDown();
-      else if (move < 0) chooser.moveUp();
-      else if (key.name === "return") void keepTheme();
+      if (key.name === "return" && !preview.visible) setPreviewVisible(true);
+      setFocus(action === "focus" && focus === "preview" ? "list" : "preview");
       return;
     }
-    if (prompt.kind === "help") {
+    if (action === "down" || action === "up") {
       key.preventDefault();
-      const move = moveKey(key);
-      if (key.name === "escape" || actionForKey(bindings, key) === "help") closePrompt();
-      else if (move) overlayPreview.scrollBy(move);
-      else if (key.name === "pageup" || key.name === "pagedown") overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3));
+      const direction = action === "up" ? -1 : 1;
+      if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
+      else if (direction < 0) fileList.moveUp(); else fileList.moveDown();
       return;
     }
-    if ((prompt.kind === "browse" || prompt.kind === "files") && actionForKey(bindings, key) === "togglePreview") {
+    if (action === "pageUp" || action === "pageDown" || action === "previewHalfUp" || action === "previewHalfDown" || action === "previewUp" || action === "previewDown") {
       key.preventDefault();
-      setPreviewVisible(!preview.visible);
-      return;
+      const direction = action === "pageUp" || action === "previewHalfUp" || action === "previewUp" ? -1 : 1;
+      ++previewNavigation;
+      preview.scrollBy(direction * (action === "previewUp" || action === "previewDown" ? 1 : action === "pageUp" || action === "pageDown" ? Math.max(1, preview.height - 3) : Math.max(1, Math.floor((preview.height - 2) / 2))));
     }
-    if (prompt.kind === "files") {
-      const action = actionForKey(bindings, key);
-      if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
-      if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
-      if (action === "focus" || key.name === "return") {
-        key.preventDefault();
-        if (key.name === "return" && !preview.visible) setPreviewVisible(true);
-        setFocus(action === "focus" && focus === "preview" ? "list" : "preview");
-        return;
-      }
-      if (action === "down" || action === "up") {
-        key.preventDefault();
-        const direction = action === "up" ? -1 : 1;
-        if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
-        else if (direction < 0) fileList.moveUp(); else fileList.moveDown();
-        return;
-      }
-      if (action === "pageUp" || action === "pageDown" || action === "previewHalfUp" || action === "previewHalfDown" || action === "previewUp" || action === "previewDown") {
-        key.preventDefault();
-        const direction = action === "pageUp" || action === "previewHalfUp" || action === "previewUp" ? -1 : 1;
-        ++previewNavigation;
-        preview.scrollBy(direction * (action === "previewUp" || action === "previewDown" ? 1 : action === "pageUp" || action === "pageDown" ? Math.max(1, preview.height - 3) : Math.max(1, Math.floor((preview.height - 2) / 2))));
-      }
-      return;
+  }
+  function inlineKey(key: KeyEvent, state: Extract<Prompt, { kind: "inline" }>) {
+    key.preventDefault();
+    const action = actionForKey(bindings, key, inlineActions);
+    if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
+    if (isBusy()) return;
+    if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
+    else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
+    else if (action === "search") {
+      destination("Choose destination", state.source, target => {
+        resumeInline(state);
+        void run("Loading destination…", async () => { await navigate(target); updateInlineHint(); }, true);
+      }, true);
     }
-    if (prompt.kind === "inline") {
-      key.preventDefault();
-      const action = actionForKey(bindings, key, inlineActions);
-      if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
-      if (isBusy()) return;
-      if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
-      else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
-      else if (action === "search") {
-        const state = prompt;
-        destination("Choose destination", state.source, target => {
-          resumeInline(state);
-          void run("Loading destination…", async () => { await navigate(target); updateInlineHint(); }, true);
-        }, true);
-      }
-      else if (action === "down") list.moveDown();
-      else if (action === "up") list.moveUp();
-      else if (action === "pageUp" || action === "pageDown") preview.scrollBy((action === "pageUp" ? -1 : 1) * Math.max(1, preview.height - 3));
-      else if (action === "rebaseScope" && prompt.action.kind === "rebase") {
-        prompt.action.descendants = !prompt.action.descendants;
-        updateInlineHint();
-      } else if (key.name === "return") {
-        const destination = selected();
-        if (!destination || destination.commitId === prompt.source.commitId) { report("Choose a different destination revision.", true); return; }
-        const action: Mutation = prompt.action.kind === "rebase"
-          ? { kind: "rebase", revision: prompt.source, destination, descendants: prompt.action.descendants }
-          : { kind: "squash", revision: prompt.source, destination, files: [], description: destination.description };
-        confirm(action);
-      }
-      return;
+    else if (action === "down") list.moveDown();
+    else if (action === "up") list.moveUp();
+    else if (action === "pageUp" || action === "pageDown") preview.scrollBy((action === "pageUp" ? -1 : 1) * Math.max(1, preview.height - 3));
+    else if (action === "rebaseScope" && state.action.kind === "rebase") {
+      state.action.descendants = !state.action.descendants;
+      updateInlineHint();
+    } else if (key.name === "return") {
+      const destination = selected();
+      if (!destination || destination.commitId === state.source.commitId) { report("Choose a different destination revision.", true); return; }
+      const action: Mutation = state.action.kind === "rebase"
+        ? { kind: "rebase", revision: state.source, destination, descendants: state.action.descendants }
+        : { kind: "squash", revision: state.source, destination, files: [], description: destination.description };
+      confirm(action);
     }
-    if (prompt.kind === "form") {
-      if (prompt.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); }
-      return;
-    }
-    if (prompt.kind !== "browse") {
-      if (!isBusy() && prompt.kind === "picker" && pickerSearch?.handleKey(key)) return;
-      if (isBusy()) { key.preventDefault(); return; }
-      if (prompt.kind === "describe" && prompt.discard && key.name !== "escape") { prompt.discard = false; overlay.report(""); }
-      if (prompt.kind === "describe" && key.name === "escape" && !prompt.discard && descriptionInput.plainText !== prompt.original) { key.preventDefault(); prompt.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
-      else if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) { prompt.back(); void loadPreview(); } else goBack(); }
-      else if (prompt.kind === "describe" && key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
-      else if (prompt.kind === "describe" && key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
-      else if (prompt.kind !== "describe" && (key.name === "pageup" || key.name === "pagedown")) { key.preventDefault(); overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3)); }
-      else if (prompt.kind === "picker") {
-        key.preventDefault();
-        if (isBusy()) return;
-        const move = moveKey(key);
-        if (move) moveChoice(move);
-        else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
-      }
-      else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.action); }
-      else if (prompt.kind === "revset" && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
-      else if (key.name === "return") { key.preventDefault(); void submit(); }
-      return;
-    }
+  }
+  /** Keys shared by the overlay dialogs: Esc goes back, PgUp/PgDn scroll the preview, Enter submits. */
+  function dialogKey(key: KeyEvent) {
+    if (isBusy()) { key.preventDefault(); return; }
+    if (key.name === "escape") { key.preventDefault(); goBack(); }
+    else if (key.name === "pageup" || key.name === "pagedown") { key.preventDefault(); scrollPage(key, overlayPreview); }
+    else if (key.name === "return") { key.preventDefault(); void submit(); }
+  }
+  function revsetKey(key: KeyEvent) {
+    if (!isBusy() && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
+    else dialogKey(key);
+  }
+  function confirmKey(key: KeyEvent, state: Extract<Prompt, { kind: "confirm" }>) {
+    if (!isBusy() && key.name === "escape" && state.back) { key.preventDefault(); state.back(); void loadPreview(); }
+    else if (!isBusy() && key.name === "p") { key.preventDefault(); confirm(state.action); }
+    else dialogKey(key);
+  }
+  function pickerKey(key: KeyEvent, state: Extract<Prompt, { kind: "picker" }>) {
+    if (!isBusy() && pickerSearch?.handleKey(key)) return;
+    key.preventDefault();
+    if (isBusy()) return;
+    const move = moveKey(key);
+    if (key.name === "escape" || key.name === "left" || key.name === "h") goBack();
+    else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
+    else if (move) moveChoice(move);
+    else if (key.name === "return") { const choice = state.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
+  }
+  function describeKey(key: KeyEvent, state: Extract<Prompt, { kind: "describe" }>) {
+    if (isBusy()) { key.preventDefault(); return; }
+    if (state.discard && key.name !== "escape") { state.discard = false; overlay.report(""); }
+    if (key.name === "escape" && !state.discard && descriptionInput.plainText !== state.original) { key.preventDefault(); state.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
+    else if (key.name === "escape") { key.preventDefault(); goBack(); }
+    else if (key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
+    else if (key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
+  }
+  function browseKey(key: KeyEvent) {
+    if (actionForKey(bindings, key) === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
     if (key.name === "escape" && previewTitle === "Last error") { key.preventDefault(); void loadPreview(); return; }
     const action = actionForKey(bindings, key);
     if (!action) return;
