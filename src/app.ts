@@ -1581,9 +1581,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   chooser.on("selectionChanged", previewChoice);
   return { start: async () => {
     setFocus("list");
-    // Palette reports arrive after startup and again when the terminal switches between light and dark.
+    // Palette events arrive when the terminal switches between light and dark. The startup palette is applied
+    // from the result, because the renderer may already have cached it and a cached palette emits no event.
     renderer.on("palette", applyTerminalColors);
-    void renderer.getPalette().catch(() => {});
+    void renderer.getPalette().then(detected => { if (!stopped) applyTerminalColors(detected); }).catch(() => {});
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
     if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }
