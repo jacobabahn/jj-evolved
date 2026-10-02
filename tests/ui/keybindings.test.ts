@@ -32,13 +32,19 @@ test("presets select jjui or legacy defaults and accept overrides on top", () =>
 });
 
 test("rebaseScope shares keys with browse-only actions but not with actions live during destination choice", () => {
-  expect(inlineActions).toEqual(["rebaseScope", "loadMore", "togglePreview"]);
+  expect(inlineActions).toEqual(["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "loadMore", "togglePreview"]);
   const shared = parseKeybindings({ bindings: { rebaseScope: ["s"] } });
   const key = { name: "s", sequence: "s", ctrl: false, shift: false, meta: false, option: false };
   expect(actionForKey(shared, key)).toBe("split");
   expect(actionForKey(shared, key, inlineActions)).toBe("rebaseScope");
   expect(parseKeybindings({ bindings: { rebaseScope: ["s"] } })).toMatchObject({ rebaseScope: ["s"], split: ["s"] });
-  for (const key of ["j", "k", "up", "down", "pageup", "pagedown", "/", "return", "escape"]) expect(() => parseKeybindings({ bindings: { rebaseScope: [key] } })).toThrow("reserved for inline destination controls");
+  for (const key of ["return", "escape"]) expect(() => parseKeybindings({ bindings: { rebaseScope: [key] } })).toThrow("reserved for inline destination controls");
+  expect(() => parseKeybindings({ bindings: { rebaseScope: ["j"] } })).toThrow("conflicts between down and rebaseScope");
+  expect(() => parseKeybindings({ bindings: { rebaseScope: ["/"] } })).toThrow("conflicts between search and rebaseScope");
+  // Remapped movement and search keys drive the inline destination picker too.
+  const remapped = parseKeybindings({ bindings: { down: ["x"], search: ["ctrl+f"] } });
+  expect(actionForKey(remapped, { ...key, name: "x", sequence: "x" }, inlineActions)).toBe("down");
+  expect(actionForKey(remapped, { ...key, name: "f", sequence: "\x06", ctrl: true }, inlineActions)).toBe("search");
   expect(parseKeybindings({ bindings: { focus: ["ctrl+t"] } })).toMatchObject({ focus: ["ctrl+t"], rebaseScope: ["tab"] });
   expect(() => parseKeybindings({ bindings: { rebaseScope: ["ctrl+l"] } })).toThrow("conflicts between loadMore and rebaseScope");
   expect(() => parseKeybindings({ bindings: { rebaseScope: ["p"] } })).toThrow("conflicts between rebaseScope and togglePreview");
