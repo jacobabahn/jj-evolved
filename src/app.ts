@@ -1,4 +1,5 @@
 import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
+import { contextView, loadHistory, searchScope, type LoadedHistory, type NavigationView, type Search } from "./revisions/history-view";
 import { actionForKey, defaultBindings, inlineActions, keyLabel, presetNames, type Keybindings, type Action } from "./ui/keybindings";
 import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { MutationReview } from "./history/mutation-review";
@@ -35,8 +36,6 @@ type Prompt =
   | { kind: "help" }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
-type Search = { query: string; matches: Revision[] };
-type NavigationView = { snapshot: Snapshot; bookmarks: Bookmark[]; index: number; top: number; outside: ReadonlySet<string> };
 
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(bindings: Keybindings): { title: string; rows: [string, string][] }[] {
@@ -115,6 +114,12 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
   ];
 }
 
+function fieldColors(colors: Theme) {
+  return { textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel };
+}
+function chooserColors(colors: Theme) {
+  return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
+}
 export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, bindings: Keybindings = defaultBindings, options: { refreshIntervalMs?: number; preset?: string } = {}) {
   const bindingLabel = (action: Action) => keyLabel(bindings, action);
   const presetLabel = options.preset ?? (bindings === defaultBindings ? "jjui" : "custom");
@@ -133,16 +138,16 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], borderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
-  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text, placeholderColor: colors.muted });
-  const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, width: "100%", height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", textColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, focusedTextColor: colors.text });
-  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", ...fieldColors(colors), placeholderColor: colors.muted });
+  const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, width: "100%", height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
+  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
   const filesShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} file  Enter focus diff  ${bindingLabel("focus")} focus  ${bindingLabel("togglePreview")} preview  ${bindingLabel("pageUp")}/${bindingLabel("pageDown")} scroll\nh/Left/Esc/${bindingLabel("files")} collapse  ${bindingLabel("quit")} quit`;
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent });
-  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], backgroundColor: colors.panel, focusedBackgroundColor: colors.panel, textColor: colors.text, focusedTextColor: colors.text, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, descriptionColor: colors.muted, showDescription: true, itemSpacing: 0, wrapSelection: false, selectedDescriptionColor: colors.selectedText });
+  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
   const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
@@ -319,63 +324,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     focusRefreshPending = false;
     const request = ++refreshRequest;
     const limit = nextRevset === revset ? historyLimit : 200;
-    const query = preserveView ? search.query : "";
     list.cancelDrag();
     // Read the ID before the view so a concurrent change costs one extra reload, never a missed one.
     const operation = await repository.snapshotOperationId();
-    const [snapshot, bookmarks, candidates] = await Promise.all([
-      repository.snapshot(nextRevset, true, limit), repository.bookmarks(),
-      query ? repository.navigationRevisions(nextRevset) : Promise.resolve([] as Revision[]),
-    ]);
+    const loaded = await loadHistory(repository, { revset: nextRevset, limit, previous: captureView, selectWorkingCopy: workingCopy, query: preserveView ? search.query : "" });
     if (stopped || request !== refreshRequest) return;
     observedOperation = operation;
-    // Browsing stays available during reads; preserve the latest view when applying results.
     const previous = selected();
-    const top = list.scrollTop;
-    const previewTop = preview.scrollTop;
-    const errorVisible = preserveView && previewTitle === "Last error";
-    const statusVisible = preserveView && previewTitle === "Working-copy status";
-    historyLimit = limit;
-    ++searchRequest;
-    clearTimeout(searchTimer);
-    const needle = query.toLowerCase();
-    const bookmarkIds = new Set(bookmarks.filter(item => `${item.name}${item.remote ? `@${item.remote}` : ""}`.toLowerCase().includes(needle)).flatMap(item => item.targets));
-    search = { query, matches: candidates.filter(item => item.description.toLowerCase().includes(needle) || item.changeId.startsWith(needle) || item.commitId.startsWith(needle) || bookmarkIds.has(item.commitId)) };
-    returnPoint = null;
-    outsideFilter = new Set();
-    currentSnapshot = snapshot;
-    currentBookmarks = bookmarks;
-    revisions = snapshot.revisions;
-    updateSearchStatus();
-    detail.prefixes = overlayText.prefixes = revisionPrefixes(revisions);
     revset = nextRevset;
-    updateFilter();
-    let index = workingCopy ? revisions.findIndex(item => item.workingCopy) : -1;
-    if (index < 0 && previous) index = revisions.findIndex(item => item.commitId === previous.commitId);
-    if (index < 0 && previous) {
-      const matches = revisions.filter(item => item.changeId === previous.changeId);
-      if (matches.length === 1) index = revisions.findIndex(item => item.changeId === previous.changeId);
-    }
-    replacing = true;
-    list.setSnapshot(snapshot, bookmarks);
-    if (revisions.length) list.setSelectedIndex(Math.max(0, index));
-    if (preserveView) list.scrollTop = top;
-    replacing = false;
-    updateSearchStatus();
-    const previewRead = statusVisible
-      ? previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error", key: "status" })
-      : prompt.kind === "files" ? followFiles()
-      : !errorVisible ? loadPreview() : undefined;
-    const navigation = previewNavigation;
-    await previewRead;
-    if (preserveView && !stopped && navigation === previewNavigation) {
-      // New diff content gets its scroll extent during layout, after this read completes.
-      restorePreviewScroll = () => {
-        restorePreviewScroll = undefined;
-        if (!stopped && navigation === previewNavigation) preview.scrollTo(previewTop);
-      };
-      renderer.once("frame", restorePreviewScroll);
-    }
+    historyLimit = limit;
+    showHistory(loaded, preserveView);
+    await followPreview(previous, { keepPane: preserveView, force: true });
   }
 
   function onTerminalFocus() {
@@ -407,27 +366,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   async function loadMoreHistory() {
     if (returnPoint) { report(`Press ${bindingLabel("return")} to return to history before loading more.`); return; }
     if (!currentSnapshot.hasMore) { report("All revisions in this revset are loaded."); return; }
-    const view = captureView();
+    const before = currentSnapshot;
     const request = ++refreshRequest;
     const limit = historyLimit + 200;
-    const snapshot = await repository.snapshot(revset, true, limit);
-    if (stopped || request !== refreshRequest || currentSnapshot !== view.snapshot || returnPoint) return;
+    const { view } = await loadHistory(repository, { revset, limit, previous: captureView, bookmarks: currentBookmarks });
+    if (stopped || request !== refreshRequest || currentSnapshot !== before || returnPoint) return;
     historyLimit = limit;
-    const current = captureView();
-    const selectedId = current.snapshot.revisions[current.index]?.commitId;
-    const index = snapshot.revisions.findIndex(item => item.commitId === selectedId);
-    displayView({ ...current, snapshot, index: Math.max(0, index) });
+    displayView(view);
     updateInlineHint();
-  }
-  function refreshedView(snapshot: Snapshot, bookmarks: Bookmark[], previous: NavigationView): NavigationView {
-    const selected = previous.snapshot.revisions[previous.index];
-    let index = snapshot.revisions.findIndex(item => item.commitId === selected?.commitId);
-    if (index < 0 && selected) {
-      const matches = snapshot.revisions.filter(item => item.changeId === selected.changeId);
-      if (matches.length === 1) index = snapshot.revisions.indexOf(matches[0]!);
-    }
-    if (index < 0) index = Math.max(0, Math.min(previous.index, snapshot.revisions.length - 1));
-    return { snapshot, bookmarks, index, top: previous.top, outside: new Set() };
   }
   async function checkForUpdates() {
     if (stopped || checkingUpdates || isBusy() || !idle() || list.dragActive) return;
@@ -445,43 +391,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const status = statusShown() ? await repository.status() : undefined;
       if (status !== undefined) operation = await repository.operationId();
       if (!valid()) return;
-      const oldView = captureView();
-      const oldReturn = returnPoint;
       const previous = selected();
-      const [snapshot, bookmarks, candidates] = await Promise.all([
-        repository.snapshot(revset, true, historyLimit), repository.bookmarks(),
-        search.query ? repository.navigationRevisions(revset) : Promise.resolve([] as Revision[]),
-      ]);
-      const base = refreshedView(snapshot, bookmarks, oldReturn ?? oldView);
-      let view = base;
-      let restoredReturn: NavigationView | null = null;
-      if (oldReturn && previous) {
-        const targets = await repository.navigationRevisions(`present(${previous.changeId})`);
-        const target = targets.find(item => item.commitId === previous.commitId) ?? (targets.length === 1 ? targets[0] : undefined);
-        if (target) {
-          const context = `${target.commitId} | latest(parents(${target.commitId}) | children(${target.commitId}), 39)`;
-          const [nearby, included] = await Promise.all([repository.snapshot(context, true), repository.navigationRevisions(`(${context}) & (${revset})`)]);
-          view = refreshedView(nearby, bookmarks, oldView);
-          const ids = new Set(included.map(item => item.commitId));
-          view.outside = new Set(nearby.revisions.filter(item => !ids.has(item.commitId)).map(item => item.commitId));
-          restoredReturn = base;
-        }
-      }
+      const loaded = await loadHistory(repository, {
+        revset, limit: historyLimit, previous: captureView, keepPosition: true, query: search.query,
+        context: returnPoint && previous ? { returnPoint, revision: previous } : null,
+      });
       // A command or user interaction during the read invalidates this result.
       if (await repository.operationId() !== operation || !valid()) return;
       observedOperation = operation;
       if (refreshError) report("Ready.");
       refreshError = "";
-      const previewTop = preview.scrollTop;
-      const title = previewTitle;
-      const statusView = statusShown();
-      if (search.query) search = { query: search.query, matches: matchingRevisions(candidates, bookmarks, search.query) };
-      returnPoint = restoredReturn;
-      displayView(view);
-      if (statusView) { if (status !== undefined) { ++previewNavigation; previews.show({ target: "main", text: status, title: "Working-copy status", keepScroll: true }, "status"); } }
-      else if (prompt.kind === "files") await followFiles();
-      else if (title !== "Last error" && JSON.stringify(previous) !== JSON.stringify(selected())) await loadPreview();
-      if (valid()) preview.scrollTo(previewTop);
+      showHistory(loaded, true);
+      await followPreview(previous, { keepPane: true, force: false, status });
     } catch (error) {
       const text = errorText(error);
       if (valid() && text !== refreshError) {
@@ -490,10 +411,38 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       }
     } finally { checkingUpdates = false; }
   }
+  // The one place a reload replaces the view, the search and the return point.
+  function showHistory(loaded: LoadedHistory, keepScroll: boolean) {
+    ++searchRequest;
+    clearTimeout(searchTimer);
+    if (loaded.search) search = loaded.search;
+    returnPoint = loaded.returnPoint;
+    displayView(loaded.view, keepScroll);
+  }
+  // After a reload, brings the preview up to date. keepPane keeps a status or error pane and the scroll position.
+  async function followPreview(previous: Revision | undefined, { keepPane, force, status }: { keepPane: boolean; force: boolean; status?: string }) {
+    const previewTop = preview.scrollTop;
+    let read: Promise<void> | undefined;
+    if (keepPane && statusShown()) {
+      if (status === undefined) read = previews.load({ target: "main", title: "Working-copy status", loading: "Loading status…", read: () => repository.status(), errorTitle: "Status error", key: "status" });
+      else { ++previewNavigation; previews.show({ target: "main", text: status, title: "Working-copy status", keepScroll: true }, "status"); }
+    } else if (prompt.kind === "files") read = followFiles();
+    else if (keepPane && previewTitle === "Last error") return;
+    else if (force || JSON.stringify(previous) !== JSON.stringify(selected())) read = loadPreview();
+    const navigation = previewNavigation;
+    await read;
+    if (!keepPane || stopped || navigation !== previewNavigation) return;
+    // New diff content gets its scroll extent during layout, after this read completes.
+    restorePreviewScroll = () => {
+      restorePreviewScroll = undefined;
+      if (!stopped && navigation === previewNavigation) preview.scrollTo(previewTop);
+    };
+    renderer.once("frame", restorePreviewScroll);
+  }
   function captureView(): NavigationView {
     return { snapshot: currentSnapshot, bookmarks: currentBookmarks, index: list.getSelectedIndex(), top: list.scrollTop, outside: outsideFilter };
   }
-  function displayView(view: NavigationView) {
+  function displayView(view: NavigationView, keepScroll = true) {
     currentSnapshot = view.snapshot;
     currentBookmarks = view.bookmarks;
     outsideFilter = view.outside;
@@ -502,7 +451,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     replacing = true;
     list.setSnapshot(currentSnapshot, currentBookmarks);
     list.setSelectedIndex(view.index);
-    list.scrollTop = view.top;
+    if (keepScroll) list.scrollTop = view.top;
     replacing = false;
     updateFilter();
     updateSearchStatus();
@@ -519,16 +468,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   async function navigate(target: Revision, request?: number) {
     let index = revisions.findIndex(item => item.commitId === target.commitId);
     if (index < 0) {
-      const context = `${target.commitId} | latest(parents(${target.commitId}) | children(${target.commitId}), 39)`;
-      const [snapshot, included, bookmarks] = await Promise.all([
-        repository.snapshot(context, true), repository.navigationRevisions(`(${context}) & (${revset})`), repository.bookmarks(),
-      ]);
+      const context = await contextView(repository, target, revset, repository.bookmarks());
       if (stopped || (request !== undefined && request !== searchRequest)) return;
-      index = snapshot.revisions.findIndex(item => item.commitId === target.commitId);
+      index = context.snapshot.revisions.findIndex(item => item.commitId === target.commitId);
       if (index < 0) throw new Error("Target no longer exists. Refresh history.");
       returnPoint ??= captureView();
-      const ids = new Set(included.map(item => item.commitId));
-      displayView({ snapshot, bookmarks, index, top: 0, outside: new Set(snapshot.revisions.filter(item => !ids.has(item.commitId)).map(item => item.commitId)) });
+      displayView({ ...context, index, top: 0 });
     }
     replacing = true;
     list.setSelectedIndex(index);
@@ -555,7 +500,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function beginSearch() {
     void run("Loading search scope…", async () => {
-      const [candidates, bookmarks] = await Promise.all([repository.navigationRevisions(revset), repository.bookmarks()]);
+      const { candidates, bookmarks } = await searchScope(repository, revset);
       if (stopped) return;
       searchCandidates = candidates;
       searchBookmarks = bookmarks;
@@ -825,32 +770,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function applyTheme(theme: Theme) {
     colors = theme;
     setTheme(renderer, theme);
-    app.backgroundColor = colors.bg;
-    suggestions.fg = colors.text;
-    header.fg = navigationStatus.fg = searchStatus.fg = promptLabel.fg = inlineHint.fg = shortcuts.fg = result.fg = colors.accent;
-    filter.fg = message.fg = colors.muted;
-    listBox.backgroundColor = colors.panel;
+    const themed: [object[], (colors: Theme) => object][] = [
+      [[app], c => ({ backgroundColor: c.bg })],
+      [[suggestions], c => ({ fg: c.text })],
+      [[header, navigationStatus, searchStatus, promptLabel, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
+      [[filter, message], c => ({ fg: c.muted })],
+      [[listBox], c => ({ backgroundColor: c.panel })],
+      [[overlayPreview], c => ({ borderColor: c.border })],
+      [[input, descriptionInput, searchInput], fieldColors],
+      [[input, searchInput], c => ({ placeholderColor: c.muted })],
+      [[chooser], chooserColors],
+    ];
+    for (const [widgets, style] of themed) for (const widget of widgets) Object.assign(widget, style(colors));
     paintPanes();
-    overlayPreview.borderColor = colors.border;
-    input.backgroundColor = input.focusedBackgroundColor = colors.panel;
-    input.textColor = input.focusedTextColor = colors.text;
-    input.placeholderColor = colors.muted;
-    descriptionInput.backgroundColor = descriptionInput.focusedBackgroundColor = colors.panel;
-    descriptionInput.textColor = descriptionInput.focusedTextColor = colors.text;
-    searchInput.backgroundColor = searchInput.focusedBackgroundColor = colors.panel;
-    searchInput.textColor = searchInput.focusedTextColor = colors.text;
-    searchInput.placeholderColor = colors.muted;
-    chooser.backgroundColor = chooser.focusedBackgroundColor = colors.panel;
-    chooser.textColor = chooser.focusedTextColor = colors.text;
-    chooser.descriptionColor = colors.muted;
-    chooser.selectedBackgroundColor = colors.selected;
-    chooser.selectedTextColor = chooser.selectedDescriptionColor = colors.selectedText;
-    list.applyTheme();
-    fileList.applyTheme();
-    detail.applyTheme();
-    overlay.applyTheme();
-    overlayText.applyTheme();
-    comparison.applyTheme();
+    for (const widget of [list, fileList, detail, overlay, overlayText, comparison]) widget.applyTheme();
   }
 
   function previewTheme() {
@@ -1305,7 +1238,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const scope = prompt.action.kind === "rebase"
       ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""} · ${bindingLabel("rebaseScope")} toggle`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · j/k destination · / search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · ${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} destination · ${bindingLabel("search")} search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
@@ -1346,120 +1279,138 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // The graph's new height is known once layout runs, so the cap follows on the next frame.
     if (prompt.kind === "files") renderer.once("frame", () => { if (prompt.kind === "files") fileList.setMaxRows(maxFileRows()); });
   }
+  // Arrow keys always move; the bound up/down keys move too.
+  function moveKey(key: KeyEvent): -1 | 0 | 1 {
+    const action = actionForKey(bindings, key, ["down", "up"]);
+    return key.name === "down" || action === "down" ? 1 : key.name === "up" || action === "up" ? -1 : 0;
+  }
+  function scrollPage(key: KeyEvent, pane: ScrollBoxRenderable) {
+    pane.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, pane.height - 3));
+  }
+  type KeyHandlers = { [K in Prompt["kind"]]: (key: KeyEvent, state: Extract<Prompt, { kind: K }>) => void };
+  const keyHandlers: KeyHandlers = {
+    browse: browseKey, files: filesKey, inline: inlineKey, search: searchKey, theme: themeKey, help: helpKey,
+    form: (key, state) => { if (state.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); } },
+    picker: pickerKey, describe: describeKey, confirm: confirmKey, revset: revsetKey, text: dialogKey,
+  };
   function onKey(key: KeyEvent) {
     if (stopped) return;
     ++activity;
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
-    if (prompt.kind === "search") {
-      if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
-      else if (key.name === "return") { key.preventDefault(); void finishSearch(false).catch(error => report(errorText(error), true)); }
-      return;
-    }
-    if (prompt.kind === "theme") {
+    (keyHandlers[prompt.kind] as (key: KeyEvent, state: Prompt) => void)(key, prompt);
+  }
+  function searchKey(key: KeyEvent) {
+    if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
+    else if (key.name === "return") { key.preventDefault(); void finishSearch(false).catch(error => report(errorText(error), true)); }
+  }
+  function themeKey(key: KeyEvent, state: Extract<Prompt, { kind: "theme" }>) {
+    key.preventDefault();
+    if (isBusy()) return;
+    const move = moveKey(key);
+    if (key.name === "escape") {
+      applyTheme(state.original);
+      closePrompt();
+    } else if (move > 0) chooser.moveDown();
+    else if (move < 0) chooser.moveUp();
+    else if (key.name === "return") void keepTheme();
+  }
+  function helpKey(key: KeyEvent) {
+    key.preventDefault();
+    const move = moveKey(key);
+    if (key.name === "escape" || actionForKey(bindings, key) === "help") closePrompt();
+    else if (move) overlayPreview.scrollBy(move);
+    else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
+  }
+  function filesKey(key: KeyEvent) {
+    const action = actionForKey(bindings, key);
+    if (action === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
+    if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
+    if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (action === "focus" || key.name === "return") {
       key.preventDefault();
-      if (isBusy()) return;
-      if (key.name === "escape") {
-        applyTheme(prompt.original);
-        closePrompt();
-      } else if (key.name === "j" || key.name === "down") chooser.moveDown();
-      else if (key.name === "k" || key.name === "up") chooser.moveUp();
-      else if (key.name === "return") void keepTheme();
+      if (key.name === "return" && !preview.visible) setPreviewVisible(true);
+      setFocus(action === "focus" && focus === "preview" ? "list" : "preview");
       return;
     }
-    if (prompt.kind === "help") {
+    if (action === "down" || action === "up") {
       key.preventDefault();
-      if (key.name === "escape" || actionForKey(bindings, key) === "help") closePrompt();
-      else if (key.name === "j" || key.name === "down") overlayPreview.scrollBy(1);
-      else if (key.name === "k" || key.name === "up") overlayPreview.scrollBy(-1);
-      else if (key.name === "pageup" || key.name === "pagedown") overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3));
+      const direction = action === "up" ? -1 : 1;
+      if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
+      else if (direction < 0) fileList.moveUp(); else fileList.moveDown();
       return;
     }
-    if ((prompt.kind === "browse" || prompt.kind === "files") && actionForKey(bindings, key) === "togglePreview") {
+    if (action === "pageUp" || action === "pageDown" || action === "previewHalfUp" || action === "previewHalfDown" || action === "previewUp" || action === "previewDown") {
       key.preventDefault();
-      setPreviewVisible(!preview.visible);
-      return;
+      const direction = action === "pageUp" || action === "previewHalfUp" || action === "previewUp" ? -1 : 1;
+      ++previewNavigation;
+      preview.scrollBy(direction * (action === "previewUp" || action === "previewDown" ? 1 : action === "pageUp" || action === "pageDown" ? Math.max(1, preview.height - 3) : Math.max(1, Math.floor((preview.height - 2) / 2))));
     }
-    if (prompt.kind === "files") {
-      const action = actionForKey(bindings, key);
-      if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
-      if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
-      if (action === "focus" || key.name === "return") {
-        key.preventDefault();
-        if (key.name === "return" && !preview.visible) setPreviewVisible(true);
-        setFocus(action === "focus" && focus === "preview" ? "list" : "preview");
-        return;
-      }
-      if (action === "down" || action === "up") {
-        key.preventDefault();
-        const direction = action === "up" ? -1 : 1;
-        if (focus === "preview") { ++previewNavigation; preview.scrollBy(direction); }
-        else if (direction < 0) fileList.moveUp(); else fileList.moveDown();
-        return;
-      }
-      if (action === "pageUp" || action === "pageDown" || action === "previewHalfUp" || action === "previewHalfDown" || action === "previewUp" || action === "previewDown") {
-        key.preventDefault();
-        const direction = action === "pageUp" || action === "previewHalfUp" || action === "previewUp" ? -1 : 1;
-        ++previewNavigation;
-        preview.scrollBy(direction * (action === "previewUp" || action === "previewDown" ? 1 : action === "pageUp" || action === "pageDown" ? Math.max(1, preview.height - 3) : Math.max(1, Math.floor((preview.height - 2) / 2))));
-      }
-      return;
+  }
+  function inlineKey(key: KeyEvent, state: Extract<Prompt, { kind: "inline" }>) {
+    key.preventDefault();
+    const action = actionForKey(bindings, key, inlineActions);
+    if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
+    if (isBusy()) return;
+    if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
+    else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
+    else if (action === "search") {
+      destination("Choose destination", state.source, target => {
+        resumeInline(state);
+        void run("Loading destination…", async () => { await navigate(target); updateInlineHint(); }, true);
+      }, true);
     }
-    if (prompt.kind === "inline") {
-      key.preventDefault();
-      const action = actionForKey(bindings, key, inlineActions);
-      if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
-      if (isBusy()) return;
-      if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
-      else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
-      else if (key.name === "/" || key.sequence === "/") {
-        const state = prompt;
-        destination("Choose destination", state.source, target => {
-          resumeInline(state);
-          void run("Loading destination…", async () => { await navigate(target); updateInlineHint(); }, true);
-        }, true);
-      }
-      else if (key.name === "j" || key.name === "down") list.moveDown();
-      else if (key.name === "k" || key.name === "up") list.moveUp();
-      else if (key.name === "pageup" || key.name === "pagedown") preview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, preview.height - 3));
-      else if (action === "rebaseScope" && prompt.action.kind === "rebase") {
-        prompt.action.descendants = !prompt.action.descendants;
-        updateInlineHint();
-      } else if (key.name === "return") {
-        const destination = selected();
-        if (!destination || destination.commitId === prompt.source.commitId) { report("Choose a different destination revision.", true); return; }
-        const action: Mutation = prompt.action.kind === "rebase"
-          ? { kind: "rebase", revision: prompt.source, destination, descendants: prompt.action.descendants }
-          : { kind: "squash", revision: prompt.source, destination, files: [], description: destination.description };
-        confirm(action);
-      }
-      return;
+    else if (action === "down") list.moveDown();
+    else if (action === "up") list.moveUp();
+    else if (action === "pageUp" || action === "pageDown") preview.scrollBy((action === "pageUp" ? -1 : 1) * Math.max(1, preview.height - 3));
+    else if (action === "rebaseScope" && state.action.kind === "rebase") {
+      state.action.descendants = !state.action.descendants;
+      updateInlineHint();
+    } else if (key.name === "return") {
+      const destination = selected();
+      if (!destination || destination.commitId === state.source.commitId) { report("Choose a different destination revision.", true); return; }
+      const action: Mutation = state.action.kind === "rebase"
+        ? { kind: "rebase", revision: state.source, destination, descendants: state.action.descendants }
+        : { kind: "squash", revision: state.source, destination, files: [], description: destination.description };
+      confirm(action);
     }
-    if (prompt.kind === "form") {
-      if (prompt.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); }
-      return;
-    }
-    if (prompt.kind !== "browse") {
-      if (!isBusy() && prompt.kind === "picker" && pickerSearch?.handleKey(key)) return;
-      if (isBusy()) { key.preventDefault(); return; }
-      if (prompt.kind === "describe" && prompt.discard && key.name !== "escape") { prompt.discard = false; overlay.report(""); }
-      if (prompt.kind === "describe" && key.name === "escape" && !prompt.discard && descriptionInput.plainText !== prompt.original) { key.preventDefault(); prompt.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
-      else if (key.name === "escape" || (prompt.kind === "picker" && (key.name === "left" || key.name === "h"))) { key.preventDefault(); if (prompt.kind === "confirm" && prompt.back) { prompt.back(); void loadPreview(); } else goBack(); }
-      else if (prompt.kind === "describe" && key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
-      else if (prompt.kind === "describe" && key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
-      else if (prompt.kind !== "describe" && (key.name === "pageup" || key.name === "pagedown")) { key.preventDefault(); overlayPreview.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, overlayPreview.height - 3)); }
-      else if (prompt.kind === "picker") {
-        key.preventDefault();
-        if (isBusy()) return;
-        if (key.name === "j" || key.name === "down") moveChoice(1);
-        else if (key.name === "k" || key.name === "up") moveChoice(-1);
-        else if (key.name === "return") { const choice = prompt.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
-      }
-      else if (prompt.kind === "confirm" && key.name === "p") { key.preventDefault(); confirm(prompt.action); }
-      else if (prompt.kind === "revset" && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
-      else if (key.name === "return") { key.preventDefault(); void submit(); }
-      return;
-    }
+  }
+  /** Keys shared by the overlay dialogs: Esc goes back, PgUp/PgDn scroll the preview, Enter submits. */
+  function dialogKey(key: KeyEvent) {
+    if (isBusy()) { key.preventDefault(); return; }
+    if (key.name === "escape") { key.preventDefault(); goBack(); }
+    else if (key.name === "pageup" || key.name === "pagedown") { key.preventDefault(); scrollPage(key, overlayPreview); }
+    else if (key.name === "return") { key.preventDefault(); void submit(); }
+  }
+  function revsetKey(key: KeyEvent) {
+    if (!isBusy() && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
+    else dialogKey(key);
+  }
+  function confirmKey(key: KeyEvent, state: Extract<Prompt, { kind: "confirm" }>) {
+    if (!isBusy() && key.name === "escape" && state.back) { key.preventDefault(); state.back(); void loadPreview(); }
+    else if (!isBusy() && key.name === "p") { key.preventDefault(); confirm(state.action); }
+    else dialogKey(key);
+  }
+  function pickerKey(key: KeyEvent, state: Extract<Prompt, { kind: "picker" }>) {
+    if (!isBusy() && pickerSearch?.handleKey(key)) return;
+    key.preventDefault();
+    if (isBusy()) return;
+    const move = moveKey(key);
+    if (key.name === "escape" || key.name === "left" || key.name === "h") goBack();
+    else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
+    else if (move) moveChoice(move);
+    else if (key.name === "return") { const choice = state.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
+  }
+  function describeKey(key: KeyEvent, state: Extract<Prompt, { kind: "describe" }>) {
+    if (isBusy()) { key.preventDefault(); return; }
+    if (state.discard && key.name !== "escape") { state.discard = false; overlay.report(""); }
+    if (key.name === "escape" && !state.discard && descriptionInput.plainText !== state.original) { key.preventDefault(); state.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
+    else if (key.name === "escape") { key.preventDefault(); goBack(); }
+    else if (key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
+    else if (key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
+  }
+  function browseKey(key: KeyEvent) {
+    if (actionForKey(bindings, key) === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
     if (key.name === "escape" && previewTitle === "Last error") { key.preventDefault(); void loadPreview(); return; }
     const action = actionForKey(bindings, key);
     if (!action) return;

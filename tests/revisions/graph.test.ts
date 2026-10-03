@@ -3,6 +3,9 @@ import { createTestRenderer } from "@opentui/core/testing";
 import { Repository } from "../../src/repository/repository";
 import { createApp } from "../../src/app";
 import { fixture } from "../fixture";
+import { RevisionLog } from "../../src/revisions/revision-log";
+import type { GraphRow, Revision, Snapshot } from "../../src/repository/model";
+import type { TextRenderable } from "@opentui/core";
 
 async function branchingFixture() {
   const f = await fixture();
@@ -221,4 +224,34 @@ test("partial repaints restore conflicted bookmark badges, drop targets and sour
     expect(screen.captureCharFrame().match(/[●→▶] ○/g)).toEqual(["▶ ○"]);
     expect([rowBg(0), rowBg(1), rowBg(2)]).toEqual([panel, selected, panel]);
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
+});
+
+test("rows outside the viewport are painted when they scroll into view and after a reused refresh", async () => {
+  const screen = await createTestRenderer({ width: 60, height: 20 });
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  const snapshot = (label: string): Snapshot => {
+    const revisions = Array.from({ length: 300 }, (_, i): Revision => ({
+      commitId: i.toString(16).padStart(40, "0"), changeId: `z${"k".repeat(i % 20)}l`, changePrefix: "z",
+      description: `${label} ${i}`, author: "a", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+    }));
+    return { root: "/", revisions, hasMore: false,
+      graph: revisions.flatMap((revision): GraphRow[] => [{ kind: "revision", revision, prefix: "○  " }, { kind: "description", revision, prefix: "│  " }]) };
+  };
+  const text = (row: number) => screen.renderer.root.findDescendantById(`revision-label-${row}`) as TextRenderable;
+  try {
+    log.setSnapshot(snapshot("First"), []);
+    await screen.renderOnce();
+    expect(text(1).plainText).toContain("First 0");
+    log.setSelectedIndex(299);
+    await screen.renderOnce();
+    // Selecting scrolls the revision's heading row into view; the frame after the jump already shows painted rows.
+    expect(text(597).plainText).toContain("First 298");
+    expect(screen.captureCharFrame()).toContain("First 298");
+    log.setSnapshot(snapshot("Second"), []);
+    log.setSelectedIndex(0);
+    await screen.renderOnce();
+    expect(screen.captureCharFrame()).toContain("Second 0");
+    expect(screen.captureCharFrame()).not.toContain("First");
+  } finally { screen.renderer.destroy(); }
 });

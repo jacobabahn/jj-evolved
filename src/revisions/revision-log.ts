@@ -2,10 +2,12 @@ import { getTheme } from "../ui/theme";
 import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
-import { shortChangeId, type Bookmark, type Revision, type Snapshot } from "../repository/model";
+import { shortChangeId, type Bookmark, type GraphRow, type Revision, type Snapshot } from "../repository/model";
 
 
-type Row = { node: BoxRenderable; label: TextRenderable; badges: TextRenderable[]; bookmarkPreview: TextRenderable | null; revisionIndex: number | null; heading: boolean; text: StyledText; dragText: StyledText };
+// Rows are pooled across snapshots: a refresh updates them in place and recreates only badges and conflict markers.
+// Setting row text is the expensive part, so only rows near the viewport are painted; the rest paint as they scroll in.
+type Row = { position: number; node: BoxRenderable; label: TextRenderable; bookmarkPreview: TextRenderable | null; badges: TextRenderable[]; extras: Renderable[]; revisionIndex: number | null; heading: boolean; graph: GraphRow | null; text: { plain: StyledText; drag: StyledText } | null };
 type BookmarkSource = { bookmark: Bookmark; revision: Revision };
 type DragSource = ({ action: "bookmark" } & BookmarkSource) | { action: "rebase"; revision: Revision };
 type Drag = DragSource & { kind: "pressed" | "dragging" };
@@ -33,6 +35,7 @@ export class RevisionLog extends ScrollBoxRenderable {
   private sourceIndex: number | null = null;
   private movingCommits: ReadonlySet<string> = new Set();
   private rows: Row[] = [];
+  private stale = new Set<Row>();
   private revisionRows: Row[][] = [];
   private revisionIndexes = new Map<string, number>();
   private bookmarkSources = new Map<Renderable, BookmarkSource>();
@@ -61,8 +64,8 @@ export class RevisionLog extends ScrollBoxRenderable {
   setSnapshot(snapshot: Snapshot, bookmarks: Bookmark[]) {
     this.snapshot = { data: snapshot, bookmarks };
     this.cancelDrag();
-    for (const row of this.rows) row.node.destroyRecursively();
-    this.rows = [];
+    const theme = getTheme(this.ctx);
+    for (const row of this.rows.splice(snapshot.graph.length)) { this.stale.delete(row); row.node.destroyRecursively(); }
     this.revisionRows = snapshot.revisions.map(() => []);
     this.revisionIndexes = new Map(snapshot.revisions.map((revision, index) => [revision.commitId, index]));
     this.bookmarkSources.clear();
@@ -70,59 +73,57 @@ export class RevisionLog extends ScrollBoxRenderable {
     this.revisions = snapshot.revisions;
     for (const [rowIndex, row] of snapshot.graph.entries()) {
       const revision = row.kind === "edge" ? null : row.revision;
-      const revisionIndex = revision ? snapshot.revisions.indexOf(revision) : null;
+      const revisionIndex = revision ? this.revisionIndexes.get(revision.commitId) ?? null : null;
       const heading = row.kind === "revision";
-      const chunks = graphChunks(row.kind === "edge" ? row.text : row.prefix, getTheme(this.ctx));
-      if (row.kind === "revision") chunks.push(...changeIdChunks(shortChangeId(row.revision), row.revision.changePrefix, getTheme(this.ctx)));
-      else if (row.kind === "description") chunks.push(fg(getTheme(this.ctx).text)(terminalText(row.revision.description.split("\n")[0] || "(no description)")));
-      const text = new StyledText(chunks);
-      const dragText = row.kind === "revision"
-        ? new StyledText([...graphChunks(row.prefix, getTheme(this.ctx)), bg(getTheme(this.ctx).selected)(bold(fg(getTheme(this.ctx).selectedText)(shortChangeId(row.revision))))])
-        : text;
-      const node = new BoxRenderable(this.ctx, {
-        id: `revision-row-${rowIndex}`, height: 1, width: "100%", flexShrink: 0,
-        flexDirection: "row", overflow: "hidden",
-        onMouseDown: event => {
-          if (event.button === 0 && this.mouseSelectionEnabled && revisionIndex !== null &&
-            (!event.target || !this.bookmarkSources.has(event.target))) this.setSelectedIndex(revisionIndex);
-        },
-      });
-      const label = new TextRenderable(this.ctx, {
-        id: `revision-label-${rowIndex}`, height: 1, flexShrink: heading ? 0 : 1,
-        wrapMode: "none", truncate: true, selectable: false, content: text,
-      });
-      node.add(label);
-      if (revision) this.revisionSources.set(label, revision);
-      const badges: TextRenderable[] = [];
-      let bookmarkPreview: TextRenderable | null = null;
+      const painted = this.rows[rowIndex] ?? this.createRow(rowIndex);
+      for (const extra of painted.extras) extra.destroyRecursively();
+      Object.assign(painted, { revisionIndex, heading, graph: row, text: null, badges: [], extras: [] });
+      painted.label.flexShrink = heading ? 0 : 1;
+      if (painted.bookmarkPreview) painted.bookmarkPreview.fg = theme.bookmark;
+      if (revision) this.revisionSources.set(painted.label, revision);
       if (heading && revision) {
-        bookmarkPreview = new TextRenderable(this.ctx, {
-          id: `bookmark-preview-${rowIndex}`, height: 1, marginLeft: 1, flexShrink: 0,
-          selectable: false, wrapMode: "none", visible: false, opacity: 0.5,
-          fg: getTheme(this.ctx).bookmark,
-        });
-        node.add(bookmarkPreview);
         for (const [index, bookmark] of bookmarks.filter(item => item.targets.includes(revision.commitId)).entries()) {
           const badge = new TextRenderable(this.ctx, {
             id: `bookmark-${rowIndex}-${index}`, height: 1, marginLeft: 1, flexShrink: 0, selectable: false, wrapMode: "none",
             content: terminalText(`[${bookmark.name}${bookmark.remote ? `@${bookmark.remote}` : ""}${bookmark.conflict ? "!" : ""}]`),
           });
-          node.add(badge);
-          badges.push(badge);
+          painted.node.add(badge);
+          painted.badges.push(badge);
+          painted.extras.push(badge);
           if (!bookmark.remote) this.bookmarkSources.set(badge, { bookmark, revision });
         }
-        if (revision.conflict) node.add(new TextRenderable(this.ctx, {
-          height: 1, flexShrink: 0, selectable: false, content: " ! conflict", fg: getTheme(this.ctx).conflict,
-        }));
+        if (revision.conflict) {
+          const marker = new TextRenderable(this.ctx, { height: 1, flexShrink: 0, selectable: false, content: " ! conflict", fg: theme.conflict });
+          painted.node.add(marker);
+          painted.extras.push(marker);
+        }
       }
-      this.add(node);
-      const painted: Row = { node, label, badges, bookmarkPreview, revisionIndex, heading, text, dragText };
-      this.rows.push(painted);
       if (revisionIndex !== null) this.revisionRows[revisionIndex]?.push(painted);
     }
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.revisions.length - 1));
     this.paintSelection();
     if (this.expansion) this.placeExpansion();
+  }
+
+  private createRow(rowIndex: number): Row {
+    const row: Row = {
+      position: rowIndex,
+      node: new BoxRenderable(this.ctx, {
+        id: `revision-row-${rowIndex}`, height: 1, width: "100%", flexShrink: 0,
+        flexDirection: "row", overflow: "hidden",
+        onMouseDown: event => {
+          if (event.button === 0 && this.mouseSelectionEnabled && row.revisionIndex !== null &&
+            (!event.target || !this.bookmarkSources.has(event.target))) this.setSelectedIndex(row.revisionIndex);
+        },
+      }),
+      label: new TextRenderable(this.ctx, { id: `revision-label-${rowIndex}`, height: 1, wrapMode: "none", truncate: true, selectable: false }),
+      bookmarkPreview: null,
+      badges: [], extras: [], revisionIndex: null, heading: false, graph: null, text: null,
+    };
+    row.node.add(row.label);
+    this.add(row.node);
+    this.rows.push(row);
+    return row;
   }
 
   // Shows a renderable beneath a revision's rows, in the graph, until collapsed; false when the revision is not loaded.
@@ -243,7 +244,40 @@ export class RevisionLog extends ScrollBoxRenderable {
     for (const index of new Set(indexes)) if (index !== null && index !== undefined) for (const row of this.revisionRows[index] ?? []) this.paintRow(row);
   }
 
+  private rowText(row: Row) {
+    if (row.text || !row.graph) return row.text ?? { plain: new StyledText([]), drag: new StyledText([]) };
+    const graph = row.graph, theme = getTheme(this.ctx);
+    const chunks = graphChunks(graph.kind === "edge" ? graph.text : graph.prefix, theme);
+    if (graph.kind === "revision") chunks.push(...changeIdChunks(shortChangeId(graph.revision), graph.revision.changePrefix, theme));
+    else if (graph.kind === "description") chunks.push(fg(theme.text)(terminalText(graph.revision.description.split("\n")[0] || "(no description)")));
+    const plain = new StyledText(chunks);
+    const drag = graph.kind === "revision"
+      ? new StyledText([...graphChunks(graph.prefix, theme), bg(theme.selected)(bold(fg(theme.selectedText)(shortChangeId(graph.revision))))])
+      : plain;
+    return row.text = { plain, drag };
+  }
+
+  // An expansion above a row pushes it down by the expansion's height, so the upper bound allows for it.
+  private nearViewport(row: Row) {
+    const overscan = 10, height = this.viewport.height || 60;
+    const expansion = this.expansion?.child.height ?? 0;
+    return row.position >= this.scrollTop - expansion - overscan && row.position < this.scrollTop + height + overscan;
+  }
+
+  // Runs before layout each frame, so rows scrolled into view by input are painted in the same frame.
+  override onLifecyclePass = () => this.paintStale();
+  // Scrolling applied during the frame (scroll acceleration) is caught up here.
+  protected override onUpdate(deltaTime: number) {
+    super.onUpdate(deltaTime);
+    this.paintStale();
+  }
+  private paintStale() {
+    for (const row of this.stale) if (this.nearViewport(row)) this.paintRow(row);
+  }
+
   private paintRow(row: Row) {
+    if (!this.nearViewport(row)) { this.stale.add(row); return; }
+    this.stale.delete(row);
     // An expanded revision yields the highlight to its file list and marks itself open instead.
     const expanded = row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.expansion?.commitId;
     const selected = row.revisionIndex === this.selectedIndex && !expanded;
@@ -256,19 +290,26 @@ export class RevisionLog extends ScrollBoxRenderable {
     const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
     const match = this.searchMatches.has(id);
     const outside = this.outsideFilter.has(id);
-    row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : expanded && row.heading ? "▾ " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? row.dragText : row.text).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
+    row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : expanded && row.heading ? "▾ " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? this.rowText(row).drag : this.rowText(row).plain).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
     row.node.backgroundColor = background;
     row.label.bg = background;
+    const bookmark = row.heading && drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
+      ? this.drag.bookmark : null;
+    if (bookmark && !row.bookmarkPreview) {
+      row.bookmarkPreview = new TextRenderable(this.ctx, {
+        id: `bookmark-preview-${row.position}`, height: 1, marginLeft: 1, flexShrink: 0,
+        selectable: false, wrapMode: "none", opacity: 0.5, fg: getTheme(this.ctx).bookmark,
+      });
+      row.node.add(row.bookmarkPreview, 1);
+    }
     if (row.bookmarkPreview) {
-      const bookmark = drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
-        ? this.drag.bookmark : null;
       row.bookmarkPreview.visible = bookmark !== null;
       row.bookmarkPreview.content = bookmark ? terminalText(`[${bookmark.name}${bookmark.conflict ? "!" : ""}]`) : "";
       row.bookmarkPreview.bg = background;
     }
     for (const badge of row.badges) {
-      const bookmark = this.bookmarkSources.get(badge)?.bookmark;
-      badge.bg = this.drag?.kind === "dragging" && this.drag.action === "bookmark" && bookmark === this.drag.bookmark ? getTheme(this.ctx).drop : background;
+      const source = this.bookmarkSources.get(badge)?.bookmark;
+      badge.bg = this.drag?.kind === "dragging" && this.drag.action === "bookmark" && source === this.drag.bookmark ? getTheme(this.ctx).drop : background;
       badge.fg = getTheme(this.ctx).bookmark;
     }
   }

@@ -151,22 +151,23 @@ export class Repository {
     return tuples(output).map(([path, status]) => ({ path: string(path), status: string(status) }));
   }
 
+  /** Callers snapshot the working copy first, so these reads can skip it. */
+  private async assertCurrent(revisions: Revision[], operationId = "@") {
+    const visible = await Promise.all(revisions.map(revision => logRevisions(this.root, `present(${revision.changeId})`, operationId)));
+    if (revisions.some((revision, index) => !visible[index]!.some(current => current.commitId === revision.commitId))) {
+      throw new Error("The selected revision has changed. Refresh and select it again.");
+    }
+  }
+
   async interactive(action: InteractiveAction): Promise<void> {
     await this.status();
-    const targets = action.kind === "squash" ? [action.revision, action.destination] : [action.revision];
-    for (const revision of targets) {
-      if (!(await this.snapshot(`present(${revision.changeId})`)).revisions.some(current => current.commitId === revision.commitId)) {
-        throw new Error("The selected revision has changed. Refresh and select it again.");
-      }
-    }
+    await this.assertCurrent(action.kind === "squash" ? [action.revision, action.destination] : [action.revision]);
     await runInteractive(this.root, action);
   }
 
   async editDescription(revision: Revision): Promise<void> {
     await this.status();
-    if (!(await this.snapshot(`present(${revision.changeId})`)).revisions.some(current => current.commitId === revision.commitId)) {
-      throw new Error("The selected revision has changed. Refresh and select it again.");
-    }
+    await this.assertCurrent([revision]);
     await editDescription(this.root, revision);
   }
 
@@ -179,12 +180,7 @@ export class Repository {
     const operationId = await this.operationId();
     const targets = "revision" in action ? [action.revision] : action.kind === "new" ? [action.parent] : [];
     if ("destination" in action) targets.push(action.destination);
-    for (const revision of targets) {
-      const visible = await this.snapshot(`present(${revision.changeId})`);
-      if (!visible.revisions.some(current => current.commitId === revision.commitId)) {
-        throw new Error("The selected revision has changed. Refresh and select it again.");
-      }
-    }
+    await this.assertCurrent(targets, operationId);
     let summary: string;
     let remoteUrl: string | undefined;
     let rebasing: Revision[] = [];
@@ -209,8 +205,8 @@ export class Repository {
           rebasing = await this.rebaseScope(action.revision, operationId);
           summary += `\n${rebaseScopeSummary(rebasing)}\n\nTrees show up to 40 revisions; the list above includes the full rebase scope.`;
         } else {
-          const affected = await this.snapshot(`${action.revision.commitId}::`);
-          summary += `\nAffected revision/descendant context (up to 200):\n${affected.revisions.map(label).join("\n")}`;
+          const affected = await logRevisions(this.root, `${action.revision.commitId}::`, operationId, 200);
+          summary += `\nAffected revision/descendant context (up to 200):\n${affected.map(label).join("\n")}`;
         }
         summary += "\n\nDescendants may be rewritten and conflicts may result.";
         break;
