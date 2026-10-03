@@ -305,18 +305,18 @@ test("expanded files follow a rewritten change, keep the selected file, and coll
   try {
     await t.app.checkForUpdates();
     t.screen.mockInput.pressKey("l");
-    await t.text("▶ M hello.txt");
+    await t.text("┃ M hello.txt");
     await Bun.write(`${t.f.path}/aaa.txt`, "late\n");
     await t.app.checkForUpdates();
     await t.text("A aaa.txt");
-    expect(t.screen.captureCharFrame()).toContain("▶ M hello.txt");
+    expect(t.screen.captureCharFrame()).toContain("┃ M hello.txt");
     expect(t.screen.captureCharFrame()).toContain("Revisions · files of");
     t.screen.mockInput.pressKey("h");
     await t.text("Change preview");
     t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressKey("l");
     await t.text("▾ ○");
-    await t.text("▶ A hello.txt");
+    await t.text("┃ A hello.txt");
     await t.f.jj("abandon", "feature");
     await t.app.checkForUpdates();
     await t.text("Collapsed changed files: the change left the graph.");

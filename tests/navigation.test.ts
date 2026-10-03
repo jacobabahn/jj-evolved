@@ -71,7 +71,7 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await t.search("FEATURE");
     const searching = await t.until("1/1");
     expect(searching).toContain("Enter keep  Esc cancel");
-    expect(searching).toContain("*▶");
+    expect(searching).toContain("┃*");
     expect(t.list().getSelectedIndex()).not.toBe(original);
     t.screen.mockInput.pressEscape();
     await Bun.sleep(80);
@@ -294,12 +294,12 @@ test("selection moves repaint only the affected rows and keep search markers", a
     await t.screen.renderOnce();
     const frame = t.screen.captureCharFrame();
     expect([...painted].sort()).toEqual([0, 1]);
-    expect(frame.split("▶")).toHaveLength(2);
-    expect(frame).toContain("*  ");
-    expect(frame).not.toContain("*▶");
+    expect(frame.split("┃")).toHaveLength(3);
+    expect(frame).toContain(" *");
+    expect(frame).not.toContain("┃*");
     painted.clear();
     t.screen.mockInput.pressKey("j");
     expect([...painted].sort()).toEqual([0, 1]);
-    expect(await t.until("*▶")).toContain("1/1");
+    expect(await t.until("┃*")).toContain("1/1");
   } finally { await t.cleanup(); }
 }, 15_000);

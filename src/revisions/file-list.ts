@@ -1,4 +1,4 @@
-import { getTheme, type Theme } from "../ui/theme";
+import { cursorBar, getTheme, hasSelectionBand, type Theme } from "../ui/theme";
 import { graphChunks } from "../ui/jj-highlighting";
 import { ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, type RenderContext } from "@opentui/core";
 import { terminalText } from "../terminal-text";
@@ -65,7 +65,8 @@ export class FileList extends ScrollBoxRenderable {
       const selected = index === this.selectedIndex;
       const status = statuses[file.status];
       const letter = status?.letter ?? (file.status[0]?.toUpperCase() || "?");
-      row.content = new StyledText([...graphChunks(this.prefix, theme), bold(fg(theme.text)(selected ? "▶ " : "  ")), bold(fg(theme[status?.color ?? "commit"])(letter)), fg(theme.text)(terminalText(` ${file.path}`))]);
+      const path = fg(theme.text)(terminalText(` ${file.path}`));
+      row.content = new StyledText([...graphChunks(this.prefix, theme), bold(fg(theme.accent)(selected ? `${cursorBar(theme)} ` : "  ")), bold(fg(theme[status?.color ?? "commit"])(letter)), selected && !hasSelectionBand(theme) ? bold(path) : path]);
       row.bg = selected ? theme.graphSelected : theme.panel;
     }
   }

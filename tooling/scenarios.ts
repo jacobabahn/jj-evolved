@@ -281,7 +281,7 @@ export const scenarios: Scenario[] = [
       assert(ui.screen.captureCharFrame().includes("+ hello from the files pane"));
       assert(!ui.screen.captureCharFrame().includes("A notes.md"));
       assert.equal(ui.screen.renderer.root.findDescendantById("changed-files"), undefined);
-      assert(ui.screen.captureCharFrame().includes("▶ @  "));
+      assert(ui.screen.captureCharFrame().includes("▌ @  "));
       await ui.capture("h collapses the files and restores the full diff");
     },
   },

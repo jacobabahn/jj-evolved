@@ -1,4 +1,4 @@
-import { getTheme } from "../ui/theme";
+import { cursorBar, getTheme, hasSelectionBand } from "../ui/theme";
 import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
@@ -290,7 +290,16 @@ export class RevisionLog extends ScrollBoxRenderable {
     const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
     const match = this.searchMatches.has(id);
     const outside = this.outsideFilter.has(id);
-    row.label.content = new StyledText([...(row.heading && (match || outside) ? [bold(fg(getTheme(this.ctx).accent)(`${match ? "*" : ""}${outside ? "+" : ""}`))] : []), bold(fg(source ? getTheme(this.ctx).accent : getTheme(this.ctx).text)(drop && row.heading ? "→ " : source ? "● " : expanded && row.heading ? "▾ " : selected && row.heading ? "▶ " : "  ")), ...(draggingSource ? this.rowText(row).drag : this.rowText(row).plain).chunks.map(chunk => match ? bg(getTheme(this.ctx).selected)(chunk) : chunk)]);
+    const theme = getTheme(this.ctx);
+    // Two-column gutter: the cursor bar (or source/drop/expanded marker) at the edge, then the search or filter marker.
+    const indicator = drop && row.heading ? fg(theme.text)("→") : source ? fg(theme.accent)("●") : expanded && row.heading ? fg(theme.text)("▾") : selected ? fg(theme.accent)(cursorBar(theme)) : " ";
+    const marker = row.heading && outside ? "+" : row.heading && match ? "*" : " ";
+    // Without a band, bold the description (the last chunk) so the change ID keeps its prefix emphasis.
+    const emphasize = selected && !row.heading && !hasSelectionBand(theme);
+    const chunks = (draggingSource ? this.rowText(row).drag : this.rowText(row).plain).chunks
+      .map((chunk, index, all) => emphasize && index === all.length - 1 ? bold(chunk) : chunk)
+      .map(chunk => match ? bg(theme.selected)(chunk) : chunk);
+    row.label.content = new StyledText([bold(indicator), bold(fg(theme.accent)(marker)), ...chunks]);
     row.node.backgroundColor = background;
     row.label.bg = background;
     const bookmark = row.heading && drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
