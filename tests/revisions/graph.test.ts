@@ -77,10 +77,10 @@ test("selected revisions remain visible while scrolling through a long graph", a
     await screen.renderOnce();
     for (let index = 0; index < snapshot.revisions.length - 1; index++) screen.mockInput.pressKey("j");
     await screen.renderOnce();
-    expect(screen.captureCharFrame()).toContain("▶ ◆  zzzzzzzz");
+    expect(screen.captureCharFrame()).toContain("┃ ◆  zzzzzzzz");
     for (let index = 0; index < snapshot.revisions.length - 1; index++) screen.mockInput.pressKey("k");
     await screen.renderOnce();
-    expect(screen.captureCharFrame()).toContain("▶ @");
+    expect(screen.captureCharFrame()).toContain("┃ @");
   } finally { app.stop(); screen.renderer.destroy(); await f.cleanup(); }
 });
 
@@ -118,7 +118,7 @@ test("JJ markings retain distinct colors when selected and marked as an action s
       expect(workingCopy.fg).not.toEqual(id.fg);
       expect(token("│").fg).not.toEqual(workingCopy.fg);
       expect(id.bg).toEqual(bookmark.bg);
-      expect(screen.captureCharFrame()).toContain(source === null ? "▶ @" : "● @");
+      expect(screen.captureCharFrame()).toContain(source === null ? "┃ @" : "● @");
     }
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
 });
@@ -218,10 +218,10 @@ test("partial repaints restore conflicted bookmark badges, drop targets and sour
     await screen.mockMouse.release(node("revision-label-0").x + 5, node("revision-label-0").y);
     log.markSource(2, new Set(["b".repeat(40)]));
     await screen.waitForVisualIdle();
-    expect(screen.captureCharFrame().match(/[●→▶] ○/g)).toEqual(["● ○", "● ○"]);
+    expect(screen.captureCharFrame().match(/[●→▌] ○/g)).toEqual(["● ○", "● ○"]);
     log.markSource(null);
     await screen.waitForVisualIdle();
-    expect(screen.captureCharFrame().match(/[●→▶] ○/g)).toEqual(["▶ ○"]);
+    expect(screen.captureCharFrame().match(/[●→▌] ○/g)).toEqual(["▌ ○"]);
     expect([rowBg(0), rowBg(1), rowBg(2)]).toEqual([panel, selected, panel]);
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
 });

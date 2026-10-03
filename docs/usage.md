@@ -6,7 +6,7 @@ Detailed controls and workflows for [jj-evolved](../README.md). Press `?` in the
 
 Press `t` to open the theme picker. Use `j`/`k` or the arrow keys to preview each theme across the app. Enter saves your choice; Escape restores the previous theme.
 
-Available themes are Terminal, Dark, Light, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, and Vesper. The default Terminal theme inherits your terminal's foreground, background, and ANSI palette. It marks the selected revision with an arrow and diff additions and deletions with colored signs, preserving the terminal background.
+Available themes are Terminal, Dark, Light, Gruvbox Dark, Tokyo Night, Catppuccin Mocha, and Vesper. The default Terminal theme inherits your terminal's foreground, background, and ANSI palette. It marks the selected revision with a thin bar and bold description, and diff additions and deletions with colored signs, preserving the terminal background.
 
 Your selection is saved in `$XDG_CONFIG_HOME/jj-evolved/theme`, or `~/.config/jj-evolved/theme` when that variable is unset. It applies across repositories and to `bun run demo`.
 

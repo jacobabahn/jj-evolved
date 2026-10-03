@@ -1,4 +1,4 @@
-import { RGBA, hexToRgb, type ColorInput, type RenderContext, type TerminalColors } from "@opentui/core";
+import { RGBA, hexToRgb, parseColor, type ColorInput, type RenderContext, type TerminalColors } from "@opentui/core";
 
 export const darkTheme = {
   bg: "#101820", panel: "#15212c", text: "#d6e2eb", muted: "#91a6b7",
@@ -80,6 +80,15 @@ export function parseThemeName(value: string): ThemeName {
       case "tokyonight": case "catppuccin": case "vesper": return value;
   }
   throw new Error(`Unknown theme "${value}". Choose ${Object.keys(themes).join(", ")}.`);
+}
+
+// Themes that select with the panel colour (Terminal) have no selection band, so the cursor bar is lighter and the text bolds instead.
+export function hasSelectionBand(theme: Theme) {
+  return !parseColor(theme.graphSelected).equals(parseColor(theme.panel));
+}
+
+export function cursorBar(theme: Theme) {
+  return hasSelectionBand(theme) ? "▌" : "┃";
 }
 
 const contextThemes = new WeakMap<RenderContext, { selected: Theme; resolved: Theme }>();

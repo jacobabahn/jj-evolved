@@ -1590,7 +1590,7 @@ test("files expand beneath the revision in the graph, preview one file at a time
     expect(String(listBox.title)).toBe(" Revisions ");
     expect(t.screen.renderer.root.findDescendantById("changed-files")).toBeUndefined();
     expect(t.screen.captureCharFrame()).not.toContain("A added.txt");
-    expect(t.screen.captureCharFrame()).toContain(`▶ @  ${working.changeId.slice(0, 8)}`);
+    expect(t.screen.captureCharFrame()).toContain(`┃ @  ${working.changeId.slice(0, 8)}`);
     expect(t.screen.captureCharFrame()).toContain("- hello from jj-evolved");
   } finally { await t.cleanup(); }
 }, 15_000);
@@ -1663,7 +1663,7 @@ test("a large change scrolls within a height cap that follows resizes, and reope
     await t.until("── f00.txt ──");
     await t.screen.renderOnce();
     expect(files.scrollTop).toBe(0);
-    expect(t.screen.captureCharFrame()).toContain("▶ A f00.txt");
+    expect(t.screen.captureCharFrame()).toContain("┃ A f00.txt");
   } finally { await t.cleanup(); }
 }, 20_000);
 

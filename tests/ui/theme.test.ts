@@ -91,7 +91,7 @@ test("the theme picker previews, cancels and saves without changing the selected
     screen.mockInput.pressKey("j");
     await screen.waitForVisualIdle();
     const log = screen.renderer.root.findDescendantById("revisions");
-    const before = screen.captureCharFrame().split("\n").find(line => line.includes("▶"));
+    const before = screen.captureCharFrame().split("\n").find(line => line.includes("┃"));
     const root = screen.renderer.root.findDescendantById("app");
     if (!(root instanceof BoxRenderable)) throw new Error("Missing app");
     screen.mockInput.pressKey("t");
@@ -120,7 +120,7 @@ test("the theme picker previews, cancels and saves without changing the selected
     screen.mockInput.pressEscape();
     await screen.waitForVisualIdle();
     expect(getTheme(screen.renderer)).toBe(themes.terminal);
-    expect(screen.captureCharFrame().split("\n").find(line => line.includes("▶"))).toBe(before);
+    expect(screen.captureCharFrame().split("\n").find(line => line.includes("┃"))).toBe(before);
     expect(saved).toEqual([]);
     screen.mockInput.pressKey("t");
     for (let i = 0; i < themeNames.indexOf("gruvbox"); i++) screen.mockInput.pressKey("j");
