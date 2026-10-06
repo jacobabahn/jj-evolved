@@ -259,9 +259,12 @@ export class RevisionLog extends ScrollBoxRenderable {
 
   // An expansion above a row pushes it down by the expansion's height, so the upper bound allows for it.
   private nearViewport(row: Row) {
-    const overscan = 10, height = this.viewport.height || 60;
+    // Before the first layout the viewport has no height; the terminal's is the most it can be.
+    const overscan = 10, height = this.viewport.height || this.ctx.height;
     const expansion = this.expansion?.child.height ?? 0;
-    return row.position >= this.scrollTop - expansion - overscan && row.position < this.scrollTop + height + overscan;
+    // Layout pulls a scroll position past the end of a shorter snapshot back in, so paint where it will land.
+    const top = Math.min(this.scrollTop, Math.max(0, this.rows.length + expansion - height));
+    return row.position >= top - expansion - overscan && row.position < top + height + overscan;
   }
 
   // Runs before layout each frame, so rows scrolled into view by input are painted in the same frame.

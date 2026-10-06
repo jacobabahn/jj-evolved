@@ -255,3 +255,45 @@ test("rows outside the viewport are painted when they scroll into view and after
     expect(screen.captureCharFrame()).not.toContain("First");
   } finally { screen.renderer.destroy(); }
 });
+
+const blankRows = (frame: string, height: number) => frame.split("\n").slice(0, height).filter(line => !line.trim()).length;
+function longSnapshot(label: string, count: number): Snapshot {
+  const revisions = Array.from({ length: count }, (_, i): Revision => ({
+    commitId: i.toString(16).padStart(40, "0"), changeId: `z${"k".repeat(i % 20)}l`, changePrefix: "z",
+    description: `${label} ${i}`, author: "a", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+  }));
+  return { root: "/", revisions, hasMore: false,
+    graph: revisions.flatMap((revision): GraphRow[] => [{ kind: "revision", revision, prefix: "○  " }, { kind: "description", revision, prefix: "│  " }]) };
+}
+
+test("the first frame fills a terminal taller than the default paint window", async () => {
+  const screen = await createTestRenderer({ width: 60, height: 100 });
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  try {
+    log.setSnapshot(longSnapshot("First", 400), []);
+    await screen.renderOnce();
+    expect(blankRows(screen.captureCharFrame(), 100)).toBe(0);
+  } finally { screen.renderer.destroy(); }
+});
+
+test("a snapshot shorter than the scroll position is painted in its first frame", async () => {
+  const screen = await createTestRenderer({ width: 60, height: 20 });
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  try {
+    log.setSnapshot(longSnapshot("First", 400), []);
+    await screen.renderOnce();
+    log.scrollBy(700);
+    await screen.renderOnce();
+    const top = log.scrollTop;
+    log.setSnapshot(longSnapshot("Second", 150), []);
+    log.setSelectedIndex(149);
+    log.scrollTop = top;
+    await screen.renderOnce();
+    const frame = screen.captureCharFrame();
+    expect(blankRows(frame, 20)).toBe(0);
+    expect(frame).toContain("Second 149");
+    expect(frame).not.toContain("First");
+  } finally { screen.renderer.destroy(); }
+});
