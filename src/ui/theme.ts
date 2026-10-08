@@ -82,7 +82,8 @@ export function parseThemeName(value: string): ThemeName {
   throw new Error(`Unknown theme "${value}". Choose ${Object.keys(themes).join(", ")}.`);
 }
 
-// Themes that select with the panel colour (Terminal) have no selection band, so the cursor bar is lighter and the text bolds instead.
+// A theme that selects with the panel colour (Terminal, until the terminal reports its colors) has no selection band,
+// so the cursor bar is lighter and the text bolds instead.
 export function hasSelectionBand(theme: Theme) {
   return !parseColor(theme.graphSelected).equals(parseColor(theme.panel));
 }
@@ -94,12 +95,16 @@ export function cursorBar(theme: Theme) {
 const contextThemes = new WeakMap<RenderContext, { selected: Theme; resolved: Theme }>();
 const contextTerminalColors = new WeakMap<RenderContext, TerminalColors>();
 
-// The terminal palette has no faint shades, so diff line tints mix the terminal's reported background toward
-// its own green and red. A terminal that does not report its colors keeps untinted lines beside the gutter.
+// The terminal palette has no faint shades, so the selection band mixes the terminal's reported background toward
+// its foreground, and diff line tints toward its green and red. A terminal that does not report its colors keeps
+// the thin cursor bar and untinted lines beside the gutter.
 function withTerminalTints(theme: Theme, colors: TerminalColors | undefined): Theme {
-  const background = colors?.defaultBackground, red = colors?.palette[1], green = colors?.palette[2];
-  if (theme !== themes.terminal || !background || !red || !green) return theme;
-  return { ...theme, addedBg: mix(background, green, 0.2), removedBg: mix(background, red, 0.2) };
+  const background = colors?.defaultBackground, foreground = colors?.defaultForeground;
+  const red = colors?.palette[1], green = colors?.palette[2];
+  if (theme !== themes.terminal || !background) return theme;
+  const band = foreground ? { graphSelected: mix(background, foreground, 0.15) } : {};
+  const tints = red && green ? { addedBg: mix(background, green, 0.2), removedBg: mix(background, red, 0.2) } : {};
+  return foreground || (red && green) ? { ...theme, ...band, ...tints } : theme;
 }
 
 function mix(from: string, to: string, amount: number) {
