@@ -1764,3 +1764,45 @@ test("refreshing an unchanged repository repaints no cells", async () => {
     }
   } finally { snapshot.mockRestore(); await t.cleanup(); }
 }, 15_000);
+
+test("g then p names a bookmark on the selected change, then tracks and pushes it after one review", async () => {
+  const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
+  try {
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    const revision = (await t.repo.snapshot("@")).revisions[0]!;
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Push this change");
+    expect(t.screen.captureCharFrame()).toContain("Fetch origin");
+    t.screen.mockInput.pressKey("p");
+    await t.until("Bookmark to push to origin");
+    await t.screen.mockInput.typeText("published");
+    t.screen.mockInput.pressEnter();
+    await t.overlayReady("Review before applying");
+    const frame = t.screen.captureCharFrame();
+    expect(frame).toContain("Bookmark: published (create)");
+    expect(frame).toContain("Tracking: start tracking published@origin");
+    expect((await t.repo.bookmarks()).some(item => item.name === "published")).toBe(false);
+    t.screen.mockInput.pressEnter();
+    await t.until("git-publish completed");
+    const bookmarks = await t.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "published" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [revision.commitId] });
+    const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/published"], { stdout: "pipe" });
+    expect((await new Response(pushed.stdout).text()).trim()).toBe(revision.commitId);
+    // The bookmark now on the change is named in the menu and offered in the prompt, so publishing again is g p Enter Enter.
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Push published");
+    t.screen.mockInput.pressEscape();
+    await Bun.sleep(50);
+    t.screen.mockInput.pressKey(" ");
+    await t.until("Actions");
+    t.choose("Publish change");
+    await t.until("Bookmark to push to origin");
+    const input = t.screen.renderer.root.findDescendantById("prompt-input");
+    expect(input instanceof InputRenderable && input.value).toBe("published");
+  } finally {
+    await t.cleanup();
+    await Bun.$`rm -rf ${remote}`.quiet();
+  }
+}, 15_000);

@@ -615,6 +615,38 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "publish", title: "Publish a change: g then p names a bookmark, tracks it and pushes",
+    async run(ui) {
+      const remote = `${ui.f.path}/.jj/demo-remote.git`;
+      const git = Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "pipe" });
+      assert.equal(await git.exited, 0);
+      await ui.f.jj("git", "remote", "add", "origin", remote);
+      await Bun.write(`${ui.f.path}/login.txt`, "login form\n");
+      await ui.f.jj("describe", "-m", "Add login form");
+      ui.key("r", { ctrl: true });
+      await ui.until("Add login form");
+      await ui.settled();
+      await ui.capture("A described change with no bookmark");
+      ui.key("g");
+      await ui.until("Push this change");
+      await ui.capture("g opens the Git menu");
+      ui.key("p");
+      await ui.until("Bookmark to push to origin");
+      await ui.type("login");
+      await ui.capture("p asks for a bookmark name");
+      ui.key("RETURN");
+      await ui.until("Tracking: start tracking login@origin");
+      await ui.capture("One review covers the bookmark, tracking and push");
+      ui.key("RETURN");
+      await ui.until("git-publish completed");
+      await ui.settled();
+      await ui.capture("The bookmark is created, tracked and pushed");
+      const commit = (await ui.repo.snapshot("@")).revisions[0]!.commitId;
+      const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/login"], { stdout: "pipe" });
+      assert.equal((await new Response(pushed.stdout).text()).trim(), commit);
+    },
+  },
+  {
     name: "picker-back", title: "Escape steps back one picker level at a time",
     async run(ui) {
       const selected = () => (ui.node("action-choices") as SelectRenderable).getSelectedOption()?.name;

@@ -25,6 +25,7 @@ export interface Remote { name: string; url: string }
 export type RemoteMutation =
   | { kind: "git-fetch"; remote: string }
   | { kind: "git-push"; remote: string; name: string }
+  | { kind: "git-publish"; remote: string; name: string; revision: Revision }
   | { kind: "bookmark-track" | "bookmark-untrack"; remote: string; name: string };
 
 export type Mutation =

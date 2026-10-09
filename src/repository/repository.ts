@@ -1,5 +1,5 @@
 import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, prepareRemote, applyRemote } from "./remotes";
+import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -145,6 +145,8 @@ export class Repository {
 
   async remotes(): Promise<Remote[]> { return remoteList(this.root); }
 
+  async defaultPushRemote(remotes: Remote[]): Promise<Remote | undefined> { return defaultPushRemote(this.root, remotes); }
+
   async files(revision: Revision): Promise<ChangedFile[]> {
     const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
       `'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'`]);
@@ -187,6 +189,7 @@ export class Repository {
     switch (action.kind) {
       case "git-fetch":
       case "git-push":
+      case "git-publish":
       case "bookmark-track":
       case "bookmark-untrack": {
         const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId);
@@ -248,7 +251,7 @@ export class Repository {
   async apply(prepared: PreparedMutation): Promise<void> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    if (prepared.remoteUrl !== undefined) { await applyRemote(this.root, prepared); return; }
+    if (prepared.remoteUrl !== undefined) { await applyRemote(this.root, prepared, await this.bookmarks()); return; }
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
   }

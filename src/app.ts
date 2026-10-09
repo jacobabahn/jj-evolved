@@ -18,9 +18,9 @@ import { RevisionLog } from "./revisions/revision-log";
 import { FileList } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
-import { shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile } from "./repository/model";
+import { shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote } from "./repository/model";
 
-type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string>; key?: string; header?: boolean };
+type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
 
 type Prompt =
   | { kind: "browse" }
@@ -37,7 +37,7 @@ type Prompt =
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null };
 
 
-const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
+const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(bindings: Keybindings): { title: string; rows: [string, string][] }[] {
   const keys = (actions: Action[]) => actions.some(action => bindings[action].length)
     ? actions.filter(action => bindings[action].length).map(action => keyLabel(bindings, action)).join(" / ")
@@ -92,7 +92,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
     ] },
     { title: "Bookmarks & remotes", rows: [
       [keys(["bookmarks"]), "Local and remote bookmarks: move, rename, delete, track or untrack"],
-      [keys(["git"]), "Git remotes: fetch and push after a review"],
+      [keys(["git"]), "Git menu: p names a bookmark on the selected change, tracks it and pushes; f fetches; r browses remotes"],
       ["Drag [bookmark]", "Drop a local bookmark onto another change to preview a move; Esc or dropping outside the graph cancels"],
     ] },
     { title: "Symbols", rows: [
@@ -1017,6 +1017,27 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       })));
     }, true);
   }
+  // jjui's git menu: g opens it, then p pushes the selected change and f fetches.
+  function showGit(revision: Revision | undefined, only?: "publish") {
+    void run("Loading remotes…", async () => {
+      const [remotes, bookmarks] = await Promise.all([repository.remotes(), repository.bookmarks()]);
+      const preferred = await repository.defaultPushRemote(remotes);
+      if (stopped) return;
+      if (!remotes.length) { showOverlay("No Git remotes configured. Add one with jj git remote add in your terminal.", "Remotes"); return; }
+      const each = (title: string, choose: (remote: Remote) => void) => preferred ? choose(preferred)
+        : pick(title, remotes.map(remote => ({ name: remote.name, description: remote.url, choose: () => choose(remote) })));
+      const existing = revision ? bookmarks.find(item => !item.remote && item.targets.includes(revision.commitId))?.name ?? "" : "";
+      const publish = (target: Revision) => each("Push to remote", remote =>
+        ask(`Bookmark to push to ${remote.name}`, existing, value => confirm({ kind: "git-publish", remote: remote.name, name: value.trim(), revision: target })));
+      if (only && revision) { publish(revision); return; }
+      const to = preferred ? ` ${preferred.name}` : "";
+      pick("Git", [
+        ...(revision ? [{ key: "p", hotkey: true, name: existing ? `Push ${existing}` : "Push this change", description: `Name a bookmark here, track it and push to${to || " a remote"} after a review`, choose: () => publish(revision) }] : []),
+        { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits after a review", choose: () => each("Fetch from remote", remote => confirm({ kind: "git-fetch", remote: remote.name })) },
+        { key: "r", hotkey: true, name: "Remotes", description: "Push another bookmark or a deletion, or fetch from a chosen remote", choose: showRemotes },
+      ]);
+    }, true);
+  }
   function showBookmarks() {
     void run("Loading bookmarks…", async () => {
       const bookmarks = await repository.bookmarks();
@@ -1164,7 +1185,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       ...(revision.conflict ? [{ key: key(), name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
       header("Bookmarks & remotes"),
       { key: key(), name: "Create bookmark", description: "Name the selected change", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
-      { key: key("git"), name: "Git remotes", description: "Fetch, push and select a remote", choose: showRemotes },
+      { key: key("publish"), name: "Publish change", description: "Create or move a bookmark here, track it and push", choose: () => showGit(revision, "publish") },
+      { key: key("git"), name: "Git", description: "Push the selected change, fetch, or browse remotes", choose: () => showGit(revision) },
       header("Inspect"),
       { key: key("files"), name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
       { key: key(), name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
@@ -1400,6 +1422,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
     else if (move) moveChoice(move);
     else if (key.name === "return") { const choice = state.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
+    else if (!key.ctrl && !key.meta) state.choices.find(choice => choice.hotkey && choice.key === key.sequence)?.choose();
   }
   function describeKey(key: KeyEvent, state: Extract<Prompt, { kind: "describe" }>) {
     if (isBusy()) { key.preventDefault(); return; }
@@ -1462,7 +1485,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     if (action === "actions") { key.preventDefault(); const revision = selected(); if (revision) actions(revision); return; }
     if (action === "bookmarks") { key.preventDefault(); showBookmarks(); return; }
-    if (action === "git") { key.preventDefault(); showRemotes(); return; }
+    if (action === "git") { key.preventDefault(); showGit(selected()); return; }
+    if (action === "publish") { key.preventDefault(); const revision = selected(); if (revision) showGit(revision, "publish"); return; }
     if (action === "operations") { key.preventDefault(); showOperations(); return; }
     if (action === "undo") { key.preventDefault(); undo(); return; }
     if (action === "files") { key.preventDefault(); const revision = selected(); if (revision) browseFiles(revision); return; }

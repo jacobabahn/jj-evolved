@@ -119,3 +119,87 @@ test("fetch imports a tracked remote advancement while preserving working-copy f
     expect(await Bun.file(join(f.path, "hello.txt")).text()).toBe("hello from jj-evolved\n");
   } finally { await f.cleanup(); await publisher.cleanup(); }
 });
+
+test("publish creates a bookmark on the change, tracks it and pushes after a read-only review", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const before = await f.repo.operationId();
+    const preview = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision });
+    expect(preview.summary).toContain("Bookmark: next (create)");
+    expect(preview.summary).toContain("Tracking: start tracking next@origin");
+    expect(preview.summary).toContain(`add next@origin at ${revision.commitId}`);
+    expect(preview.summary).toContain("Commits to publish (2):");
+    expect(await f.repo.operationId()).toBe(before);
+    expect(await refs(f.remote)).toBe("");
+    await f.repo.apply(preview);
+    expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
+    const bookmarks = await f.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
+    expect(bookmarks.find(item => item.name === "next" && item.remote === "origin")?.tracked).toBe(true);
+    const again = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision });
+    expect(again.summary).toContain("already on this change");
+    expect(again.summary).toContain("remote is already up to date");
+    expect(again.summary).toContain("No new commits to publish.");
+  } finally { await f.cleanup(); }
+});
+
+test("publish moves an existing bookmark to the change and advances the tracked remote", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    const old = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const preview = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision });
+    expect(preview.summary).toContain(`Bookmark: feature (move from ${old})`);
+    expect(preview.summary).toContain("Tracking: already tracking feature@origin");
+    expect(preview.summary).toContain(`move feature@origin from ${old} to ${revision.commitId}`);
+    expect(preview.summary).toContain("Commits to publish (1):");
+    await f.repo.apply(preview);
+    expect(await refs(f.remote)).toBe(`refs/heads/feature ${revision.commitId}\n`);
+  } finally { await f.cleanup(); }
+});
+
+test("publish refuses changes JJ will not push, untracked remote names and empty names before writing", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.jj("new");
+    const undescribed = (await f.repo.snapshot("@")).revisions[0]!;
+    const before = await f.repo.operationId();
+    await expect(f.repo.prepare({ kind: "git-publish", remote: "origin", name: "wip", revision: undescribed })).rejects.toThrow("has no description");
+    await expect(f.repo.prepare({ kind: "git-publish", remote: "origin", name: "", revision: undescribed })).rejects.toThrow("Enter a bookmark name");
+    expect(await f.repo.operationId()).toBe(before);
+    expect((await f.repo.bookmarks()).some(item => item.name === "wip")).toBe(false);
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await f.jj("bookmark", "untrack", "feature", "--remote", "origin");
+    const revision = (await f.repo.snapshot("@-")).revisions[0]!;
+    await expect(f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision })).rejects.toThrow("is not tracked");
+  } finally { await f.cleanup(); }
+});
+
+test("a failed publish keeps the tracked local bookmark so it can be retried", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const preview = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision });
+    await rm(f.remote, { recursive: true, force: true });
+    await expect(f.repo.apply(preview)).rejects.toThrow("only the push failed");
+    expect((await f.repo.bookmarks()).find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
+  } finally { await f.cleanup(); }
+});
+
+test("the default push remote follows git.push, then origin, then a lone remote", async () => {
+  const f = await remoteFixture();
+  try {
+    const origin = { name: "origin", url: f.remote };
+    expect(await f.repo.defaultPushRemote([origin])).toEqual(origin);
+    await f.jj("git", "remote", "add", "fork", f.remote);
+    expect(await f.repo.defaultPushRemote(await f.repo.remotes())).toEqual(origin);
+    await f.jj("config", "set", "--repo", "git.push", "fork");
+    expect((await f.repo.defaultPushRemote(await f.repo.remotes()))?.name).toBe("fork");
+    await f.jj("config", "unset", "--repo", "git.push");
+    await f.jj("git", "remote", "rename", "origin", "upstream");
+    expect(await f.repo.defaultPushRemote(await f.repo.remotes())).toBeUndefined();
+    expect((await f.repo.defaultPushRemote([{ name: "upstream", url: f.remote }]))?.name).toBe("upstream");
+  } finally { await f.cleanup(); }
+});
