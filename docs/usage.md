@@ -56,7 +56,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `v` | Browse the selected change's evolution and preview each version's rewrite diff |
 | Space | Open the action menu, grouped into Edit, History, Bookmarks & remotes, Inspect and Repository; each item shows its effective key and `/` filters by name |
 | `b` | Browse bookmarks; move, rename, or delete a local bookmark |
-| `g` | Git remotes: fetch, push, and select a remote |
+| `g` | Git menu: `p` publishes the selected change, `f` fetches, `r` browses remotes |
 | `o` | Browse operation history, inspect an operation, or restore its state |
 | `u` | Preview undo of the latest operation |
 | `l` / Right | Expand the selected revision's changed files beneath it in the graph; `j` / `k` preview one file at a time, `h` / Left / Escape collapses |
@@ -109,7 +109,7 @@ Rebase can move one change or its descendants. Squash accepts all files or a sel
 
 ## Bookmarks, undo, and restore
 
-Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Press `b` to track or untrack remote bookmarks. Select **Git remotes** from the bookmark browser or action menu to fetch or push. Choose a remote, then **Push bookmark** to select one local bookmark (or a tracked deleted bookmark). The confirmation shows the remote URL, full previous and proposed commit IDs, and JJ’s dry-run report. Enter publishes that exact bookmark; Escape cancels. Fetches and tracking changes also require review. JJ retains its push safety checks; after a rejected push, fetch and review again. Configure authentication through Git credentials or SSH in your terminal. Remote operations time out after 30 seconds; after an interrupted push, fetch to check its outcome before retrying. Pushes cannot be reversed with local undo. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
+Drag a local `[bookmark]` label in the log onto another change to preview a move. The destination highlights while dragging. Release to open the confirmation, then press Enter to apply. Escape, dropping outside a change, or dropping on the source cancels. Each bookmark has its own label, so you can move one when several share a change. Press `b` to track or untrack remote bookmarks. Press `g`, then `p`, (or choose **Publish change** from the action menu) to put the selected change on a remote in one step: enter a bookmark name, review, and press Enter. The prompt offers a bookmark already on the change, so republishing is `g`, `p`, Enter, Enter. The `publish` action has no default key; bind one in `keybindings.json` to skip the menu. The review shows whether the bookmark is created or moved, whether tracking starts, the remote's old and new targets, and every commit that will be published; applying sets the bookmark, tracks it on the remote, and pushes. It uses the `git.push` remote, then `origin`, then the only remote, and asks when none of those applies. Changes JJ refuses to push (no description, conflicts) are rejected before the bookmark is created. If the push itself fails, the local bookmark stays in place and publishing again retries. In the same menu, `f` fetches from that remote and `r` opens the remote browser, which is also listed as **Git remotes** in the bookmark browser. There, choose a remote, then **Push bookmark** to select one local bookmark (or a tracked deleted bookmark). The confirmation shows the remote URL, full previous and proposed commit IDs, and JJ’s dry-run report. Enter publishes that exact bookmark; Escape cancels. Fetches and tracking changes also require review. JJ retains its push safety checks; after a rejected push, fetch and review again. Configure authentication through Git credentials or SSH in your terminal. Remote operations time out after 30 seconds; after an interrupted push, fetch to check its outcome before retrying. Pushes cannot be reversed with local undo. Undo applies the inverse of the exact latest operation shown in its preview. Restore returns repository state and local bookmarks to a selected operation. Both preserve remote-tracking state and run without network operations.
 
 ## Search, navigation, and descriptions
 
@@ -182,6 +182,7 @@ Available actions and defaults:
 | `rebaseScope` (inline rebase only) | `tab` | same |
 | `absorb`, `evolution` | `A`, `v` | `a`, `v` |
 | `actions`, `bookmarks`, `git`, `operations` | `space`, `b`, `g`, `o` | `space`, `b`, unbound, `o` |
+| `publish` | unbound | unbound |
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
 
 Unbound actions stay reachable from the Space menu, which shows the effective

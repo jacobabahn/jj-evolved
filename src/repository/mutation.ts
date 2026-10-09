@@ -6,6 +6,7 @@ export function mutationArgs(action: Mutation): string[] {
   let args: string[];
   switch (action.kind) {
     case "git-fetch": args = ["git", "fetch", "--remote", action.remote]; break;
+    case "git-publish":
     case "git-push": args = ["git", "push", "--remote", action.remote, "--bookmark", `exact:${action.name}`]; break;
     case "bookmark-track":
     case "bookmark-untrack": args = ["bookmark", action.kind === "bookmark-track" ? "track" : "untrack", "--remote", `exact:${action.remote}`, "--", `exact:${action.name}`]; break;

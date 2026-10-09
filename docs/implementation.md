@@ -11,6 +11,7 @@ The current build implements the local history-management workflows in the [feat
 - Splitting selected whole files with descriptions for both changes, optionally preserving the original description on the second.
 - Listing local and remote bookmarks and creating, moving, renaming, or deleting local bookmarks.
 - Named-remote fetch, exact-bookmark push with full target IDs and JJ dry-run review, and remote bookmark tracking/untracking.
+- One-step publish: create or move a bookmark on the selected change, track it, and push after a single review.
 - Operation-history browsing with incremental expansion, operation inspection, undo, and restore.
 - Absorb with a projected operation patch, remaining source edits, and confirmation.
 - Change evolution with incremental expansion and native patches for individual historical versions.
@@ -127,6 +128,8 @@ Rebase/squash form destinations, interactive squash, and bookmark destinations r
 ## Remote workflows
 
 Remote actions use the existing mutation-review lifecycle. Push previews run `jj git push --bookmark exact:<name> --dry-run` at the captured operation, without publishing or changing tracking state. Apply checks the operation and remote URL, then pins that same operation so concurrent local edits cannot substitute different push targets. JJ checks remote leases at push time. Deleted tracked bookmarks remain selectable for explicit deletion reviews; conflicted bookmarks are rejected. Fetch and tracking changes are reviewed, and tracking status appears in the bookmark browser. Git's synthetic `@git` bookmark is informational.
+
+Publish (`git-publish`) combines three commands under one review. A dry run cannot describe a bookmark that does not exist yet, so the preview is computed from bookmark state and `::<commit> ~ ::remote_bookmarks(remote=<remote>)` at the captured operation, and it rejects commits JJ would refuse (no description, conflicts) so a doomed push does not leave a bookmark behind. Apply runs `jj bookmark create` or `set`, `jj bookmark track`, then `jj git push --bookmark exact:<name>` pinned to the operation those local steps produced. The steps are separate operations: a failed push leaves the tracked local bookmark, and publishing again skips the completed steps.
 
 Network failures preserve JJ diagnostics and offer authentication, rejected-push, and interrupted-connection recovery instructions. Interactive Git credential prompting is disabled. Operations share the existing 30-second timeout. Remote configuration is currently managed through the JJ CLI. Repository tests use disposable local bare Git remotes to verify preview purity, exact push scope, deletion, tracking, stale local state, changed remote URLs, concurrent remote updates, and inaccessible remotes. The `remotes` UI scenario records remote selection, push review/cancellation, and tracking review/application.
 
