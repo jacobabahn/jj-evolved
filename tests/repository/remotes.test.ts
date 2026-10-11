@@ -151,12 +151,47 @@ test("publish moves an existing bookmark to the change and advances the tracked 
     const old = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
     const revision = (await f.repo.snapshot("@")).revisions[0]!;
     const preview = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision });
-    expect(preview.summary).toContain(`Bookmark: feature (move from ${old})`);
+    expect(preview.summary).toContain(`Advance bookmark feature by 1 commit to this change, then push it.\n  from ${old}\n  to   ${revision.commitId}`);
+    expect(preview.summary).toContain("Bookmark: feature (advance 1 commit)");
     expect(preview.summary).toContain("Tracking: already tracking feature@origin");
     expect(preview.summary).toContain(`move feature@origin from ${old} to ${revision.commitId}`);
     expect(preview.summary).toContain("Commits to publish (1):");
     await f.repo.apply(preview);
     expect(await refs(f.remote)).toBe(`refs/heads/feature ${revision.commitId}\n`);
+    // Moving it back is not an advance, and is reviewed as a plain move.
+    const parent = (await f.repo.snapshot("@-")).revisions[0]!;
+    const back = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision: parent });
+    expect(back.summary).toContain(`Bookmark: feature (move from ${revision.commitId})`);
+    expect(back.summary).not.toContain("Advance bookmark");
+  } finally { await f.cleanup(); }
+});
+
+test("publish infers the bookmark on the change, then on the nearest mutable ancestor, and never an immutable one", async () => {
+  const f = await remoteFixture();
+  try {
+    const infer = async (revset: string) => f.repo.publishBookmarks((await f.repo.snapshot(revset)).revisions[0]!, await f.repo.bookmarks());
+    expect(await infer("feature")).toEqual({ names: ["feature"], advance: false });
+    expect(await infer("@")).toEqual({ names: ["feature"], advance: true });
+    await f.jj("new", "-m", "Third change");
+    await f.jj("bookmark", "create", "aaa", "-r", "feature");
+    expect(await infer("@")).toEqual({ names: ["aaa", "feature"], advance: true });
+    await f.jj("bookmark", "create", "nearer", "-r", "@-");
+    expect(await infer("@")).toEqual({ names: ["nearer"], advance: true });
+    // Pushing main makes it trunk, so it and the bookmarks beside it are immutable.
+    await f.jj("bookmark", "delete", "nearer");
+    await f.jj("bookmark", "create", "main", "-r", "feature");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "main" }));
+    expect(await infer("@")).toEqual({ names: [], advance: true });
+  } finally { await f.cleanup(); }
+});
+
+test("the suggested bookmark name follows templates.git_push_bookmark", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    expect(await f.repo.generatedBookmarkName(revision)).toBe(`push-${revision.changeId.slice(0, 12)}`);
+    await f.jj("config", "set", "--repo", "templates.git_push_bookmark", `'"me/" ++ change_id.short(6)'`);
+    expect(await f.repo.generatedBookmarkName(revision)).toBe(`me/${revision.changeId.slice(0, 6)}`);
   } finally { await f.cleanup(); }
 });
 

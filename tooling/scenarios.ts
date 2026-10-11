@@ -615,7 +615,7 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    name: "publish", title: "Publish a change: g then p names a bookmark, tracks it and pushes",
+    name: "publish", title: "Publish a change: g then p advances the nearest bookmark, or pushes under another name",
     async run(ui) {
       const remote = `${ui.f.path}/.jj/demo-remote.git`;
       const git = Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "pipe" });
@@ -626,17 +626,21 @@ export const scenarios: Scenario[] = [
       ui.key("r", { ctrl: true });
       await ui.until("Add login form");
       await ui.settled();
-      await ui.capture("A described change with no bookmark");
+      await ui.capture("A described change on top of the feature bookmark");
       ui.key("g");
-      await ui.until("Push this change");
-      await ui.capture("g opens the Git menu");
+      await ui.until("Advance feature here and push");
+      await ui.capture("g opens the Git menu, which names the bookmark p will use");
       ui.key("p");
+      await ui.until("Advance bookmark feature by 1 commit");
+      await ui.capture("p skips the name prompt: one review covers the advance, tracking and push");
+      ui.key("n");
       await ui.until("Bookmark to push to origin");
+      await ui.capture("n asks for another name, starting from the one jj would generate");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.type("login");
-      await ui.capture("p asks for a bookmark name");
       ui.key("RETURN");
       await ui.until("Tracking: start tracking login@origin");
-      await ui.capture("One review covers the bookmark, tracking and push");
+      await ui.capture("The review for a new bookmark");
       ui.key("RETURN");
       await ui.until("git-publish completed");
       await ui.settled();

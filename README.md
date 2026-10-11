@@ -77,7 +77,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `s` / `a` | Split selected files / preview abandoning the change |
 | `A` / `v` | Preview absorb / browse change evolution |
 | `b` / `g` / `o` / `u` | Bookmarks / Git menu / operation history / undo preview |
-| `g` `p` | Publish the selected change: name a bookmark, track it, and push after one review |
+| `g` `p` | Publish the selected change after one review: push its bookmark, advance the nearest ancestor bookmark to it, or name a new one |
 | `g` `f` | Fetch from the default remote after a review |
 | `w` | Show working-copy status |
 | `t` | Choose a theme |

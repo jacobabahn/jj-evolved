@@ -22,6 +22,8 @@ export interface Snapshot {
 }
 
 export interface Remote { name: string; url: string }
+/** Local bookmarks a publish can use without asking: those on the revision, or (advance) on its nearest bookmarked ancestors. */
+export interface PublishBookmarks { names: string[]; advance: boolean }
 export type RemoteMutation =
   | { kind: "git-fetch"; remote: string }
   | { kind: "git-push"; remote: string; name: string }

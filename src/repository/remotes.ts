@@ -1,4 +1,4 @@
-import { label, type Bookmark, type PreparedMutation, type Remote, type RemoteMutation } from "./model";
+import { label, type Bookmark, type PreparedMutation, type PublishBookmarks, type Remote, type RemoteMutation, type Revision } from "./model";
 import { run } from "./jj-process";
 import { logRevisions } from "./log-snapshot";
 import { mutationArgs } from "./mutation";
@@ -16,6 +16,22 @@ export async function remoteList(root: string): Promise<Remote[]> {
 export async function defaultPushRemote(root: string, remotes: Remote[]): Promise<Remote | undefined> {
   const configured = (await run(root, ["--ignore-working-copy", "config", "get", "git.push"]).catch(() => "")).trim();
   return remotes.find(item => item.name === configured) ?? remotes.find(item => item.name === "origin") ?? (remotes.length === 1 ? remotes[0] : undefined);
+}
+
+// Immutable ancestors are left out, so a change stacked on main is never offered "advance main and push".
+export async function publishBookmarks(root: string, revision: Revision, bookmarks: Bookmark[]): Promise<PublishBookmarks> {
+  const on = (commitId: string) => bookmarks.filter(item => !item.remote && item.targets.includes(commitId)).map(item => item.name);
+  const here = on(revision.commitId);
+  if (here.length) return { names: here, advance: false };
+  const ancestors = await logRevisions(root, `heads(::${revision.commitId} & bookmarks() & mutable())`);
+  return { names: [...new Set(ancestors.flatMap(item => on(item.commitId)))], advance: true };
+}
+
+// The name `jj git push --change` would create, from the templates.git_push_bookmark setting.
+export async function generatedBookmarkName(root: string, revision: Revision): Promise<string> {
+  const template = (await run(root, ["--ignore-working-copy", "config", "get", "templates.git_push_bookmark"]).catch(() => "")).trim();
+  if (!template) return "";
+  return (await run(root, ["--ignore-working-copy", "log", "--no-graph", "-r", revision.commitId, "-T", template]).catch(() => "")).trim();
 }
 
 type PublishAction = Extract<RemoteMutation, { kind: "git-publish" }>;
@@ -36,8 +52,14 @@ async function preparePublish(root: string, action: PublishAction, bookmarks: Bo
   const blocked = commits.find(item => item.conflict || !item.description.trim());
   if (blocked) throw new Error(`JJ will not push ${label(blocked)} because it ${blocked.conflict ? "has conflicts. Resolve them" : "has no description. Describe it"} first.`);
   const previous = remote?.targets.join(", ");
+  // A bookmark on an ancestor advances. The ancestor's own row proves the ancestry and is not counted.
+  const old = !placed && local?.targets.length === 1 ? local.targets[0]! : "";
+  const path = old ? await logRevisions(root, `(${old} & ::${target}) | ${old}..${target}`, operationId) : [];
+  const advance = path.some(item => item.commitId === old) ? path.length - 1 : 0;
   let summary = `Publish ${label(action.revision)}\n\n`;
-  summary += `Bookmark: ${action.name} (${placed ? "already on this change" : local?.targets.length ? `move from ${local.targets.join(", ")}` : "create"})\n`;
+  const count = `${advance} ${advance === 1 ? "commit" : "commits"}`;
+  if (advance) summary += `Advance bookmark ${action.name} by ${count} to this change, then push it.\n  from ${old}\n  to   ${target}\n\n`;
+  summary += `Bookmark: ${action.name} (${placed ? "already on this change" : advance ? `advance ${count}` : local?.targets.length ? `move from ${local.targets.join(", ")}` : "create"})\n`;
   summary += `Tracking: ${remote ? "already tracking" : "start tracking"} ${action.name}@${action.remote}\n`;
   summary += `Push:     ${previous === target ? "remote is already up to date" : previous ? `move ${action.name}@${action.remote} from ${previous} to ${target}` : `add ${action.name}@${action.remote} at ${target}`}\n\n`;
   summary += commits.length ? `Commits to publish (${commits.length}):\n${commits.map(item => `  ${label(item)}`).join("\n")}` : "No new commits to publish.";

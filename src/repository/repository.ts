@@ -1,5 +1,5 @@
-import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
+import { label, rebaseScopeSummary, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, applyRemote } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -146,6 +146,10 @@ export class Repository {
   async remotes(): Promise<Remote[]> { return remoteList(this.root); }
 
   async defaultPushRemote(remotes: Remote[]): Promise<Remote | undefined> { return defaultPushRemote(this.root, remotes); }
+
+  async publishBookmarks(revision: Revision, bookmarks: Bookmark[]): Promise<PublishBookmarks> { return publishBookmarks(this.root, revision, bookmarks); }
+
+  async generatedBookmarkName(revision: Revision): Promise<string> { return generatedBookmarkName(this.root, revision); }
 
   async files(revision: Revision): Promise<ChangedFile[]> {
     const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
