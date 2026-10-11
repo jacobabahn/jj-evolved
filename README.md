@@ -26,7 +26,7 @@ If your everyday work centers on reviewing and reshaping local stacks, that is t
 
 - **Explore your history.** Browse JJ’s native graph, inspect changed files and diffs, filter with revsets and bookmark/function completion, and search descriptions, bookmarks, or IDs across the active revset.
 - **Edit a stack.** Create, describe, edit, rebase, squash, split, absorb, and abandon changes. Rebase and squash show the proposed and current graphs side by side before you apply.
-- **Manage local bookmarks.** Create, rename, delete, or move bookmarks, including by dragging a bookmark onto another revision.
+- **Manage bookmarks.** Create, rename, delete, or move bookmarks, including by dragging a bookmark onto another revision. Labels in the graph show whether a bookmark is in step with its remote, ahead or behind (`[name ↑2↓1]`), or not pushed yet (`[name*]`).
 - **Sync with remotes.** Publish a change in one step (bookmark, track, push), review fetches, push a selected bookmark, and manage bookmark tracking.
 - **Review and recover.** Browse a change’s evolution, inspect repository operations, undo the latest operation, or restore an earlier state.
 - **Use your existing editors.** Open JJ’s configured description, diff, and merge tools for external editing, interactive splits and squashes, and conflict resolution.
@@ -92,7 +92,7 @@ See the [usage guide](docs/usage.md) for all controls, search and navigation beh
 
 jj-evolved is under active development and focuses on local repository work. It runs your installed `jj` executable and follows JJ’s configuration and repository rules.
 
-- **Remote operations:** `g` opens the Git menu, as in jjui: `p` publishes the selected change, `f` fetches, and `r` browses remotes to push another bookmark. Bookmark tracking is in the bookmark browser. Configure remotes and authentication through the CLI.
+- **Remote operations:** `g` opens the Git menu, as in jjui: `p` publishes the selected change, `f` fetches, and `r` browses remotes to push another bookmark. The bookmark browser (`b`) lists each bookmark once with its sync state and offers push, track, untrack, and deletion on the remote. Configure remotes and authentication through the CLI.
 - **Hunks and conflicts:** interactive hunk selection and conflict resolution use JJ’s configured external tools. There is no built-in hunk or merge editor.
 - **Customization:** browse keybindings are configurable, with `jjui` and `legacy` presets; prompts retain their displayed controls. Revset completion covers bookmarks and common functions; custom aliases, scripted workflows, and custom themes are not implemented.
 - **Large histories:** the graph starts with 200 revisions; `Ctrl+L` loads more. Search and destination pickers cover the full history; diffs and search metadata are buffered in memory.

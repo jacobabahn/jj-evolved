@@ -979,9 +979,17 @@ test("bookmark drop confirmation can be cancelled and rejects an external operat
 
 test("remote bookmark labels stay read-only and overlays block bookmark drags", async () => {
   const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
   try {
     t.screen.resize(120, 30);
-    const { badge, target } = await bookmarkDragTargets(t, "feature", "git");
+    // An untracked remote bookmark keeps a badge of its own beside the local one.
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    await t.repo.apply(await t.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await t.f.jj("bookmark", "untrack", "feature", "--remote", "origin");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("[feature@origin]");
+    const { badge, target } = await bookmarkDragTargets(t, "feature", "origin");
     const before = await t.repo.operationId();
     await t.screen.mockMouse.drag(badge.x + 2, badge.y, target.x + 2, target.y);
     await t.screen.renderOnce();
@@ -995,7 +1003,63 @@ test("remote bookmark labels stay read-only and overlays block bookmark drags", 
     await t.screen.renderOnce();
     expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
     expect(await t.repo.operationId()).toBe(before);
-  } finally { await t.cleanup(); }
+  } finally { await t.cleanup(); await Bun.$`rm -rf ${remote}`.quiet(); }
+}, 15_000);
+
+test("bookmark badges and the bookmark browser show sync state, and delete can also delete on the remote", async () => {
+  const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
+  const pushed = async () => {
+    const proc = Bun.spawn(["git", "--git-dir", remote, "for-each-ref", "--format=%(refname)"], { stdout: "pipe" });
+    return (await new Response(proc.stdout).text()).trim();
+  };
+  try {
+    t.screen.resize(140, 30);
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    await t.f.jj("bookmark", "create", "solo", "-r", "@");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("[solo*]");
+    expect(t.screen.captureCharFrame()).toContain("[feature*]");
+    await t.repo.apply(await t.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("[feature]");
+    expect(t.screen.captureCharFrame()).not.toContain("feature@");
+    // A drag still moves the collapsed local badge; the remote's badge then stays behind on the old commit.
+    const { badge, target } = await bookmarkDragTargets(t);
+    await t.screen.mockMouse.drag(badge.x + 2, badge.y, target.x + 2, target.y);
+    await t.until("Review before applying");
+    t.screen.mockInput.pressEnter();
+    await t.until("[feature ↑1]");
+    expect(t.screen.captureCharFrame()).toContain("[feature@origin]");
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Git remotes");
+    expect(t.chooser().options.map(option => option.value)).toEqual(["Git remotes", "feature", "solo"]);
+    expect(t.chooser().options.map(option => option.description)).toEqual([
+      "Fetch and push with a review", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
+    ]);
+    t.choose("solo");
+    await t.until("Push to origin");
+    expect(t.chooser().options.map(option => option.value)).toEqual(["Move bookmark", "Rename bookmark", "Delete bookmark", "Push to origin"]);
+    t.screen.mockInput.pressEscape();
+    await t.until("Esc close");
+    t.screen.mockInput.pressKey("k");
+    t.choose("feature");
+    await t.until("optionally feature@origin");
+    expect(t.chooser().options.map(option => option.value)).toEqual(["Move bookmark", "Rename bookmark", "Delete bookmark", "Push to origin", "Untrack feature@origin"]);
+    t.choose("Delete bookmark");
+    await t.overlayReady("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain("Local deletion only. feature@origin stays on the remote");
+    expect(t.screen.captureCharFrame()).toContain("r also delete on origin");
+    t.screen.mockInput.pressKey("r");
+    await t.until("cannot be undone locally");
+    expect(t.screen.captureCharFrame()).toContain("r keep it on origin");
+    expect(await pushed()).toBe("refs/heads/feature");
+    t.screen.mockInput.pressEnter();
+    await t.until("Bookmark delete completed");
+    expect(await pushed()).toBe("");
+    expect((await t.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+  } finally { await t.cleanup(); await Bun.$`rm -rf ${remote}`.quiet(); }
 }, 15_000);
 
 test("dragging a change previews a rebase and applies only after confirmation", async () => {

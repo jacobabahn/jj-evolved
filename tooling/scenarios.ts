@@ -181,12 +181,13 @@ export const scenarios: Scenario[] = [
       assert.equal(await ui.repo.operationId(), before);
       await ui.repo.apply(await ui.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
       ui.key("b");
-      await ui.until("feature@origin");
-      await ui.capture("Local and tracked remote bookmarks");
-      ui.choose("feature@origin");
-      await ui.until("Untrack bookmark");
-      ui.choose("Untrack bookmark");
+      await ui.until("in sync with origin");
+      await ui.capture("One row per bookmark with its sync state");
+      ui.choose("feature");
       await ui.until("Untrack feature@origin");
+      await ui.capture("Actions for a tracked bookmark");
+      ui.choose("Untrack feature@origin");
+      await ui.until("Targets:");
       await ui.capture("Review remote bookmark tracking change");
       ui.key("RETURN");
       await ui.until("Bookmark untrack completed");
