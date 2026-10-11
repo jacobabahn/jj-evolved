@@ -1,5 +1,5 @@
-import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
+import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -15,6 +15,10 @@ function string(value: unknown): string {
 }
 function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") throw new Error("Unexpected jj template field.");
+  return value;
+}
+function number(value: unknown): number {
+  if (typeof value !== "number") throw new Error("Unexpected jj template field.");
   return value;
 }
 function array(value: unknown): unknown[] {
@@ -54,6 +58,22 @@ export class Repository {
 
   async rebaseScope(revision: Revision, operationId = "@"): Promise<Revision[]> {
     return logRevisions(this.root, `${revision.commitId}::`, operationId);
+  }
+
+  // `jj rebase -b X -d D` is `-s roots(D..X) -d D`, so a stack with one root is the existing rebase with descendants.
+  async trunkRebase(revision: Revision): Promise<TrunkRebase> {
+    const id = revision.commitId, name = shortChangeId(revision);
+    const [trunks, roots, immutable] = await Promise.all([
+      logRevisions(this.root, "trunk()"), logRevisions(this.root, `roots(trunk()..${id})`), logRevisions(this.root, `${id} & immutable()`),
+    ]);
+    const [trunk] = trunks, [root] = roots;
+    if (!trunk) throw new Error("trunk() does not resolve to a revision in this repository.");
+    if (trunk.commitId === id) return { kind: "blocked", reason: `${name} is trunk itself, so there is no stack to sync.` };
+    if (immutable.length) return { kind: "blocked", reason: `${name} is immutable, so its stack cannot be rebased onto trunk.` };
+    if (!root) return { kind: "current", reason: "Already part of trunk; nothing to rebase." };
+    if (roots.length > 1) return { kind: "blocked", reason: `This stack has ${roots.length} roots, which the rebase preview cannot show. Run jj rebase -b ${name} -d 'trunk()' in a terminal.` };
+    if (root.parents.length === 1 && root.parents[0] === trunk.commitId) return { kind: "current", reason: `Already based on trunk (${shortChangeId(trunk)}); nothing to rebase.` };
+    return { kind: "rebase", action: { kind: "rebase", revision: root, destination: trunk, descendants: true } };
   }
 
   async diff(revision: Revision, files: string[] = []): Promise<string> {
@@ -138,14 +158,26 @@ export class Repository {
   }
 
   async bookmarks(): Promise<Bookmark[]> {
-    const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
-      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ ']\n'`]);
-    return tuples(output).map(([name, remote, targets, conflict, tracked]) => ({ tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict) }));
+    // JJ counts from the remote's side, so its "behind" is how far the local bookmark is ahead. Only tracked remotes have counts.
+    const [output, remotes] = await Promise.all([run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
+      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']\n'`]),
+      this.remotes().catch(() => [])]);
+    const bookmarks = tuples(output).map(([name, remote, targets, conflict, tracked, ahead, behind]): Bookmark => ({
+      tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict),
+      ...(ahead === undefined ? {} : { ahead: number(ahead), behind: number(behind) }),
+    }));
+    if (!remotes.length) return bookmarks;
+    const pushed = new Set(bookmarks.filter(item => isRealRemote(item) && item.tracked && item.targets.length).map(item => item.name));
+    return bookmarks.map(item => item.remote || !item.targets.length || pushed.has(item.name) ? item : { ...item, localOnly: true });
   }
 
   async remotes(): Promise<Remote[]> { return remoteList(this.root); }
 
   async defaultPushRemote(remotes: Remote[]): Promise<Remote | undefined> { return defaultPushRemote(this.root, remotes); }
+
+  async publishBookmarks(revision: Revision, bookmarks: Bookmark[]): Promise<PublishBookmarks> { return publishBookmarks(this.root, revision, bookmarks); }
+
+  async generatedBookmarkName(revision: Revision): Promise<string> { return generatedBookmarkName(this.root, revision); }
 
   async files(revision: Revision): Promise<ChangedFile[]> {
     const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
@@ -227,12 +259,16 @@ export class Repository {
       case "bookmark-move":
       case "bookmark-delete":
       case "bookmark-rename": {
-        const bookmark = (await this.bookmarks()).find(item => !item.remote && item.name === action.name);
+        const bookmarks = await this.bookmarks();
+        const bookmark = bookmarks.find(item => !item.remote && item.name === action.name);
         if (!bookmark) throw new Error("This local bookmark no longer exists. Reload bookmarks.");
         summary = `${action.kind} ${action.name}\nCurrent targets: ${bookmark.targets.join(", ") || "deleted"}`;
         if (action.kind === "bookmark-move") summary += `\nNew target: ${label(action.revision)}`;
         if (action.kind === "bookmark-rename") summary += `\nNew name: ${action.newName}`;
-        if (action.kind === "bookmark-delete") summary += "\nLocal deletion only. Remote bookmarks are not pushed.";
+        if (action.kind === "bookmark-delete") {
+          const preview = await prepareDeletion(this.root, action, bookmarks);
+          summary += `\n${preview.summary}`; remoteUrl = preview.remoteUrl;
+        }
         break;
       }
       case "undo":
