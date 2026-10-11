@@ -44,6 +44,14 @@ export type Mutation =
   | { kind: "bookmark-delete"; name: string; remote?: string; push?: boolean }
   | { kind: "undo" | "restore"; operation: Operation };
 
+/**
+ * Syncing a revision's stack with trunk: the rebase `jj rebase -b <revision> -d 'trunk()'` would do, that the stack is
+ * already current, or why it cannot be rebased.
+ */
+export type TrunkRebase =
+  | { kind: "rebase"; action: Extract<Mutation, { kind: "rebase" }> }
+  | { kind: "current" | "blocked"; reason: string };
+
 export type InteractiveAction =
   | { kind: "squash"; revision: Revision; destination: Revision }
   | { kind: "split" | "describe" | "resolve"; revision: Revision };

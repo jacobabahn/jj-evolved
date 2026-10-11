@@ -1,4 +1,4 @@
-import { label, rebaseScopeSummary, isRealRemote, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
 import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
@@ -58,6 +58,22 @@ export class Repository {
 
   async rebaseScope(revision: Revision, operationId = "@"): Promise<Revision[]> {
     return logRevisions(this.root, `${revision.commitId}::`, operationId);
+  }
+
+  // `jj rebase -b X -d D` is `-s roots(D..X) -d D`, so a stack with one root is the existing rebase with descendants.
+  async trunkRebase(revision: Revision): Promise<TrunkRebase> {
+    const id = revision.commitId, name = shortChangeId(revision);
+    const [trunks, roots, immutable] = await Promise.all([
+      logRevisions(this.root, "trunk()"), logRevisions(this.root, `roots(trunk()..${id})`), logRevisions(this.root, `${id} & immutable()`),
+    ]);
+    const [trunk] = trunks, [root] = roots;
+    if (!trunk) throw new Error("trunk() does not resolve to a revision in this repository.");
+    if (trunk.commitId === id) return { kind: "blocked", reason: `${name} is trunk itself, so there is no stack to sync.` };
+    if (immutable.length) return { kind: "blocked", reason: `${name} is immutable, so its stack cannot be rebased onto trunk.` };
+    if (!root) return { kind: "current", reason: "Already part of trunk; nothing to rebase." };
+    if (roots.length > 1) return { kind: "blocked", reason: `This stack has ${roots.length} roots, which the rebase preview cannot show. Run jj rebase -b ${name} -d 'trunk()' in a terminal.` };
+    if (root.parents.length === 1 && root.parents[0] === trunk.commitId) return { kind: "current", reason: `Already based on trunk (${shortChangeId(trunk)}); nothing to rebase.` };
+    return { kind: "rebase", action: { kind: "rebase", revision: root, destination: trunk, descendants: true } };
   }
 
   async diff(revision: Revision, files: string[] = []): Promise<string> {

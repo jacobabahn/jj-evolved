@@ -293,6 +293,42 @@ test("a failed remote deletion reports that the local bookmark is gone and how t
   } finally { await f.cleanup(); }
 });
 
+test("syncing with trunk rebases the whole stack after a fetch and explains when there is nothing to rebase", async () => {
+  const f = await remoteFixture();
+  const publisher = await fixture();
+  try {
+    await f.jj("bookmark", "create", "main", "-r", "feature");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "main" }));
+    await f.jj("new", "-m", "Top of the stack");
+    const top = async () => (await f.repo.snapshot("@")).revisions[0]!;
+    expect(await f.repo.trunkRebase(await top())).toMatchObject({ kind: "current", reason: expect.stringContaining("Already based on trunk") });
+    await publisher.jj("git", "remote", "add", "origin", f.remote);
+    await publisher.jj("git", "fetch", "--remote", "origin");
+    await publisher.jj("bookmark", "track", "main@origin");
+    await publisher.jj("new", "main", "-m", "Upstream work");
+    await publisher.jj("bookmark", "set", "main", "-r", "@");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:main");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "origin" }));
+    const [trunk] = await f.repo.navigationRevisions("trunk()");
+    const [root] = await f.repo.navigationRevisions("@-");
+    expect(trunk!.description.trim()).toBe("Upstream work");
+    // The selected change is the top of the stack; the rebase starts at the stack's root, as jj rebase -b does.
+    const plan = await f.repo.trunkRebase(await top());
+    expect(plan).toMatchObject({ kind: "rebase", action: { kind: "rebase", descendants: true, revision: { commitId: root!.commitId }, destination: { commitId: trunk!.commitId } } });
+    if (plan.kind !== "rebase") throw new Error("Expected a rebase");
+    await f.repo.apply(await f.repo.prepare(plan.action));
+    expect((await f.repo.navigationRevisions("@-"))[0]!.parents).toEqual([trunk!.commitId]);
+    expect((await f.repo.trunkRebase(await top())).kind).toBe("current");
+    expect(await f.repo.trunkRebase(trunk!)).toMatchObject({ kind: "blocked", reason: expect.stringContaining("is trunk itself") });
+    const [old] = await f.repo.navigationRevisions("trunk()-");
+    expect(await f.repo.trunkRebase(old!)).toMatchObject({ kind: "blocked", reason: expect.stringContaining("is immutable") });
+    await f.jj("bookmark", "create", "stack", "-r", "@");
+    await f.jj("new", "root()", "-m", "Unrelated root");
+    await f.jj("new", "@", "stack", "-m", "Merge of two stacks");
+    expect(await f.repo.trunkRebase(await top())).toMatchObject({ kind: "blocked", reason: expect.stringContaining("2 roots") });
+  } finally { await f.cleanup(); await publisher.cleanup(); }
+});
+
 test("the default push remote follows git.push, then origin, then a lone remote", async () => {
   const f = await remoteFixture();
   try {

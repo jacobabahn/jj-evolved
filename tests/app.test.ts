@@ -1881,6 +1881,64 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
   }
 }, 15_000);
 
+test("g then s fetches, then previews a rebase of the selected stack onto trunk that Escape can skip", async () => {
+  const t = await setup();
+  const publisher = await fixture();
+  const remote = `${t.f.path}-remote.git`;
+  try {
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    await t.f.jj("bookmark", "create", "main", "-r", "feature");
+    await t.repo.apply(await t.repo.prepare({ kind: "git-push", remote: "origin", name: "main" }));
+    await publisher.jj("git", "remote", "add", "origin", remote);
+    await publisher.jj("git", "fetch", "--remote", "origin");
+    await publisher.jj("bookmark", "track", "main@origin");
+    await publisher.jj("new", "main", "-m", "Upstream work");
+    await publisher.jj("bookmark", "set", "main", "-r", "@");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:main");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.settled();
+    const before = (await t.repo.snapshot("@")).revisions[0]!;
+    const sync = async () => {
+      t.screen.mockInput.pressKey("g");
+      await t.overlayReady("Sync with trunk");
+      t.screen.mockInput.pressKey("s");
+      await t.overlayReady("Enter apply and continue");
+      expect(t.screen.captureCharFrame()).toContain("Fetch bookmarks and commits from this remote");
+      t.screen.mockInput.pressEnter();
+    };
+    await sync();
+    await t.overlayReady("Esc keeps the fetch and skips the rebase");
+    expect(t.screen.captureCharFrame()).toContain("Rebase preview");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    const [trunk] = await t.repo.navigationRevisions("trunk()");
+    expect(trunk!.description.trim()).toBe("Upstream work");
+    expect((await t.repo.snapshot("@")).revisions[0]!.parents).toEqual(before.parents);
+    await sync();
+    await t.overlayReady("Esc keeps the fetch and skips the rebase");
+    t.screen.mockInput.pressEnter();
+    await t.until("rebase completed");
+    expect((await t.repo.snapshot("@")).revisions[0]!.parents).toEqual([trunk!.commitId]);
+    await sync();
+    await t.until("Fetched from origin. Already based on trunk");
+    await t.closed();
+    // Trunk itself has no stack, which is said before anything is fetched.
+    t.screen.mockInput.pressKey("j");
+    await t.until(`Change   ${trunk!.changeId}`);
+    const operation = await t.repo.operationId();
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Sync with trunk");
+    t.screen.mockInput.pressKey("s");
+    await t.until("is trunk itself, so there is no stack to sync.");
+    expect(await t.repo.operationId()).toBe(operation);
+  } finally {
+    await t.cleanup();
+    await publisher.cleanup();
+    await Bun.$`rm -rf ${remote}`.quiet();
+  }
+}, 20_000);
+
 test("g then p advances the nearest ancestor bookmark without asking, and offers a picker for several", async () => {
   const t = await setup();
   const remote = `${t.f.path}-remote.git`;
