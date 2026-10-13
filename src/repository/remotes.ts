@@ -58,7 +58,7 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
 async function network(root: string, args: string[]): Promise<string> {
   try { return await run(root, args, true); }
   catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRemote operation failed. For authentication, configure Git credentials or SSH in your terminal. After a rejected push, fetch and review again. If the connection was interrupted, fetch to check the remote before retrying.`);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRemote operation failed. For authentication, configure Git credentials or SSH in your terminal. After a rejected push, fetch and push again. If the connection was interrupted, fetch to check the remote before retrying.`);
   }
 }
 

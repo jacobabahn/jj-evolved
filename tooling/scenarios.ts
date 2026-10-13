@@ -153,7 +153,7 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    name: "remotes", title: "Review a push and manage remote bookmark tracking",
+    name: "remotes", title: "Push a bookmark and manage remote bookmark tracking",
     async run(ui) {
       const remote = `${ui.f.path}/.jj/demo-remote.git`;
       const git = Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "pipe" });
@@ -167,19 +167,17 @@ export const scenarios: Scenario[] = [
       await ui.until("Push bookmark");
       await ui.capture("Choose fetch or push for a named remote");
       ui.choose("Push bookmark");
-      await ui.until("Review before publishing");
+      await ui.until("Publish this bookmark");
+      await ui.capture("Choose the bookmark to publish");
+      ui.key("ESCAPE");
+      await ui.until("Choose one bookmark to publish");
+      await ui.capture("Escape returns to the remote's actions");
+      ui.choose("Push bookmark");
+      await ui.until("Publish this bookmark");
       ui.choose("feature");
-      await ui.until("Push only bookmark: feature");
-      await ui.capture("Review exact bookmark targets before publishing");
-      const before = await ui.repo.operationId();
-      ui.key("ESCAPE");
-      await ui.until("Review before publishing");
-      await ui.capture("Escape returns to the push bookmark list");
-      for (const level of ["Push bookmark", "demo-remote.git", "Fetch and push with a review"]) { ui.key("ESCAPE"); await ui.until(level); }
-      ui.key("ESCAPE");
-      await ui.until("Empty change.");
-      assert.equal(await ui.repo.operationId(), before);
-      await ui.repo.apply(await ui.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+      await ui.until("Git push completed");
+      await ui.capture("The chosen bookmark is pushed without a further prompt");
+      assert((await ui.repo.bookmarks()).some(bookmark => bookmark.remote === "origin" && bookmark.name === "feature"));
       ui.key("b");
       await ui.until("feature@origin");
       await ui.capture("Local and tracked remote bookmarks");
@@ -638,7 +636,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Tracking: start tracking login@origin");
       await ui.capture("One review covers the bookmark, tracking and push");
       ui.key("RETURN");
-      await ui.until("git-publish completed");
+      await ui.until("Git publish completed");
       await ui.settled();
       await ui.capture("The bookmark is created, tracked and pushed");
       const commit = (await ui.repo.snapshot("@")).revisions[0]!.commitId;
