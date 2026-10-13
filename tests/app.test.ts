@@ -1785,7 +1785,7 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
     expect(frame).toContain("Tracking: start tracking published@origin");
     expect((await t.repo.bookmarks()).some(item => item.name === "published")).toBe(false);
     t.screen.mockInput.pressEnter();
-    await t.until("git-publish completed");
+    await t.until("Git publish completed");
     const bookmarks = await t.repo.bookmarks();
     expect(bookmarks.find(item => item.name === "published" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [revision.commitId] });
     const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/published"], { stdout: "pipe" });

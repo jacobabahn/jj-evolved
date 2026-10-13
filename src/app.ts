@@ -731,7 +731,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (outcome.kind !== "applied" || stopped) return;
     closePrompt();
     if (outcome.refreshError) throw new Error(outcome.refreshError);
-    result.content = `${outcome.action.kind.replace("bookmark-", "Bookmark ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
+    result.content = `${outcome.action.kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
     result.visible = true;
     clearTimeout(resultTimer);
     resultTimer = setTimeout(() => { if (!stopped) result.visible = false; }, 4000);
@@ -1000,16 +1000,16 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       pick("Git remotes", remotes.map(remote => ({
         name: remote.name, description: remote.url,
         choose: () => pick(`Remote ${remote.name}`, [
-          { name: "Fetch", description: "Fetch bookmarks and commits from this remote", choose: () => confirm({ kind: "git-fetch", remote: remote.name }) },
-          { name: "Push bookmark", description: "Choose one bookmark and review its exact targets", choose: () => {
+          { name: "Fetch", description: "Fetch bookmarks and commits from this remote", choose: () => applyNow(`Fetching from ${remote.name}…`, { kind: "git-fetch", remote: remote.name }) },
+          { name: "Push bookmark", description: "Choose one bookmark to publish", choose: () => {
             void run("Loading push bookmarks…", async () => {
               const bookmarks = await repository.bookmarks();
               if (stopped) return;
               const names = [...new Set(bookmarks.filter(item => !item.remote || item.remote === remote.name && item.tracked).map(item => item.name))];
               if (!names.length) { showOverlay("No local or tracked deleted bookmarks to push.", "Push bookmark"); return; }
               pick(`Push to ${remote.name}`, names.map(name => ({ name,
-                description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Review before publishing" : "Review remote deletion",
-                choose: () => confirm({ kind: "git-push", remote: remote.name, name }),
+                description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Publish this bookmark" : "Delete the remote bookmark",
+                choose: () => applyNow(`Pushing ${name} to ${remote.name}…`, { kind: "git-push", remote: remote.name, name }),
               })));
             }, true);
           } },
@@ -1033,7 +1033,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const to = preferred ? ` ${preferred.name}` : "";
       pick("Git", [
         ...(revision ? [{ key: "p", hotkey: true, name: existing ? `Push ${existing}` : "Push this change", description: `Name a bookmark here, track it and push to${to || " a remote"} after a review`, choose: () => publish(revision) }] : []),
-        { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits after a review", choose: () => each("Fetch from remote", remote => confirm({ kind: "git-fetch", remote: remote.name })) },
+        { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits", choose: () => each("Fetch from remote", remote => applyNow(`Fetching from ${remote.name}…`, { kind: "git-fetch", remote: remote.name })) },
         { key: "r", hotkey: true, name: "Remotes", description: "Push another bookmark or a deletion, or fetch from a chosen remote", choose: showRemotes },
       ]);
     }, true);
@@ -1042,7 +1042,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void run("Loading bookmarks…", async () => {
       const bookmarks = await repository.bookmarks();
       if (stopped) return;
-      pick("Bookmarks", [{ name: "Git remotes", description: "Fetch and push with a review", choose: showRemotes }, ...bookmarks.map(bookmark => ({
+      pick("Bookmarks", [{ name: "Git remotes", description: "Fetch and push", choose: showRemotes }, ...bookmarks.map(bookmark => ({
         name: `${bookmark.name}${bookmark.remote ? `@${bookmark.remote}` : ""}${bookmark.conflict ? " !" : ""}`,
         description: `${bookmark.remote ? bookmark.tracked ? "Tracked remote" : "Untracked remote" : "Local"} ${bookmark.targets.map(id => id.slice(0, 12)).join(", ") || "deleted"}`,
         choose: () => {
@@ -1149,11 +1149,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     });
   }
 
-  function createChild(parent: Revision) {
-    void run("Creating child change…", async () => {
-      if (await review.prepare({ kind: "new", parent })) await applyReviewed();
+  /** Applies an action without stopping at the review screen. */
+  function applyNow(label: string, action: Mutation) {
+    void run(label, async () => {
+      if (await review.prepare(action)) await applyReviewed();
     });
   }
+  function createChild(parent: Revision) { applyNow("Creating child change…", { kind: "new", parent }); }
   function matchingChoices(choices: Choice[], query: string) {
     const needle = query.toLowerCase();
     const matches: Choice[] = [];
@@ -1510,9 +1512,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (!revision) { report("Select a revision first.", true); return; }
       if (action === "describe") { describe(revision); return; }
       if (action === "new") { createChild(revision); return; }
-      void run("Switching working copy…", async () => {
-        if (await review.prepare({ kind: "edit", revision })) await applyReviewed();
-      });
+      applyNow("Switching working copy…", { kind: "edit", revision });
     }
   }
   function stop() {

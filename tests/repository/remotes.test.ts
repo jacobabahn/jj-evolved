@@ -81,7 +81,7 @@ test("push reports remote rejection and preserves a concurrently changed remote"
     const other = (await f.repo.bookmarks()).find(item => item.name === "other" && !item.remote)!.targets[0]!;
     const proc = Bun.spawn(["git", "--git-dir", f.remote, "update-ref", "refs/heads/feature", other]);
     expect(await proc.exited).toBe(0);
-    await expect(f.repo.apply(preview)).rejects.toThrow("fetch and review again");
+    await expect(f.repo.apply(preview)).rejects.toThrow("fetch and push again");
     expect(await refs(f.remote)).toContain(`refs/heads/feature ${other}`);
   } finally { await f.cleanup(); }
 });
