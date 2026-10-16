@@ -1082,6 +1082,7 @@ for (const flow of ["new menu", "form"] as const) {
       const write = spyOn(t.repo, "apply").mockImplementation(async prepared => {
         await apply(prepared);
         reload = spyOn(t.repo, "snapshot").mockRejectedValue(new Error("Graph unavailable"));
+        return null;
       });
       try {
         if (flow === "new menu") t.choose("New child"); else t.screen.mockInput.pressEnter();
@@ -1785,7 +1786,7 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
     expect(frame).toContain("Tracking: start tracking published@origin");
     expect((await t.repo.bookmarks()).some(item => item.name === "published")).toBe(false);
     t.screen.mockInput.pressEnter();
-    await t.until("Git publish completed");
+    await t.until("Published published to origin");
     const bookmarks = await t.repo.bookmarks();
     expect(bookmarks.find(item => item.name === "published" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [revision.commitId] });
     const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/published"], { stdout: "pipe" });
@@ -1801,6 +1802,44 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
     await t.until("Bookmark to push to origin");
     const input = t.screen.renderer.root.findDescendantById("prompt-input");
     expect(input instanceof InputRenderable && input.value).toBe("published");
+  } finally {
+    await t.cleanup();
+    await Bun.$`rm -rf ${remote}`.quiet();
+  }
+}, 15_000);
+
+test("a remote push applies at once and reports its target, but a remote deletion stops for review", async () => {
+  const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
+  const offers = async (name: string) => {
+    for (let attempt = 0; attempt < 150 && !t.chooser().options.some(option => option.name === name); attempt++) await Bun.sleep(10);
+  };
+  const pushFeature = async (ready: string) => {
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Git remotes");
+    t.choose("Git remotes");
+    await offers("origin");
+    t.choose("origin");
+    await t.until("Push bookmark");
+    t.choose("Push bookmark");
+    await t.until(ready);
+    t.choose("feature");
+  };
+  try {
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    await pushFeature("Publish this bookmark");
+    await t.until("Pushed feature to origin");
+    expect(t.screen.captureCharFrame()).toMatch(/added at [0-9a-f]{8}/);
+    await t.f.jj("bookmark", "delete", "feature");
+    await pushFeature("Delete the remote bookmark after a review");
+    await t.overlayReady("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain("Warning: This deletes feature on origin.");
+    expect((await t.repo.bookmarks()).some(item => item.name === "feature" && item.remote === "origin")).toBe(true);
+    t.screen.mockInput.pressEnter();
+    await t.until("Pushed feature to origin");
+    expect(t.screen.captureCharFrame()).toMatch(/deleted \(was [0-9a-f]{8}\)/);
+    expect((await t.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
   } finally {
     await t.cleanup();
     await Bun.$`rm -rf ${remote}`.quiet();

@@ -32,6 +32,7 @@ export class Repository {
   private readonly pendingDiffs = new Map<string, Promise<string>>();
   private diffChars = 0;
   private diffGeneration = 0;
+  private networkAbort: AbortController | null = null;
   private constructor(readonly root: string) {}
 
   static async open(path: string): Promise<Repository> {
@@ -185,6 +186,7 @@ export class Repository {
     await this.assertCurrent(targets, operationId);
     let summary: string;
     let remoteUrl: string | undefined;
+    let caution: string | undefined;
     let rebasing: Revision[] = [];
     switch (action.kind) {
       case "git-fetch":
@@ -192,8 +194,9 @@ export class Repository {
       case "git-publish":
       case "bookmark-track":
       case "bookmark-untrack": {
-        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId);
-        summary = preview.summary; remoteUrl = preview.remoteUrl;
+        const bookmarks = await this.bookmarks();
+        const preview = await this.withNetwork(signal => prepareRemote(this.root, action, bookmarks, operationId, signal));
+        summary = preview.summary; remoteUrl = preview.remoteUrl; caution = preview.caution;
         break;
       }
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
@@ -245,14 +248,32 @@ export class Repository {
     const trees = action.kind === "rebase" || action.kind === "squash"
       ? await projectedTree(this.root, action, operationId, rebasing) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
-    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }) };
+    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(caution ? { caution } : {}) };
   }
 
-  async apply(prepared: PreparedMutation): Promise<void> {
+  /** Applies a prepared mutation; remote actions return a short report of what changed. */
+  async apply(prepared: PreparedMutation): Promise<string | null> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    if (prepared.remoteUrl !== undefined) { await applyRemote(this.root, prepared, await this.bookmarks()); return; }
+    if (prepared.remoteUrl !== undefined) {
+      const bookmarks = await this.bookmarks();
+      return await this.withNetwork(signal => applyRemote(this.root, prepared, bookmarks, signal));
+    }
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
+    return null;
+  }
+
+  /** True while a fetch or push can be stopped with cancelNetwork(). */
+  get networkActive() { return this.networkAbort !== null; }
+
+  /** Stops the running fetch or push, if any. */
+  cancelNetwork() { this.networkAbort?.abort(); }
+
+  private async withNetwork<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    this.networkAbort = controller;
+    try { return await work(controller.signal); }
+    finally { if (this.networkAbort === controller) this.networkAbort = null; }
   }
 }
