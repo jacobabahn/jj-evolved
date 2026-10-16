@@ -175,7 +175,7 @@ export const scenarios: Scenario[] = [
       ui.choose("Push bookmark");
       await ui.until("Publish this bookmark");
       ui.choose("feature");
-      await ui.until("Git push completed");
+      await ui.until("Pushed feature to origin");
       await ui.capture("The chosen bookmark is pushed without a further prompt");
       assert((await ui.repo.bookmarks()).some(bookmark => bookmark.remote === "origin" && bookmark.name === "feature"));
       ui.key("b");
@@ -636,7 +636,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Tracking: start tracking login@origin");
       await ui.capture("One review covers the bookmark, tracking and push");
       ui.key("RETURN");
-      await ui.until("Git publish completed");
+      await ui.until("Published login to origin");
       await ui.settled();
       await ui.capture("The bookmark is created, tracked and pushed");
       const commit = (await ui.repo.snapshot("@")).revisions[0]!.commitId;
