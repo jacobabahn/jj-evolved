@@ -47,6 +47,7 @@ export type InteractiveAction =
 
 export interface Operation { id: string; description: string; time: string; current: boolean }
 export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean; tracked?: boolean }
+export interface RevsetAlias { name: string; definition: string }
 export interface ChangedFile { path: string; status: string }
 export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string> }
 export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null; remoteUrl?: string }

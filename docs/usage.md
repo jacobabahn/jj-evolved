@@ -202,18 +202,29 @@ custom browse shortcut inserts text. Ctrl-C remains available everywhere.
 
 ## Revset completion
 
-In the `L` revset prompt, type a bookmark or function prefix and press Tab to insert a suggestion.
-Tab cycles forward and Shift-Tab cycles backward; the visible list tracks the
-selection. Enter applies the expression, and Escape cancels the prompt. Invalid
-expressions leave the current history view intact so you can correct the input.
-Completion replaces only the token at the cursor, preserving the surrounding
-expression. Local and remote bookmark suggestions use the most recently loaded
-repository state; press `Ctrl+R` before opening the prompt to refresh that state.
+In the `L` revset prompt, suggestions update as you type: built-in functions with
+their argument signatures, configured `revset-aliases` with their definitions,
+local and remote bookmarks, and local tags. Tab or Down selects the next
+suggestion and Shift-Tab or Up the previous one (Ctrl-N and Ctrl-P also work);
+the selection is inserted immediately and the list tracks it. Enter applies the
+expression, and Escape cancels the prompt without applying the draft. Invalid
+expressions leave the current history view and your input intact so you can
+correct it. An empty input restores the `jj log` default revset.
 
-Suggestions are computed locally without running commands or contacting remotes.
-Bookmark names are quoted when needed, and a small list of common built-in jj
-functions is included. This is token completion, not a full revset parser: custom
-aliases, argument-aware suggestions, and syntax validation remain jj's job.
+Completion replaces only the token at the cursor, preserving the surrounding
+expression. Names that need it are quoted, including each side of a remote
+bookmark. Functions and function aliases that take arguments are inserted with
+empty parentheses and the cursor between them; completing a name that is already
+followed by `(` keeps the existing arguments. Bookmark suggestions use the most
+recently loaded repository state; tags and aliases are read when the prompt opens.
+
+Successfully applied expressions are remembered per repository, most recent first
+(up to 50), in `$XDG_STATE_HOME/jj-evolved/revset-history.json` (by default under
+`~/.local/state`). Reopening the prompt lists them before you edit the current
+expression; once you type, earlier expressions that extend your input appear above
+the token suggestions and replace the whole input when selected. Suggestions never
+contact remotes. This is token completion, not a full revset parser: syntax
+validation remains jj's job.
 
 Help shows the active preset (`custom` when file overrides are present). Use j/k or arrows to scroll and PgUp/PgDn to page. Sections separate navigation, preview controls, editing, history, bookmarks, symbols, and fixed prompt keys. Unbound actions available in the action menu are marked `(Space menu)`.
 

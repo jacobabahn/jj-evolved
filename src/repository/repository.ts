@@ -1,4 +1,4 @@
-import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
+import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
 import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
@@ -23,6 +23,13 @@ function array(value: unknown): unknown[] {
 }
 function tuples(output: string): unknown[][] {
   return output.split("\n").filter(Boolean).map(line => array(JSON.parse(line)));
+}
+/** The alias from a `revset-aliases.<key>` config path; the key is a bare, basic, or literal TOML key. */
+function aliasName(path: string): string {
+  const key = path.slice("revset-aliases.".length);
+  if (key.startsWith("'")) return key.slice(1, -1);
+  if (key.startsWith('"')) { try { return string(JSON.parse(key)); } catch { return ""; } }
+  return key;
 }
 const diffKey = (revision: Revision, files: string[]) => [revision.commitId, ...files].join("\0");
 export class Repository {
@@ -141,6 +148,19 @@ export class Repository {
     const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
       `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ ']\n'`]);
     return tuples(output).map(([name, remote, targets, conflict, tracked]) => ({ tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict) }));
+  }
+
+  /** Local tags and configured revset aliases, for revset completion. jj's internal `builtin_` aliases are omitted. */
+  async revsetSymbols(): Promise<{ tags: string[]; aliases: RevsetAlias[] }> {
+    const [tags, aliases] = await Promise.all([
+      run(this.root, ["--ignore-working-copy", "--at-op=@", "tag", "list", "-T", 'if(!remote, json(name) ++ "\\n")']),
+      run(this.root, ["--ignore-working-copy", "config", "list", "--include-defaults", "revset-aliases", "-T", '"[" ++ json(name) ++ "," ++ json(value) ++ "]\\n"']),
+    ]);
+    return {
+      tags: tags.split("\n").filter(Boolean).map(line => string(JSON.parse(line))),
+      aliases: tuples(aliases).map(([key, value]) => ({ name: aliasName(string(key)), definition: typeof value === "string" ? value : JSON.stringify(value) }))
+        .filter(alias => alias.name && !alias.name.startsWith("builtin_")),
+    };
   }
 
   async remotes(): Promise<Remote[]> { return remoteList(this.root); }
