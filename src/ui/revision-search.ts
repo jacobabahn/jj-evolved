@@ -16,6 +16,8 @@ type Chooser = Pick<SelectRenderable, "moveUp" | "moveDown" | "focus">;
 export class ListSearch<T> {
   readonly input: InputRenderable;
   matches: T[];
+  // Called when the search input opens or closes, so the footer can switch to the search keys.
+  onActiveChange?: () => void;
   private editing = false;
 
   constructor(ctx: RenderContext, id: string, private readonly choices: Chooser, private readonly items: T[],
@@ -29,10 +31,13 @@ export class ListSearch<T> {
     });
   }
 
+  get active() { return this.editing; }
+
   start() {
     this.editing = true;
     this.input.visible = true;
     this.input.focus();
+    this.onActiveChange?.();
   }
 
   handleKey(key: KeyEvent): boolean {
@@ -51,6 +56,7 @@ export class ListSearch<T> {
       this.matches = this.items;
       this.render(this.matches);
       this.choices.focus();
+      this.onActiveChange?.();
       return true;
     }
     if (key.name === "return") return false;
