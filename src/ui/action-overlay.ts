@@ -1,6 +1,7 @@
 import { getTheme } from "./theme";
 import { BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
 import { terminalText } from "../terminal-text";
+import type { ShortcutLine } from "./shortcut-bar";
 
 export class ActionOverlay extends BoxRenderable {
   onError?: (message: string) => void;
@@ -8,7 +9,9 @@ export class ActionOverlay extends BoxRenderable {
   readonly fields: BoxRenderable;
   readonly feedback: TextRenderable;
   readonly body: BoxRenderable;
-  readonly hints: TextRenderable;
+  // The overlay's keys are shown in the app footer rather than inside the overlay.
+  onKeys?: () => void;
+  private shortcuts: ShortcutLine = { left: [] };
 
   constructor(ctx: RenderContext, id: string) {
     super(ctx, {
@@ -20,8 +23,13 @@ export class ActionOverlay extends BoxRenderable {
     this.fields = new BoxRenderable(ctx, { id: `${id}-fields`, flexDirection: "column", flexShrink: 0 });
     this.feedback = new TextRenderable(ctx, { id: `${id}-feedback`, height: 2, flexShrink: 0, fg: getTheme(this.ctx).muted, visible: false });
     this.body = new BoxRenderable(ctx, { id: `${id}-body`, marginBottom: 1, height: 0, flexGrow: 1, minHeight: 1, flexDirection: "column" });
-    this.hints = new TextRenderable(ctx, { id: `${id}-hints`, height: 1, flexShrink: 0, fg: getTheme(this.ctx).accent, truncate: true });
-    for (const child of [this.context, this.fields, this.feedback, this.body, this.hints]) this.add(child);
+    for (const child of [this.context, this.fields, this.feedback, this.body]) this.add(child);
+  }
+
+  get keys(): ShortcutLine { return this.shortcuts; }
+  set keys(keys: ShortcutLine) {
+    this.shortcuts = keys;
+    this.onKeys?.();
   }
 
   applyTheme() {
@@ -29,7 +37,6 @@ export class ActionOverlay extends BoxRenderable {
     this.borderColor = colors.accent;
     this.backgroundColor = colors.panel;
     this.context.fg = this.feedback.fg = colors.muted;
-    this.hints.fg = colors.accent;
   }
 
   report(message: string, error = false) {

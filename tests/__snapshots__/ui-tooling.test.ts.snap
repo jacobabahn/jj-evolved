@@ -19,45 +19,204 @@ exports[`styled selection and help layout at 80 columns: selected revision 80 1`
 ]
 `;
 
+exports[`styled selection and help layout at 80 columns: footer styles 80 1`] = `
+[
+  [
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "j/k",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " move  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "L",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " revset  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "/",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " search  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "Tab",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " focus preview  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "[ ]",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " parent/child",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#ffffff",
+      "text": "               ",
+    },
+  ],
+  [
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "Enter",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " describe  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "d",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " diff  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "n",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " new  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "e",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " edit  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "r",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " rebase    ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "Space",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " actions  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "?",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " help  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "q",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " quit",
+    },
+  ],
+]
+`;
+
 exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 "┌─ Help · keys: jjui ───────────────────────────────────────────┐
 │Keyboard reference · jjui preset                               │
 │Switch: --keys jjui|legacy, JJ_EVOLVED_KEYS, keybindings.json  │
 │┌─ Keyboard reference ────────────────────────────────────────┐│
 ││Navigate                                                     ▀│
-││j/down / k/up     Move through revisions                      │
-││Tab               Switch focus between the revisions and the  │
-││                  preview                                     │
-││@ / [ / ]         Jump to the working copy / parent / child;  │
-││                  choose when there are several               │
-││^O                Return from a temporary reveal to the       │
-││                  previous view                               │
-││^L                Load 200 more revisions, keeping the        │
-││                  selection                                   │
-││^R                Refresh history now; external changes also  │
-││                  refresh automatically                       │
-││?                 Show this help                              │
-││^E                Show the last error in full; Esc or d       │
-││                  returns to the diff                         │
-││q / Ctrl-C        Quit                                        │
+││j/down / k/up    Move through revisions                       │
+││Tab              Switch focus between the revisions and the   │
+││                 preview                                      │
+││@ / [ / ]        Jump to the working copy / parent / child;   │
+││                 choose when there are several                │
+││^O               Return from a temporary reveal to the        │
+││                 previous view                                │
+││^L               Load 200 more revisions, keeping the         │
+││                 selection                                    │
+││^R               Refresh history now; external changes also   │
+││                 refresh automatically                        │
+││?                Show this help                               │
+││^E               Show the last error in full; Esc or d        │
+││                 returns to the diff                          │
+││q / ^C           Quit                                         │
 ││                                                              │
+││Preview pane                                                  │
 ││                                                              │
 │└─────────────────────────────────────────────────────────────┘│
-│Esc/? close  j/k scroll  PgUp/PgDn page                        │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘"
-`;
-
-exports[`styled selection and help layout at 80 columns: footer styles 80 1`] = `
-[
-  {
-    "attributes": 0,
-    "bg": "#101820",
-    "fg": "#6ed6bd",
-    "text": "j/k move  L revset  / search  '/" match  @ work  [/] ancestry  ^O return",
-    "width": 72,
-  },
-]
 `;
 
 exports[`styled selection and help layout at 120 columns: selected revision 120 1`] = `
@@ -79,43 +238,226 @@ exports[`styled selection and help layout at 120 columns: selected revision 120 
 ]
 `;
 
+exports[`styled selection and help layout at 120 columns: footer styles 120 1`] = `
+[
+  [
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "j/k",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " move  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "L",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " revset  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "/",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " search  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "Tab",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " focus preview  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "[ ]",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " parent/child  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "@",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " working copy",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#ffffff",
+      "text": "                                       ",
+    },
+  ],
+  [
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "Enter",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " describe  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "d",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " diff  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "n",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " new  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "e",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " edit  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "r",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " rebase  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "S",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " squash                                  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "Space",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " actions  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "?",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " help  ",
+    },
+    {
+      "attributes": 1,
+      "bg": "#101820",
+      "fg": "#6ed6bd",
+      "text": "q",
+    },
+    {
+      "attributes": 0,
+      "bg": "#101820",
+      "fg": "#91a6b7",
+      "text": " quit",
+    },
+  ],
+]
+`;
+
 exports[`styled selection and help layout at 120 columns: help layout 120 1`] = `
 "┌─ Help · keys: jjui ─────────────────────────────────────────────────────────────────────────────┐
 │Keyboard reference · jjui preset                                                                 │
 │Switch: --keys jjui|legacy, JJ_EVOLVED_KEYS, keybindings.json                                    │
 │┌─ Keyboard reference ──────────────────────────────────────────────────────────────────────────┐│
 ││Navigate                                                                                     ▀ ││
-││j/down / k/up     Move through revisions                                                       ││
-││Tab               Switch focus between the revisions and the preview                           ││
-││@ / [ / ]         Jump to the working copy / parent / child; choose when there are several     ││
-││^O                Return from a temporary reveal to the previous view                          ││
-││^L                Load 200 more revisions, keeping the selection                               ││
-││^R                Refresh history now; external changes also refresh automatically             ││
-││?                 Show this help                                                               ││
-││^E                Show the last error in full; Esc or d returns to the diff                    ││
-││q / Ctrl-C        Quit                                                                         ││
+││j/down / k/up    Move through revisions                                                        ││
+││Tab              Switch focus between the revisions and the preview                            ││
+││@ / [ / ]        Jump to the working copy / parent / child; choose when there are several      ││
+││^O               Return from a temporary reveal to the previous view                           ││
+││^L               Load 200 more revisions, keeping the selection                                ││
+││^R               Refresh history now; external changes also refresh automatically              ││
+││?                Show this help                                                                ││
+││^E               Show the last error in full; Esc or d returns to the diff                     ││
+││q / ^C           Quit                                                                          ││
 ││                                                                                               ││
 ││Preview pane                                                                                   ││
-││p                 Hide or show the preview; the graph expands when hidden                      ││
-││PgUp / PgDn       Scroll the preview by page                                                   ││
-││^P / ^N           Scroll the preview by line, keeping graph focus                              ││
-││^U / ^D           Scroll the preview by half page                                              ││
-││d                 Show the selected revision's diff                                            ││
+││p                Hide or show the preview; the graph expands when hidden                       ││
+││PgDn / PgUp      Scroll the preview by page                                                    ││
+││^N / ^P          Scroll the preview by line, keeping graph focus                               ││
+││^D / ^U          Scroll the preview by half page                                               ││
+││d                Show the selected revision's diff                                             ││
+││l/Right          Expand changed files under the revision; j/k file, Enter focus diff, h/Left/  ││
 ││                                                                                               ││
 │└───────────────────────────────────────────────────────────────────────────────────────────────┘│
-│Esc/? close  j/k scroll  PgUp/PgDn page                                                          │
 │                                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘"
-`;
-
-exports[`styled selection and help layout at 120 columns: footer styles 120 1`] = `
-[
-  {
-    "attributes": 0,
-    "bg": "#101820",
-    "fg": "#6ed6bd",
-    "text": "j/k move  L revset  / search  '/" match  @ work  [/] ancestry  ^O return",
-    "width": 72,
-  },
-]
 `;

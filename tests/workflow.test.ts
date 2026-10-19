@@ -123,7 +123,7 @@ test("auto-refresh detects commands and file edits, preserving selection, search
     await t.app.checkForUpdates();
     expect(t.node<any>("preview").visible).toBe(false);
     await t.screen.renderOnce();
-    expect(t.screen.captureCharFrame()).toContain("| Next");
+    expect(t.screen.captureCharFrame()).toContain("· Next");
     const editorTarget = (await t.repo.navigationRevisions("@"))[0]!;
     expect(editorTarget.changeId).toBe(before.changeId);
     t.screen.mockInput.pressEnter();

@@ -87,7 +87,7 @@ export class HistoryForm extends ActionOverlay {
     labels.push(`Apply ${this.draft.kind}`);
     this.controls.options = labels.map(name => ({ name: terminalText(name), description: "" }));
     this.controls.setSelectedIndex(Math.max(0, index));
-    this.hints.content = "j/k move  Enter edit/apply  Esc close  p preview  PgUp/Dn";
+    this.keys = { left: [["j/k", "move"], ["Enter", "edit/apply"], ["p", "preview"], ["PgDn/PgUp", "scroll preview"]], right: [["Esc", "close"]] };
     this.controls.focus();
   }
 
@@ -152,6 +152,7 @@ export class HistoryForm extends ActionOverlay {
       };
       render(revisions);
       this.destinationSearch = new RevisionSearch(this.ctx, "history-destination-search", this.choices, revisions, bookmarks, render);
+      this.destinationSearch.onActiveChange = () => this.showChoiceKeys();
       this.fields.add(this.destinationSearch.input);
     } else if (this.draft.kind === "rebase") {
       this.draft.descendants = !this.draft.descendants;
@@ -168,7 +169,7 @@ export class HistoryForm extends ActionOverlay {
       this.input.value = this.draft.keepDescription ? "" : this.draft.description;
       this.input.visible = true;
       this.input.focus();
-      this.hints.content = "Enter save description  Ctrl-D keep destination text  Esc back";
+      this.keys = { left: [["Enter", "save description"], ["^D", "keep destination text"]], right: [["Esc", "back"]] };
       return;
     }
     if (this.mode.kind !== "destination") this.report("");
@@ -176,7 +177,15 @@ export class HistoryForm extends ActionOverlay {
     this.choices.visible = true;
     this.preview.visible = false;
     this.choices.focus();
-    this.hints.content = this.mode.kind === "destination" ? "j/k choose · / search all destinations · Enter select · Esc back" : "j/k choose  Enter select  Esc back to form";
+    this.showChoiceKeys();
+  }
+
+  private showChoiceKeys() {
+    this.keys = this.destinationSearch?.active
+      ? { left: [["^N/^P", "choose"], ["Enter", "select"]], right: [["Esc", "clear"]] }
+      : this.mode.kind === "destination"
+        ? { left: [["j/k", "choose"], ["Enter", "select"], ["/", "search all destinations"]], right: [["Esc", "back"]] }
+        : { left: [["j/k", "choose"], ["Enter", "select"]], right: [["Esc", "back to form"]] };
   }
 
   private renderFiles() {
