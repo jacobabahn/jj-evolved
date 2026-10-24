@@ -195,6 +195,30 @@ test("publish infers the bookmark on the change, then on the nearest mutable anc
   } finally { await f.cleanup(); }
 });
 
+test("publish never infers a conflicted bookmark, which the push would refuse", async () => {
+  const f = await remoteFixture();
+  const publisher = await fixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await publisher.jj("bookmark", "forget", "feature");
+    await publisher.jj("git", "remote", "add", "origin", f.remote);
+    await publisher.jj("git", "fetch", "--remote", "origin");
+    await publisher.jj("bookmark", "track", "feature", "--remote", "origin");
+    await publisher.jj("new", "feature", "-m", "Upstream work");
+    await publisher.jj("bookmark", "set", "feature", "-r", "@");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:feature");
+    // The local bookmark moves one way and the remote another, so the fetch leaves feature conflicted.
+    await f.jj("bookmark", "set", "feature", "-r", "@");
+    await f.jj("git", "fetch", "--remote", "origin");
+    const bookmarks = await f.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "feature" && !item.remote)?.conflict).toBe(true);
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    expect(await f.repo.publishBookmarks(revision, bookmarks)).toEqual({ names: [], advance: true });
+    await f.jj("new", "-m", "On top");
+    expect(await f.repo.publishBookmarks((await f.repo.snapshot("@")).revisions[0]!, await f.repo.bookmarks())).toEqual({ names: [], advance: true });
+  } finally { await f.cleanup(); await publisher.cleanup(); }
+});
+
 test("the suggested bookmark name follows templates.git_push_bookmark", async () => {
   const f = await remoteFixture();
   try {

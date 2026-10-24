@@ -18,9 +18,11 @@ export async function defaultPushRemote(root: string, remotes: Remote[]): Promis
   return remotes.find(item => item.name === configured) ?? remotes.find(item => item.name === "origin") ?? (remotes.length === 1 ? remotes[0] : undefined);
 }
 
-// Immutable ancestors are left out, so a change stacked on main is never offered "advance main and push".
+// Immutable ancestors are left out, so a change stacked on main is never offered "advance main and push". Conflicted
+// bookmarks, local or remote, are left out too, since the push would refuse them.
 export async function publishBookmarks(root: string, revision: Revision, bookmarks: Bookmark[]): Promise<PublishBookmarks> {
-  const on = (commitId: string) => bookmarks.filter(item => !item.remote && item.targets.includes(commitId)).map(item => item.name);
+  const conflicted = new Set(bookmarks.filter(item => item.conflict).map(item => item.name));
+  const on = (commitId: string) => bookmarks.filter(item => !item.remote && !conflicted.has(item.name) && item.targets.includes(commitId)).map(item => item.name);
   const here = on(revision.commitId);
   if (here.length) return { names: here, advance: false };
   const ancestors = await logRevisions(root, `heads(::${revision.commitId} & bookmarks() & mutable())`);
