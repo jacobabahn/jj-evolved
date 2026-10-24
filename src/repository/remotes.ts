@@ -43,7 +43,16 @@ function publishState(action: PublishAction, bookmarks: Bookmark[]) {
   return { local, remote, placed: local?.targets.length === 1 && local.targets[0] === action.revision.commitId };
 }
 
-async function preparePublish(root: string, action: PublishAction, bookmarks: Bookmark[], operationId: string) {
+// A publish has no dry run to read, so it gets the same caution as a push from the remote bookmark's ancestry.
+async function publishCaution(root: string, action: PublishAction, previous: string, operationId: string): Promise<string | undefined> {
+  const target = action.revision.commitId;
+  if (!previous || previous === target) return undefined;
+  if ((await logRevisions(root, `${previous} & ::${target}`, operationId)).length) return undefined;
+  const direction = (await logRevisions(root, `${target} & ::${previous}`, operationId)).length ? "backward" : "sideways";
+  return `This moves ${action.name}@${action.remote} ${direction}; commits now on the remote bookmark will no longer be reachable from it.`;
+}
+
+async function preparePublish(root: string, action: PublishAction, bookmarks: Bookmark[], operationId: string): Promise<{ summary: string; caution?: string }> {
   if (!action.name) throw new Error("Enter a bookmark name.");
   const { local, remote, placed } = publishState(action, bookmarks);
   const target = action.revision.commitId;
@@ -63,7 +72,8 @@ async function preparePublish(root: string, action: PublishAction, bookmarks: Bo
   summary += `Tracking: ${remote ? "already tracking" : "start tracking"} ${action.name}@${action.remote}\n`;
   summary += `Push:     ${previous === target ? "remote is already up to date" : previous ? `move ${action.name}@${action.remote} from ${previous} to ${target}` : `add ${action.name}@${action.remote} at ${target}`}\n\n`;
   summary += commits.length ? `Commits to publish (${commits.length}):\n${commits.map(item => `  ${label(item)}`).join("\n")}` : "No new commits to publish.";
-  return summary;
+  const caution = await publishCaution(root, action, remote?.targets.length === 1 ? remote.targets[0]! : "", operationId);
+  return { summary, ...(caution ? { caution } : {}) };
 }
 
 // The whole publish is cancellable, so Escape during its local steps stops the push before it starts; the local
@@ -197,7 +207,9 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
   if (action.kind === "git-fetch") {
     summary += "Fetch bookmarks and commits from this remote. Tracked bookmarks may update local bookmarks and the working copy. No local commits are pushed.";
   } else if (action.kind === "git-publish") {
-    summary += await preparePublish(root, action, bookmarks, operationId);
+    const publish = await preparePublish(root, action, bookmarks, operationId);
+    caution = publish.caution;
+    summary = `${caution ? `Warning: ${caution}\n\n` : ""}${summary}${publish.summary}`;
     summary += "\n\nThis publishes commits to the remote. Local undo cannot undo a push. JJ rejects a push if the remote changed since the last fetch.";
   } else if (action.kind === "git-push") {
     const local = bookmarks.find(item => !item.remote && item.name === action.name);

@@ -22,10 +22,12 @@ import { terminalText } from "./terminal-text";
 import { isRealRemote, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
-/** One extra key a review offers besides apply, such as publishing under another name. */
+/** One extra key a review offers besides apply, such as also deleting a bookmark on its remote. */
 type ReviewOption = { key: string; hint: string; choose: () => void };
 /** What follows a review once it has been applied: it may open the next review, or return a note for the message line. */
 type ReviewStep = () => Promise<string | void>;
+/** What a review adds to apply and cancel: an extra key, a next step, and footer labels for Enter and Escape. */
+type ReviewExtras = { option?: ReviewOption; then?: ReviewStep; labels?: { apply: string; cancel: string } };
 
 type Prompt =
   | { kind: "browse" }
@@ -39,7 +41,7 @@ type Prompt =
   | { kind: "files"; revision: Revision; files: ChangedFile[] }
   | { kind: "text"; label: string; accept: (value: string) => void }
   | { kind: "help" }
-  | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null; option: ReviewOption | null; then: ReviewStep | null };
+  | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null; extras: ReviewExtras };
 
 
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
@@ -97,7 +99,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
     ] },
     { title: "Bookmarks & remotes", rows: [
       [keys(["bookmarks"]), "Bookmarks with their sync state: move, rename, push, track or untrack; delete locally or also on the remote"],
-      [keys(["git"]), "Git menu: p pushes the selected change under its bookmark, advancing the nearest ancestor bookmark or asking for a name; f fetches; s fetches, then previews rebasing the selected stack onto trunk(); r browses remotes"],
+      [keys(["git"]), "Git menu: p pushes the selected change under its bookmark, advancing the nearest ancestor bookmark or asking for a name; n pushes it under another name; f fetches; s fetches, then previews rebasing the selected stack onto trunk(); r browses remotes"],
       ["Drag [bookmark]", "Drop a local bookmark onto another change to preview a move; Esc or dropping outside the graph cancels"],
     ] },
     { title: "Symbols", rows: [
@@ -775,10 +777,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.keys = { left: [["Enter", "apply"], ["Tab/Shift-Tab", "complete"]], right: [exit("cancel")] };
       updateCompletions();
     }
-    if (next.kind === "confirm") overlay.keys = {
-      left: [["Enter", next.then ? "apply and continue" : "apply"], ...(next.option ? [[next.option.key, next.option.hint] as Shortcut] : []), ["p", "refresh preview"], previewScroll],
-      right: [exit("cancel")],
-    };
+    if (next.kind === "confirm") {
+      const { option, then, labels } = next.extras;
+      overlay.keys = {
+        left: [["Enter", labels?.apply ?? (then ? "apply and continue" : "apply")], ...(option ? [[option.key, option.hint] as Shortcut] : []), ["p", "refresh preview"], previewScroll],
+        right: [labels ? ["Esc", labels.cancel] : exit("cancel")],
+      };
+    }
   }
   async function submit() {
     if (isBusy()) return;
@@ -787,7 +792,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (current.kind === "text") { current.accept(value); return; }
     if (current.kind === "confirm") {
       let note = "";
-      await run(networkLabel(current.action) ?? "Applying jj operation…", async () => { note = await applyReviewed(current.then) ?? ""; });
+      await run(networkLabel(current.action) ?? "Applying jj operation…", async () => { note = await applyReviewed(current.extras.then) ?? ""; });
       if (note && !stopped && prompt.kind === "browse") report(note);
       return;
     }
@@ -814,7 +819,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
   }
   /** Applies the prepared action, then runs its next step, which may return a note for the message line. */
-  async function applyReviewed(then: ReviewStep | null = null): Promise<string | void> {
+  async function applyReviewed(then?: ReviewStep): Promise<string | void> {
     const outcome = await review.apply();
     if (outcome.kind === "not-ready") {
       // Only the review screen and history form bind p to a fresh preview; elsewhere p toggles the preview pane.
@@ -833,10 +838,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function operationLabel(kind: Mutation["kind"]) {
     return kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ").replace(/^[a-z]/, letter => letter.toUpperCase());
   }
-  function openReview(action: Mutation, prepared: PreparedMutation, edit: (() => void) | null, back: (() => void) | null, option: ReviewOption | null = null, then: ReviewStep | null = null) {
+  function openReview(action: Mutation, prepared: PreparedMutation, edit: (() => void) | null, back: (() => void) | null, extras: ReviewExtras = {}) {
     showOverlay(prepared.summary, `${operationLabel(action.kind)} preview`);
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
-    openPrompt({ kind: "confirm", action, edit, back, option, then }, "Review before applying");
+    openPrompt({ kind: "confirm", action, edit, back, extras }, "Review before applying");
   }
   /** Where Escape and a failed apply return to from a review opened over the current prompt. */
   function reviewReturns() {
@@ -852,15 +857,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (action.kind === "bookmark-delete" && action.push && action.remote) return `Deleting ${action.name} here and on ${action.remote}…`;
     return null;
   }
-  function confirm(action: Mutation, option: ReviewOption | null = null, then: ReviewStep | null = null) {
+  function confirm(action: Mutation, extras: ReviewExtras = {}) {
     const previous = prompt;
     const { back, edit } = reviewReturns();
-    // Refreshing the preview reviews the same action again, so its option and next step stay.
-    if (previous.kind === "confirm" && previous.action === action) { option ??= previous.option; then ??= previous.then; }
+    // Refreshing the preview reviews the same action again, so its option, next step and labels stay.
+    if (previous.kind === "confirm" && previous.action === action) extras = { ...previous.extras, ...extras };
     void run("Preparing operation preview…", async () => {
       const prepared = await review.prepare(action);
       if (!prepared) return;
-      openReview(action, prepared, edit, back, option, then);
+      openReview(action, prepared, edit, back, extras);
       if (back) {
         inlineHint.visible = false;
         if (action.kind === "rebase" || action.kind === "squash") {
@@ -1134,7 +1139,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else pick(title, remotes.map(remote => ({ name: remote.name, description: remote.url, choose: () => choose(remote) })));
   }
   // The second half of a sync, run once its fetch has been applied: reviews `jj rebase -b <target> -d 'trunk()'` as an
-  // ordinary rebase. Escape there leaves the fetch in place.
+  // ordinary rebase. Escape there skips the rebase and leaves the fetch in place.
   async function rebaseOntoTrunk(target: Revision, remote: Remote): Promise<string | void> {
     const fetched = `Fetched from ${remote.name}.`;
     try {
@@ -1145,13 +1150,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (plan.kind !== "rebase") return `${fetched} ${plan.reason}`;
       const prepared = await review.prepare(plan.action);
       if (!prepared) return;
-      openReview(plan.action, prepared, null, null);
-      overlay.context.content = terminalText(`${fetched} Rebase the stack of ${shortChangeId(current)} onto trunk()\nEnter applies the rebase · Esc keeps the fetch and skips the rebase`);
+      openReview(plan.action, prepared, null, null, { labels: { apply: "apply rebase", cancel: "skip rebase" } });
+      overlay.context.content = terminalText(`${fetched} Rebase the stack of ${shortChangeId(current)} onto trunk()\nSkipping the rebase keeps the fetch.`);
     } catch (error) { throw new Error(`${fetched} The rebase onto trunk could not be previewed: ${errorText(error)}`); }
   }
   // jjui's git menu: g opens it, then p pushes the selected change and f fetches.
   function showGit(revision: Revision | undefined, only?: "publish") {
-    // The standalone publish opens its review once this load has finished, because a review is a run of its own.
+    // The standalone publish runs once this load has finished, because applying is a run of its own.
     let direct: (() => void) | undefined;
     void run("Loading remotes…", async () => {
       const [remotes, bookmarks] = await Promise.all([repository.remotes(), repository.bookmarks()]);
@@ -1160,27 +1165,31 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (!remotes.length) { showOverlay("No Git remotes configured. Add one with jj git remote add in your terminal.", "Remotes"); return; }
       const each = (title: string, choose: (remote: Remote) => void) => eachRemote(remotes, preferred, title, choose);
       const { names, advance } = inferred ?? { names: [], advance: false };
+      // Like every push, a publish applies at once and stops for review only when it would move the remote bookmark backward or sideways.
+      const push = (target: Revision, remote: Remote, name: string) => applyNow({ kind: "git-publish", remote: remote.name, name, revision: target });
+      // Starts from the name jj itself would give this change with `jj git push --change`.
+      const askName = (target: Revision, remote: Remote) => void run("Loading bookmark name…", async () => {
+        const generated = await repository.generatedBookmarkName(target);
+        if (!stopped) ask(`Bookmark to push to ${remote.name}`, generated, value => push(target, remote, value.trim()));
+      }, true);
       const publish = (target: Revision) => each("Push to remote", remote => {
-        const push = (name: string, option?: ReviewOption) => confirm({ kind: "git-publish", remote: remote.name, name, revision: target }, option);
-        // Starts from the name jj itself would give this change with `jj git push --change`.
-        const askName = () => void run("Loading bookmark name…", async () => {
-          const generated = await repository.generatedBookmarkName(target);
-          if (!stopped) ask(`Bookmark to push to ${remote.name}`, generated, value => push(value.trim()));
-        }, true);
-        if (names.length === 1) push(names[0]!, { key: "n", hint: "other name", choose: askName });
+        if (names.length === 1) push(target, remote, names[0]!);
         else if (names.length) pick(`Bookmark to push to ${remote.name}`, [
-          ...names.map(name => ({ name, description: advance ? "Advance this bookmark to the selected change, then push it" : "Already on the selected change", choose: () => push(name) })),
-          { name: "Other name…", description: "Create or move a bookmark by name", choose: askName },
+          ...names.map(name => ({ name, description: advance ? "Advance this bookmark to the selected change, then push it" : "Already on the selected change", choose: () => push(target, remote, name) })),
+          { name: "Other name…", description: "Create or move a bookmark by name", choose: () => askName(target, remote) },
         ]);
-        else askName();
+        else askName(target, remote);
       });
       if (only && revision) { direct = () => publish(revision); return; }
       const to = preferred ? ` ${preferred.name}` : "";
-      const [inferredName] = names, after = `to${to || " a remote"} after a review`;
+      const [inferredName] = names, after = `to${to || " a remote"}`;
       const entry = names.length > 1 ? { name: "Push this change", description: `Choose ${names.join(", ")} or another name, then push ${after}` }
         : !inferredName ? { name: "Push this change", description: `Name a bookmark here, track it and push ${after}` }
         : advance ? { name: `Advance ${inferredName} here and push`, description: `Move bookmark ${inferredName} forward to this change, then push ${after}` }
         : { name: `Push ${inferredName}`, description: `Track and push bookmark ${inferredName} ${after}` };
+      // With one inferred bookmark, p pushes it at once, so another name has an entry of its own.
+      const otherName = revision && names.length === 1
+        ? [{ key: "n", hotkey: true, name: "Push under another name", description: `Name a bookmark here instead of ${inferredName}, then push ${after}`, choose: () => each("Push to remote", remote => askName(revision, remote)) }] : [];
       // A stack that can never be rebased is refused before fetching; whether it needs a rebase is decided after the fetch.
       const sync = (target: Revision) => {
         let ready = false;
@@ -1189,11 +1198,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           if (plan.kind === "blocked") throw new Error(plan.reason);
           ready = true;
         }, true).then(() => {
-          if (ready && !stopped) each("Fetch from remote", remote => confirm({ kind: "git-fetch", remote: remote.name }, null, () => rebaseOntoTrunk(target, remote)));
+          // The rebase is the fetch's next step, so a failed or cancelled fetch never reaches it.
+          if (ready && !stopped) each("Fetch from remote", remote => applyNow({ kind: "git-fetch", remote: remote.name }, undefined, () => rebaseOntoTrunk(target, remote)));
         });
       };
       pick("Git", [
         ...(revision ? [{ key: "p", hotkey: true, ...entry, choose: () => publish(revision) }] : []),
+        ...otherName,
         { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits", choose: () => each("Fetch from remote", remote => applyNow({ kind: "git-fetch", remote: remote.name })) },
         ...(revision ? [{ key: "s", hotkey: true, name: "Sync with trunk", description: `Fetch${to || " from a remote"}, then preview rebasing this change's stack onto trunk()`, choose: () => sync(revision) }] : []),
         { key: "r", hotkey: true, name: "Remotes", description: "Push another bookmark or a deletion, or fetch from a chosen remote", choose: showRemotes },
@@ -1222,7 +1233,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           choose: () => {
             if (!others.length) { showOverlay("The @git bookmark reflects the local Git repository. Manage it with Git.", "Local Git bookmark"); return; }
             pick(name, others.flatMap(remote => [
-              ...(remote.tracked ? [{ name: `Push deletion to ${remote.remote}`, description: "Review, then delete this bookmark on the remote", choose: () => confirm({ kind: "git-push", remote: remote.remote, name }) }] : []),
+              ...(remote.tracked ? [{ name: `Push deletion to ${remote.remote}`, description: "Delete this bookmark on the remote after a review", choose: () => applyNow({ kind: "git-push", remote: remote.remote, name }) }] : []),
               tracking(remote),
             ]));
           },
@@ -1230,7 +1241,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         const tracked = others.find(remote => remote.tracked);
         // A local-only delete is the default; r adds or drops the remote deletion in the same review.
         const remove = (push: boolean): void => confirm({ kind: "bookmark-delete", name, ...(tracked ? { remote: tracked.remote, push } : {}) },
-          tracked ? { key: "r", hint: push ? `keep it on ${tracked.remote}` : `also delete on ${tracked.remote}`, choose: () => remove(!push) } : null);
+          tracked ? { option: { key: "r", hint: push ? `keep it on ${tracked.remote}` : `also delete on ${tracked.remote}`, choose: () => remove(!push) } } : {});
         return {
           name: `${name}${local.conflict ? " !" : ""}`,
           description: `${local.conflict ? "conflicted · " : ""}${others.map(remote => syncState(local, remote)).join(" · ") || (local.localOnly ? "local only" : "local")} · ${short(local)}`,
@@ -1241,12 +1252,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             { name: "Rename bookmark", description: "Keep its current targets", choose: () => ask("New bookmark name", name, newName => confirm({ kind: "bookmark-rename", name, newName })) },
             { name: "Delete bookmark", description: tracked ? `Delete the local bookmark, and optionally ${name}@${tracked.remote}` : "Delete the local bookmark", choose: () => remove(false) },
             ...(local.conflict ? [] : others.filter(remote => remote.tracked && remote.ahead).map(remote => ({
-              name: `Push to ${remote.remote}`, description: `Review the ${remote.ahead} ${remote.ahead === 1 ? "commit" : "commits"} ${remote.remote} lacks, then push`,
-              choose: () => confirm({ kind: "git-push", remote: remote.remote, name }),
+              name: `Push to ${remote.remote}`, description: `Push the ${remote.ahead} ${remote.ahead === 1 ? "commit" : "commits"} ${remote.remote} lacks`,
+              choose: () => applyNow({ kind: "git-push", remote: remote.remote, name }),
             }))),
             ...(local.localOnly && !local.conflict && !others.length ? [{
-              name: `Push to ${preferred?.name ?? "a remote"}`, description: "Review, then add this bookmark to the remote and track it",
-              choose: () => eachRemote(remotes, preferred, "Push to remote", remote => confirm({ kind: "git-push", remote: remote.name, name })),
+              name: `Push to ${preferred?.name ?? "a remote"}`, description: "Add this bookmark to the remote and track it",
+              choose: () => eachRemote(remotes, preferred, "Push to remote", remote => applyNow({ kind: "git-push", remote: remote.name, name })),
             }] : []),
             ...others.map(tracking),
           ]),
@@ -1342,13 +1353,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
 
   /** Applies an action without stopping at the review screen, unless its preview carries a caution. */
-  function applyNow(action: Mutation, label = networkLabel(action) ?? "Applying jj operation…", then: ReviewStep | null = null) {
+  function applyNow(action: Mutation, label = networkLabel(action) ?? "Applying jj operation…", then?: ReviewStep) {
     const { back, edit } = reviewReturns();
     let note = "";
     void run(label, async () => {
       const prepared = await review.prepare(action);
       if (!prepared) return;
-      if (prepared.caution) openReview(action, prepared, edit, back, null, then);
+      if (prepared.caution) openReview(action, prepared, edit, back, { then });
       else note = await applyReviewed(then) ?? "";
     }).then(() => { if (note && !stopped && prompt.kind === "browse") report(note); });
   }
@@ -1629,7 +1640,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function confirmKey(key: KeyEvent, state: Extract<Prompt, { kind: "confirm" }>) {
     if (!isBusy() && key.name === "escape" && state.back) { key.preventDefault(); state.back(); void loadPreview(); }
     else if (!isBusy() && key.name === "p") { key.preventDefault(); confirm(state.action); }
-    else if (!isBusy() && state.option && !key.ctrl && !key.meta && key.sequence === state.option.key) { key.preventDefault(); state.option.choose(); }
+    else if (!isBusy() && state.extras.option && !key.ctrl && !key.meta && key.sequence === state.extras.option.key) { key.preventDefault(); state.extras.option.choose(); }
     else dialogKey(key);
   }
   function pickerKey(key: KeyEvent, state: Extract<Prompt, { kind: "picker" }>) {

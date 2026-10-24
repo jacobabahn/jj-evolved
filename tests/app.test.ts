@@ -1045,9 +1045,13 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
     t.choose("solo");
     await t.until("Push to origin");
     expect(t.chooser().options.map(option => option.value)).toEqual(["Move bookmark", "Rename bookmark", "Delete bookmark", "Push to origin"]);
-    t.screen.mockInput.pressEscape();
-    await t.until("Esc close");
-    t.screen.mockInput.pressKey("k");
+    // A push from the browser applies at once, like any other push that adds or advances a bookmark.
+    t.choose("Push to origin");
+    await t.until("Pushed solo to origin");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
+    expect(await pushed()).toContain("refs/heads/solo");
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Git remotes");
     t.choose("feature");
     await t.until("optionally feature@origin");
     expect(t.chooser().options.map(option => option.value)).toEqual(["Move bookmark", "Rename bookmark", "Delete bookmark", "Push to origin", "Untrack feature@origin"]);
@@ -1058,10 +1062,10 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
     t.screen.mockInput.pressKey("r");
     await t.until("cannot be undone locally");
     expect(t.screen.captureCharFrame()).toContain("r keep it on origin");
-    expect(await pushed()).toBe("refs/heads/feature");
+    expect(await pushed()).toContain("refs/heads/feature");
     t.screen.mockInput.pressEnter();
     await t.until("Deleted feature here and on origin");
-    expect(await pushed()).toBe("");
+    expect(await pushed()).toBe("refs/heads/solo");
     expect((await t.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
   } finally { await t.cleanup(); await Bun.$`rm -rf ${remote}`.quiet(); }
 }, 15_000);
@@ -1853,28 +1857,25 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
     await t.until("Bookmark to push to origin");
     const generated = input();
     expect(generated instanceof InputRenderable && generated.value).toBe(`push-${revision.changeId.slice(0, 12)}`);
-    await t.prompt("published", true);
-    const frame = t.screen.captureCharFrame();
-    expect(frame).toContain("Bookmark: published (create)");
-    expect(frame).toContain("Tracking: start tracking published@origin");
-    expect((await t.repo.bookmarks()).some(item => item.name === "published")).toBe(false);
+    t.screen.mockInput.pressKey("a", { ctrl: true });
+    t.screen.mockInput.pressKey("k", { ctrl: true });
+    await t.screen.mockInput.typeText("published");
     t.screen.mockInput.pressEnter();
     await t.until("Published published to origin");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
     const bookmarks = await t.repo.bookmarks();
     expect(bookmarks.find(item => item.name === "published" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [revision.commitId] });
     const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/published"], { stdout: "pipe" });
     expect((await new Response(pushed.stdout).text()).trim()).toBe(revision.commitId);
-    // The bookmark now on the change is named in the menu and used without asking, so publishing again is g p Enter.
-    t.screen.mockInput.pressKey("g");
-    await t.overlayReady("Push published");
-    t.screen.mockInput.pressEscape();
-    await Bun.sleep(50);
+    // The bookmark now on the change is named in the menu and used without asking, so publishing again is g p.
     t.screen.mockInput.pressKey(" ");
     await t.until("Actions");
     t.choose("Publish change");
-    await t.overlayReady("Review before applying");
-    expect(t.screen.captureCharFrame()).toContain("Bookmark: published (already on this change)");
-    expect(t.screen.captureCharFrame()).toContain("n other name");
+    await t.until("already up to date on");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Push published");
+    expect(t.screen.captureCharFrame()).toContain("Push under another name");
     // n leaves the inferred bookmark for the name prompt.
     t.screen.mockInput.pressKey("n");
     await t.until("Bookmark to push to origin");
@@ -1886,7 +1887,7 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
   }
 }, 15_000);
 
-test("g then s fetches, then previews a rebase of the selected stack onto trunk that Escape can skip", async () => {
+test("g then s fetches at once, then previews a rebase of the selected stack onto trunk that Escape can skip", async () => {
   const t = await setup();
   const publisher = await fixture();
   const remote = `${t.f.path}-remote.git`;
@@ -1908,20 +1909,19 @@ test("g then s fetches, then previews a rebase of the selected stack onto trunk 
       t.screen.mockInput.pressKey("g");
       await t.overlayReady("Sync with trunk");
       t.screen.mockInput.pressKey("s");
-      await t.overlayReady("Enter apply and continue");
-      expect(t.screen.captureCharFrame()).toContain("Fetch bookmarks and commits from this remote");
-      t.screen.mockInput.pressEnter();
     };
     await sync();
-    await t.overlayReady("Esc keeps the fetch and skips the rebase");
+    await t.overlayReady("skip rebase");
     expect(t.screen.captureCharFrame()).toContain("Rebase preview");
+    expect(t.screen.captureCharFrame()).toContain("Skipping the rebase keeps the fetch.");
+    expect(t.screen.captureCharFrame()).not.toContain("Fetch bookmarks and commits from this remote");
     t.screen.mockInput.pressEscape();
     await t.closed();
     const [trunk] = await t.repo.navigationRevisions("trunk()");
     expect(trunk!.description.trim()).toBe("Upstream work");
     expect((await t.repo.snapshot("@")).revisions[0]!.parents).toEqual(before.parents);
     await sync();
-    await t.overlayReady("Esc keeps the fetch and skips the rebase");
+    await t.overlayReady("skip rebase");
     t.screen.mockInput.pressEnter();
     await t.until("rebase completed");
     expect((await t.repo.snapshot("@")).revisions[0]!.parents).toEqual([trunk!.commitId]);
@@ -1937,6 +1937,16 @@ test("g then s fetches, then previews a rebase of the selected stack onto trunk 
     t.screen.mockInput.pressKey("s");
     await t.until("is trunk itself, so there is no stack to sync.");
     expect(await t.repo.operationId()).toBe(operation);
+    // A fetch that fails stops the sync before the rebase.
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    t.screen.mockInput.pressKey("k");
+    await t.settled();
+    await Bun.$`rm -rf ${remote}`.quiet();
+    await sync();
+    await t.until("Remote operation failed");
+    expect(t.screen.captureCharFrame()).not.toContain("Rebase preview");
+    expect(t.screen.captureCharFrame()).not.toContain("skip rebase");
   } finally {
     await t.cleanup();
     await publisher.cleanup();
@@ -1944,7 +1954,7 @@ test("g then s fetches, then previews a rebase of the selected stack onto trunk 
   }
 }, 20_000);
 
-test("g then p advances the nearest ancestor bookmark without asking, and offers a picker for several", async () => {
+test("g then p advances the nearest ancestor bookmark and pushes without asking, and offers a picker for several", async () => {
   const t = await setup();
   const remote = `${t.f.path}-remote.git`;
   try {
@@ -1954,20 +1964,10 @@ test("g then p advances the nearest ancestor bookmark without asking, and offers
     const old = (await t.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
     t.screen.mockInput.pressKey("g");
     await t.overlayReady("Advance feature here and push");
-    t.screen.mockInput.pressKey("p");
-    await t.overlayReady("Review before applying");
-    const frame = t.screen.captureCharFrame();
-    expect(frame).toContain("Advance bookmark feature by 1 commit to this change, then push it.");
-    expect(frame).toContain(old);
-    expect(frame).toContain(revision.commitId);
     expect((await t.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)?.targets).toEqual([old]);
-    // Escape returns to the Git menu, which still offers the other entries.
-    t.screen.mockInput.pressEscape();
-    await t.until("Fetch origin");
     t.screen.mockInput.pressKey("p");
-    await t.overlayReady("Review before applying");
-    t.screen.mockInput.pressEnter();
     await t.until("Published feature to origin");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
     const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/feature"], { stdout: "pipe" });
     expect((await new Response(pushed.stdout).text()).trim()).toBe(revision.commitId);
     await t.f.jj("bookmark", "create", "second", "-r", "@");
@@ -1976,8 +1976,7 @@ test("g then p advances the nearest ancestor bookmark without asking, and offers
     t.screen.mockInput.pressKey("p");
     await t.until("Other name…");
     t.choose("second");
-    await t.overlayReady("Review before applying");
-    expect(t.screen.captureCharFrame()).toContain("Bookmark: second (already on this change)");
+    await t.until("Published second to origin");
   } finally {
     await t.cleanup();
     await Bun.$`rm -rf ${remote}`.quiet();

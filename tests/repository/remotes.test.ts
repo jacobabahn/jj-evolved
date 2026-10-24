@@ -121,7 +121,7 @@ test("fetch imports a tracked remote advancement while preserving working-copy f
   } finally { await f.cleanup(); await publisher.cleanup(); }
 });
 
-test("publish creates a bookmark on the change, tracks it and pushes after a read-only review", async () => {
+test("publish creates a bookmark on the change, tracks it and pushes, with a read-only preview", async () => {
   const f = await remoteFixture();
   try {
     const revision = (await f.repo.snapshot("@")).revisions[0]!;
@@ -164,6 +164,15 @@ test("publish moves an existing bookmark to the change and advances the tracked 
     const back = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision: parent });
     expect(back.summary).toContain(`Bookmark: feature (move from ${revision.commitId})`);
     expect(back.summary).not.toContain("Advance bookmark");
+    // Publishing applies at once like any push, so moving the remote bookmark backward or sideways must stop for review.
+    expect(preview.caution).toBeUndefined();
+    expect(back.caution).toContain("moves feature@origin backward");
+    expect(back.summary).toStartWith("Warning: This moves feature@origin backward");
+    await f.jj("new", parent.commitId, "-m", "Side change");
+    const side = (await f.repo.snapshot("@")).revisions[0]!;
+    const sideways = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision: side });
+    expect(sideways.caution).toContain("moves feature@origin sideways");
+    expect((await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "fresh", revision: side })).caution).toBeUndefined();
   } finally { await f.cleanup(); }
 });
 
