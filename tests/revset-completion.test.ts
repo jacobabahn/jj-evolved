@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InputRenderable } from "@opentui/core";
@@ -99,6 +99,32 @@ test("two app instances on one repository both keep the revsets they apply", asy
     // The second instance loaded before the first recorded, but recording merges with the file as it is now.
     expect(await second.record("tags()")).toEqual(["tags()", "mine()"]);
     expect(await first.record("all()")).toEqual(["all()", "tags()", "mine()"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a corrupt history file is backed up before a fresh one replaces it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "revset-history.json");
+    const store = fileRevsetHistory("/repo/one", path);
+    for (const corrupt of ["{ not json", '["not", "a", "history"]']) {
+      await writeFile(path, corrupt);
+      expect(await store.load()).toEqual([]);
+      // Loading alone leaves the file untouched.
+      expect(await readFile(path, "utf8")).toBe(corrupt);
+      expect(await store.record("mine()")).toEqual(["mine()"]);
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ repositories: { "/repo/one": ["mine()"] } });
+      const backups = (await readdir(directory)).filter(name => name.endsWith(".bak"));
+      expect(backups).toHaveLength(1);
+      expect(backups[0]).toStartWith("revset-history.json.");
+      expect(await readFile(join(directory, backups[0]!), "utf8")).toBe(corrupt);
+      await rm(join(directory, backups[0]!));
+    }
+    // A valid file is rewritten in place, without a backup.
+    await store.record("all()");
+    expect((await readdir(directory)).filter(name => name.endsWith(".bak"))).toEqual([]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

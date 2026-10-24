@@ -27,19 +27,27 @@ export function revsetHistoryPath() {
   return join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "jj-evolved", "revset-history.json");
 }
 
-type HistoryFile = { repositories: Record<string, string[]> };
+// `corrupt` marks a file that exists but isn't a history file; it is kept as a backup rather than overwritten.
+type HistoryFile = { repositories: Record<string, string[]>; corrupt?: true };
 async function readHistoryFile(path: string): Promise<HistoryFile> {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
-    const repositories = typeof parsed === "object" && parsed && "repositories" in parsed ? parsed.repositories : null;
-    if (typeof repositories !== "object" || !repositories) return { repositories: {} };
-    return { repositories: Object.fromEntries(Object.entries(repositories)
-      .map(([root, entries]) => [root, Array.isArray(entries) ? entries.filter((entry): entry is string => typeof entry === "string") : []])) };
+    parsed = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     // A missing or unreadable history only costs suggestions; it never blocks the prompt.
-    if (error instanceof SyntaxError || (error instanceof Error && "code" in error && error.code === "ENOENT")) return { repositories: {} };
+    if (error instanceof SyntaxError) return { repositories: {}, corrupt: true };
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return { repositories: {} };
     throw error;
   }
+  const repositories = typeof parsed === "object" && parsed && "repositories" in parsed ? parsed.repositories : null;
+  if (typeof repositories !== "object" || !repositories || Array.isArray(repositories)) return { repositories: {}, corrupt: true };
+  return { repositories: Object.fromEntries(Object.entries(repositories)
+    .map(([root, entries]) => [root, Array.isArray(entries) ? entries.filter((entry): entry is string => typeof entry === "string") : []])) };
+}
+
+/** Where a corrupt history file is moved before a fresh one replaces it. */
+export function corruptHistoryBackupPath(path: string, now = new Date()) {
+  return `${path}.${now.toISOString().replace(/[:.]/g, "-")}.bak`;
 }
 
 /** History for one repository, in a file shared by all repositories under the XDG state directory. */
@@ -48,10 +56,11 @@ export function fileRevsetHistory(root: string, path = revsetHistoryPath()): Rev
     async load() { return (await readHistoryFile(path)).repositories[root]?.slice(0, revsetHistoryLimit) ?? []; },
     async record(expression) {
       // Reading just before writing keeps entries other repositories and other app instances saved meanwhile.
-      const { repositories } = await readHistoryFile(path);
+      const { repositories, corrupt } = await readHistoryFile(path);
       const entries = recordRevset(repositories[root]?.slice(0, revsetHistoryLimit) ?? [], expression);
       repositories[root] = entries;
       await mkdir(dirname(path), { recursive: true });
+      if (corrupt) await rename(path, corruptHistoryBackupPath(path));
       const temporary = `${path}.${crypto.randomUUID()}.tmp`;
       try {
         await writeFile(temporary, `${JSON.stringify({ repositories }, null, 2)}\n`, { flag: "wx" });

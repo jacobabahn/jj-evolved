@@ -220,9 +220,12 @@ recently loaded repository state; tags and aliases are read when the prompt open
 
 Successfully applied expressions are remembered per repository, most recent first
 (up to 50), in `$XDG_STATE_HOME/jj-evolved/revset-history.json` (by default under
-`~/.local/state`). Reopening the prompt lists them before you edit the current
-expression; once you type, earlier expressions that extend your input appear above
-the token suggestions and replace the whole input when selected. Suggestions never
+`~/.local/state`). Several open copies of the app share it without losing each
+other's entries, and a file that can't be parsed is kept as a timestamped `.bak`
+backup before a fresh one is written. Reopening the prompt lists them before you
+edit the current expression; once you type, earlier expressions that extend your
+input appear above the token suggestions and replace the whole input when
+selected. Suggestions never
 contact remotes. This is token completion, not a full revset parser: syntax
 validation remains jj's job.
 
