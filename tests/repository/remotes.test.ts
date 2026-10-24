@@ -121,7 +121,7 @@ test("fetch imports a tracked remote advancement while preserving working-copy f
   } finally { await f.cleanup(); await publisher.cleanup(); }
 });
 
-test("publish creates a bookmark on the change, tracks it and pushes after a read-only review", async () => {
+test("publish creates a bookmark on the change, tracks it and pushes, with a read-only preview", async () => {
   const f = await remoteFixture();
   try {
     const revision = (await f.repo.snapshot("@")).revisions[0]!;
@@ -152,12 +152,113 @@ test("publish moves an existing bookmark to the change and advances the tracked 
     const old = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
     const revision = (await f.repo.snapshot("@")).revisions[0]!;
     const preview = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision });
-    expect(preview.summary).toContain(`Bookmark: feature (move from ${old})`);
+    expect(preview.summary).toContain(`Advance bookmark feature by 1 commit to this change, then push it.\n  from ${old}\n  to   ${revision.commitId}`);
+    expect(preview.summary).toContain("Bookmark: feature (advance 1 commit)");
     expect(preview.summary).toContain("Tracking: already tracking feature@origin");
     expect(preview.summary).toContain(`move feature@origin from ${old} to ${revision.commitId}`);
     expect(preview.summary).toContain("Commits to publish (1):");
     await f.repo.apply(preview);
     expect(await refs(f.remote)).toBe(`refs/heads/feature ${revision.commitId}\n`);
+    // Moving it back is not an advance, and is reviewed as a plain move.
+    const parent = (await f.repo.snapshot("@-")).revisions[0]!;
+    const back = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision: parent });
+    expect(back.summary).toContain(`Bookmark: feature (move from ${revision.commitId})`);
+    expect(back.summary).not.toContain("Advance bookmark");
+    // Publishing applies at once like any push, so moving the remote bookmark backward or sideways must stop for review.
+    expect(preview.caution).toBeUndefined();
+    expect(back.caution).toContain("moves feature@origin backward");
+    expect(back.summary).toStartWith("Warning: This moves feature@origin backward");
+    await f.jj("new", parent.commitId, "-m", "Side change");
+    const side = (await f.repo.snapshot("@")).revisions[0]!;
+    const sideways = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "feature", revision: side });
+    expect(sideways.caution).toContain("moves feature@origin sideways");
+    expect((await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "fresh", revision: side })).caution).toBeUndefined();
+  } finally { await f.cleanup(); }
+});
+
+test("publish infers the bookmark on the change, then on the nearest mutable ancestor, and never an immutable one", async () => {
+  const f = await remoteFixture();
+  try {
+    const infer = async (revset: string) => f.repo.publishBookmarks((await f.repo.snapshot(revset)).revisions[0]!, await f.repo.bookmarks());
+    expect(await infer("feature")).toEqual({ names: ["feature"], advance: false });
+    expect(await infer("@")).toEqual({ names: ["feature"], advance: true });
+    await f.jj("new", "-m", "Third change");
+    await f.jj("bookmark", "create", "aaa", "-r", "feature");
+    expect(await infer("@")).toEqual({ names: ["aaa", "feature"], advance: true });
+    await f.jj("bookmark", "create", "nearer", "-r", "@-");
+    expect(await infer("@")).toEqual({ names: ["nearer"], advance: true });
+    // Pushing main makes it trunk, so it and the bookmarks beside it are immutable.
+    await f.jj("bookmark", "delete", "nearer");
+    await f.jj("bookmark", "create", "main", "-r", "feature");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "main" }));
+    expect(await infer("@")).toEqual({ names: [], advance: true });
+  } finally { await f.cleanup(); }
+});
+
+test("publish never infers a conflicted bookmark, which the push would refuse", async () => {
+  const f = await remoteFixture();
+  const publisher = await fixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await publisher.jj("bookmark", "forget", "feature");
+    await publisher.jj("git", "remote", "add", "origin", f.remote);
+    await publisher.jj("git", "fetch", "--remote", "origin");
+    await publisher.jj("bookmark", "track", "feature", "--remote", "origin");
+    await publisher.jj("new", "feature", "-m", "Upstream work");
+    await publisher.jj("bookmark", "set", "feature", "-r", "@");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:feature");
+    // The local bookmark moves one way and the remote another, so the fetch leaves feature conflicted.
+    await f.jj("bookmark", "set", "feature", "-r", "@");
+    await f.jj("git", "fetch", "--remote", "origin");
+    const bookmarks = await f.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "feature" && !item.remote)?.conflict).toBe(true);
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    expect(await f.repo.publishBookmarks(revision, bookmarks)).toEqual({ names: [], advance: true });
+    await f.jj("new", "-m", "On top");
+    expect(await f.repo.publishBookmarks((await f.repo.snapshot("@")).revisions[0]!, await f.repo.bookmarks())).toEqual({ names: [], advance: true });
+  } finally { await f.cleanup(); await publisher.cleanup(); }
+});
+
+// Puts a jj on PATH that runs the real one, then writes a bookmark from "another process" right after any command whose
+// arguments include `trigger`, which is the window between a publish's local step and its push.
+async function withIntruder<T>(trigger: string, work: () => Promise<T>): Promise<T> {
+  const real = Bun.which("jj")!;
+  const dir = await mkdtemp(join(tmpdir(), "jj-intruder-"));
+  await Bun.write(join(dir, "jj"), `#!/bin/sh\n"${real}" "$@"\ncode=$?\ncase " $* " in *" ${trigger} "*) "${real}" --ignore-working-copy bookmark create intruder -r @ >/dev/null 2>&1;; esac\nexit $code\n`);
+  await Bun.$`chmod +x ${join(dir, "jj")}`.quiet();
+  const path = process.env.PATH;
+  process.env.PATH = `${dir}:${path}`;
+  try { return await work(); } finally { process.env.PATH = path; await rm(dir, { recursive: true, force: true }); }
+}
+
+test("a publish or remote deletion refuses to push when another jj command writes after its local step", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const publish = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision });
+    await withIntruder("create", async () => { await expect(f.repo.apply(publish)).rejects.toThrow("Another jj command changed the repository during this publish, so nothing was pushed to origin."); });
+    expect(await refs(f.remote)).toBe("");
+    const bookmarks = await f.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
+    expect(bookmarks.some(item => item.name === "intruder")).toBe(true);
+    // Without the intruder, publishing again pushes.
+    await f.jj("bookmark", "delete", "intruder");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision }));
+    expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
+    await f.jj("bookmark", "delete", "intruder");
+    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "next", remote: "origin", push: true });
+    await withIntruder("delete", async () => { await expect(f.repo.apply(deletion)).rejects.toThrow("Another jj command changed the repository during this deletion, so nothing was pushed to origin."); });
+    expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
+  } finally { await f.cleanup(); }
+});
+
+test("the suggested bookmark name follows templates.git_push_bookmark", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    expect(await f.repo.generatedBookmarkName(revision)).toBe(`push-${revision.changeId.slice(0, 12)}`);
+    await f.jj("config", "set", "--repo", "templates.git_push_bookmark", `'"me/" ++ change_id.short(6)'`);
+    expect(await f.repo.generatedBookmarkName(revision)).toBe(`me/${revision.changeId.slice(0, 6)}`);
   } finally { await f.cleanup(); }
 });
 
@@ -187,6 +288,142 @@ test("a failed publish keeps the tracked local bookmark so it can be retried", a
     await expect(f.repo.apply(preview)).rejects.toThrow("only the push failed");
     expect((await f.repo.bookmarks()).find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
   } finally { await f.cleanup(); }
+});
+
+test("bookmarks report ahead and behind counts for tracked remotes and mark local-only bookmarks", async () => {
+  const f = await remoteFixture();
+  const plain = await fixture();
+  try {
+    const state = async () => {
+      const bookmarks = await f.repo.bookmarks();
+      const { ahead, behind } = bookmarks.find(item => item.name === "feature" && item.remote === "origin") ?? {};
+      return { ahead, behind, localOnly: bookmarks.filter(item => item.localOnly).map(item => `${item.name}@${item.remote}`) };
+    };
+    expect(await state()).toEqual({ ahead: undefined, behind: undefined, localOnly: ["feature@"] });
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await f.jj("bookmark", "create", "solo", "-r", "@");
+    expect(await state()).toEqual({ ahead: 0, behind: 0, localOnly: ["solo@"] });
+    await f.jj("new", "-m", "Third change");
+    await f.jj("bookmark", "set", "feature", "-r", "@");
+    expect(await state()).toEqual({ ahead: 2, behind: 0, localOnly: ["solo@"] });
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await f.jj("bookmark", "set", "feature", "-r", "@--", "--allow-backwards");
+    expect(await state()).toEqual({ ahead: 0, behind: 2, localOnly: ["solo@"] });
+    await f.jj("new", "@--", "-m", "Side change");
+    await f.jj("bookmark", "set", "feature", "-r", "@");
+    expect(await state()).toEqual({ ahead: 1, behind: 2, localOnly: ["solo@"] });
+    // An untracked remote bookmark has no counts, but the name is on the remote, so the local bookmark is not unpushed.
+    await f.jj("bookmark", "untrack", "feature", "--remote", "origin");
+    expect(await state()).toEqual({ ahead: undefined, behind: undefined, localOnly: ["solo@"] });
+    // Without a remote there is nowhere to push to, so nothing is marked.
+    expect((await (await Repository.open(plain.path)).bookmarks()).some(item => item.localOnly)).toBe(false);
+  } finally { await f.cleanup(); await plain.cleanup(); }
+});
+
+test("a local bookmark created beside a fetched, untracked remote bookmark is not marked unpushed", async () => {
+  const f = await remoteFixture();
+  const publisher = await fixture();
+  try {
+    await publisher.jj("git", "remote", "add", "origin", f.remote);
+    await publisher.jj("bookmark", "create", "topic", "-r", "@-");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:topic");
+    await f.jj("git", "fetch", "--remote", "origin");
+    const remote = (await f.repo.bookmarks()).find(item => item.name === "topic" && item.remote === "origin")!;
+    expect(remote.tracked).toBe(false);
+    await f.jj("bookmark", "create", "topic", "-r", remote.targets[0]!);
+    const local = (await f.repo.bookmarks()).find(item => item.name === "topic" && !item.remote)!;
+    expect(local.targets).toEqual(remote.targets);
+    expect(local.localOnly).toBeUndefined();
+  } finally { await f.cleanup(); await publisher.cleanup(); }
+});
+
+test("deleting a tracked bookmark stays local by default and can also delete it on the remote", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    const target = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
+    const localOnly = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin" });
+    expect(localOnly.summary).toContain("Local deletion only. feature@origin stays on the remote");
+    const before = await f.repo.operationId();
+    const both = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin", push: true });
+    expect(both.summary).toContain(`delete feature@origin, last fetched at ${target}`);
+    expect(both.summary).toContain("cannot be undone locally");
+    expect(both.summary).toContain("undo reverts the push, which changes nothing here");
+    expect(await f.repo.operationId()).toBe(before);
+    expect(await refs(f.remote)).toBe(`refs/heads/feature ${target}\n`);
+    expect(await f.repo.apply(both)).toMatch(/^Deleted feature here and on origin\nwas [0-9a-f]{8}$/);
+    expect(await refs(f.remote)).toBe("");
+    expect((await f.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+    // What the review says about recovery: undo reverts only the push and leaves the bookmark deleted,
+    // while restoring the operation before the deletion brings the local bookmark back.
+    const [push, deletion, previous] = await f.repo.operations(3);
+    expect(deletion!.description).toBe("delete bookmark feature");
+    await f.repo.apply(await f.repo.prepare({ kind: "undo", operation: push! }));
+    expect((await f.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+    await f.repo.apply(await f.repo.prepare({ kind: "restore", operation: previous! }));
+    expect((await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)?.targets).toEqual([target]);
+    expect(await refs(f.remote)).toBe("");
+    await f.jj("bookmark", "delete", "feature");
+    await f.jj("bookmark", "create", "feature", "-r", target);
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin" }));
+    expect(await refs(f.remote)).toBe(`refs/heads/feature ${target}\n`);
+    expect((await f.repo.bookmarks()).find(item => item.name === "feature" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [target] });
+    await expect(f.repo.prepare({ kind: "bookmark-delete", name: "solo", remote: "origin", push: true })).rejects.toThrow("no longer exists");
+  } finally { await f.cleanup(); }
+});
+
+test("a failed remote deletion reports that the local bookmark is gone and how to retry", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    const preview = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin", push: true });
+    await rm(f.remote, { recursive: true, force: true });
+    const failure = f.repo.apply(preview);
+    await expect(failure).rejects.toThrow("The local bookmark feature was deleted, but feature@origin still exists; only the push failed.");
+    await expect(failure).rejects.toThrow("Push deletion");
+    const bookmarks = await f.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "feature" && !item.remote)?.targets ?? []).toEqual([]);
+    expect(bookmarks.find(item => item.name === "feature" && item.remote === "origin")?.tracked).toBe(true);
+  } finally { await f.cleanup(); }
+});
+
+test("syncing with trunk rebases the whole stack after a fetch and explains when there is nothing to rebase", async () => {
+  const f = await remoteFixture();
+  const publisher = await fixture();
+  try {
+    const top = async () => (await f.repo.snapshot("@")).revisions[0]!;
+    // trunk() falls back to root() without a trunk bookmark; that is reported, not taken as being based on trunk.
+    expect(await f.repo.trunkRebase(await top())).toEqual({ kind: "no-trunk", reason: "No trunk bookmark found, so there is nothing to rebase onto." });
+    await f.jj("bookmark", "create", "main", "-r", "feature");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "main" }));
+    await f.jj("new", "-m", "Top of the stack");
+    expect(await f.repo.trunkRebase(await top())).toMatchObject({ kind: "current", reason: expect.stringContaining("Already based on trunk") });
+    await publisher.jj("git", "remote", "add", "origin", f.remote);
+    await publisher.jj("git", "fetch", "--remote", "origin");
+    await publisher.jj("bookmark", "track", "main@origin");
+    await publisher.jj("new", "main", "-m", "Upstream work");
+    await publisher.jj("bookmark", "set", "main", "-r", "@");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:main");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "origin" }));
+    const [trunk] = await f.repo.navigationRevisions("trunk()");
+    const [root] = await f.repo.navigationRevisions("@-");
+    expect(trunk!.description.trim()).toBe("Upstream work");
+    // The selected change is the top of the stack; the rebase starts at the stack's root, as jj rebase -b does.
+    const plan = await f.repo.trunkRebase(await top());
+    expect(plan).toMatchObject({ kind: "rebase", action: { kind: "rebase", descendants: true, revision: { commitId: root!.commitId }, destination: { commitId: trunk!.commitId } } });
+    if (plan.kind !== "rebase") throw new Error("Expected a rebase");
+    await f.repo.apply(await f.repo.prepare(plan.action));
+    expect((await f.repo.navigationRevisions("@-"))[0]!.parents).toEqual([trunk!.commitId]);
+    expect((await f.repo.trunkRebase(await top())).kind).toBe("current");
+    expect(await f.repo.trunkRebase(trunk!)).toMatchObject({ kind: "blocked", reason: expect.stringContaining("is trunk itself") });
+    const [old] = await f.repo.navigationRevisions("trunk()-");
+    expect(await f.repo.trunkRebase(old!)).toMatchObject({ kind: "blocked", reason: expect.stringContaining("is immutable") });
+    await f.jj("bookmark", "create", "stack", "-r", "@");
+    await f.jj("new", "root()", "-m", "Unrelated root");
+    await f.jj("new", "@", "stack", "-m", "Merge of two stacks");
+    expect(await f.repo.trunkRebase(await top())).toMatchObject({ kind: "blocked", reason: expect.stringContaining("2 roots") });
+  } finally { await f.cleanup(); await publisher.cleanup(); }
 });
 
 test("the default push remote follows git.push, then origin, then a lone remote", async () => {
