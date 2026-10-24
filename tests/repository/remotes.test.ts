@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
-import { fetchReport, pushChanges } from "../../src/repository/remotes";
+import { fetchReport, pushCaution, pushChanges } from "../../src/repository/remotes";
 import { fixture } from "../fixture";
 
 async function remoteFixture() {
@@ -226,6 +226,23 @@ test("pushes that delete or drop commits from a remote bookmark carry a caution;
   } finally { await f.cleanup(); }
 });
 
+test("a non-ASCII bookmark, which jj quotes in push output, still stops for review before its deletion", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.jj("bookmark", "create", "é", "-r", "feature");
+    const added = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "é" });
+    expect(added.summary).toContain('bookmark: "é" [add to');
+    expect(added.caution).toBeUndefined();
+    expect(await f.repo.apply(added)).toMatch(/^Pushed é to origin\nadded at [0-9a-f]{8}$/);
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "é" }))).toBe("é is already up to date on origin");
+    await f.jj("bookmark", "delete", "é");
+    const deletion = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "é" });
+    expect(deletion.caution).toBe("This deletes é on origin.");
+    expect(await f.repo.apply(deletion)).toMatch(/^Pushed é to origin\ndeleted \(was [0-9a-f]{8}\)$/);
+    expect(await refs(f.remote)).not.toContain("refs/heads/");
+  } finally { await f.cleanup(); }
+});
+
 test("fetch and push report when there was nothing to do", async () => {
   const f = await remoteFixture();
   try {
@@ -241,8 +258,20 @@ test("push and fetch output parse into changes and reports", () => {
     { name: "other", kind: "add", to: "da0e4cdd6b90" },
   ]);
   expect(fetchReport("origin", "bookmark: main@origin [updated] tracked\nbookmark: newb@origin [new] untracked\n")).toBe("Fetched origin · 2 bookmarks changed\nmain updated, newb new");
+  expect(pushChanges('  bookmark: "é" [delete from e7dba9d55b13]\n  bookmark: "a \\"b\\"" [add to da0e4cdd6b90]\n  bookmark: feat+x [add to da0e4cdd6b90]')).toEqual([
+    { name: "é", kind: "delete", from: "e7dba9d55b13" },
+    { name: 'a "b"', kind: "add", to: "da0e4cdd6b90" },
+    { name: "feat+x", kind: "add", to: "da0e4cdd6b90" },
+  ]);
+  expect(fetchReport("origin", 'bookmark: "ü"@origin [new] untracked\n')).toBe("Fetched origin · 1 bookmark changed\nü new");
   expect(fetchReport("origin", "bookmark: a@origin [new] untracked\nbookmark: b@origin [new] untracked\nbookmark: c@origin [new] untracked\nbookmark: d@origin [deleted] untracked\n"))
     .toBe("Fetched origin · 4 bookmarks changed\na new, b new, c new, +1 more");
+});
+
+test("a push dry run that does not show the bookmark's change stops for review", () => {
+  expect(pushCaution("feature", "origin", "Bookmark feature@origin already matches feature\nNothing changed.\n")).toBeUndefined();
+  expect(pushCaution("feature", "origin", "Changes to push to origin:\n  bookmark: other [add to da0e4cdd6b90]\n")).toContain("does not say how this push changes feature@origin");
+  expect(pushCaution("feature", "origin", "Changes to push to origin:\n  bookmark: feature [rewrite e7dba9d55b13]\n")).toContain("does not say how this push changes feature@origin");
 });
 
 test("cancelNetwork stops a fetch that is waiting on the remote", async () => {

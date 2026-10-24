@@ -67,13 +67,22 @@ async function network(root: string, args: string[], signal?: AbortSignal): Prom
 
 export interface PushChange { name: string; kind: "add" | "forward" | "backward" | "sideways" | "delete"; from?: string; to?: string }
 
+// jj prints a bookmark name bare, or as a quoted string literal when it is not plain ASCII, such as `"é"` or `"a b"`.
+const bookmarkName = String.raw`("(?:[^"\\]|\\.)*"|\S+?)`;
+function unquote(name: string): string {
+  if (!name.startsWith('"')) return name;
+  try { return String(JSON.parse(name)); } catch { return name.slice(1, -1); }
+}
+
 /** Reads the bookmark lines `jj git push` prints, with or without --dry-run. */
 export function pushChanges(output: string): PushChange[] {
   const changes: PushChange[] = [];
+  const pattern = new RegExp(String.raw`^\s*bookmark: ${bookmarkName} \[(?:add to ([0-9a-f]+)|move (forward|backward|sideways) from ([0-9a-f]+) to ([0-9a-f]+)|delete from ([0-9a-f]+))\]`);
   for (const line of output.split("\n")) {
-    const match = /^\s*bookmark: (\S+) \[(?:add to ([0-9a-f]+)|move (forward|backward|sideways) from ([0-9a-f]+) to ([0-9a-f]+)|delete from ([0-9a-f]+))\]/.exec(line);
+    const match = pattern.exec(line);
     if (!match) continue;
-    const [, name = "", added, direction, from, to, deleted] = match;
+    const [, quoted = "", added, direction, from, to, deleted] = match;
+    const name = unquote(quoted);
     if (added) changes.push({ name, kind: "add", to: added });
     else if (deleted) changes.push({ name, kind: "delete", from: deleted });
     else changes.push({ name, kind: direction as PushChange["kind"], from, to });
@@ -90,22 +99,30 @@ function describeChange(change: PushChange): string {
   }
 }
 
-/** Why a push should stop for review: it deletes the remote bookmark or drops commits from it. */
-function pushCaution(change: PushChange | undefined, remote: string): string | undefined {
-  if (change?.kind === "delete") return `This deletes ${change.name} on ${remote}.`;
-  if (change?.kind === "backward" || change?.kind === "sideways") return `This moves ${change.name}@${remote} ${change.kind}; commits now on the remote bookmark will no longer be reachable from it.`;
+// jj prints this, and no bookmark line, when the remote already has the pushed target.
+const unchanged = (output: string) => /^Nothing changed\.$/m.test(output);
+
+/**
+ * Why a push should stop for review: it deletes the remote bookmark or drops commits from it.
+ * A dry run whose effect on the bookmark cannot be read also stops, so an unexpected output format fails safe.
+ */
+export function pushCaution(name: string, remote: string, dryRun: string): string | undefined {
+  const change = pushChanges(dryRun).find(item => item.name === name);
+  if (!change) return unchanged(dryRun) ? undefined : `jj's dry run does not say how this push changes ${name}@${remote}; check its output below.`;
+  if (change.kind === "delete") return `This deletes ${change.name} on ${remote}.`;
+  if (change.kind === "backward" || change.kind === "sideways") return `This moves ${change.name}@${remote} ${change.kind}; commits now on the remote bookmark will no longer be reachable from it.`;
   return undefined;
 }
 
 function pushReport(verb: string, action: { remote: string; name: string }, output: string): string {
   const change = pushChanges(output).find(item => item.name === action.name);
-  if (!change) return `${action.name} is already up to date on ${action.remote}`;
-  return `${verb} ${action.name} to ${action.remote}\n${describeChange(change)}`;
+  if (change) return `${verb} ${action.name} to ${action.remote}\n${describeChange(change)}`;
+  return unchanged(output) ? `${action.name} is already up to date on ${action.remote}` : `${verb} ${action.name} to ${action.remote}`;
 }
 
 /** Summarizes the bookmark lines `jj git fetch` prints, such as `bookmark: main@origin [updated] tracked`. */
 export function fetchReport(remote: string, output: string): string {
-  const changes = [...output.matchAll(/^bookmark: (\S+?)@\S+ \[(\w+)\]/gm)].map(match => `${match[1]} ${match[2]}`);
+  const changes = [...output.matchAll(new RegExp(String.raw`^bookmark: ${bookmarkName}@\S+ \[(\w+)\]`, "gm"))].map(match => `${unquote(match[1] ?? "")} ${match[2]}`);
   if (!changes.length) return `Fetched ${remote}\nalready up to date`;
   const shown = changes.slice(0, 3).join(", ");
   return `Fetched ${remote} · ${changes.length} bookmark${changes.length === 1 ? "" : "s"} changed\n${shown}${changes.length > 3 ? `, +${changes.length - 3} more` : ""}`;
@@ -128,7 +145,7 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
     if (local?.conflict || previous?.conflict) throw new Error("Resolve this bookmark's conflict before pushing.");
     summary += `Push only bookmark: ${action.name}\nLast fetched target: ${previous?.targets.join(", ") || "(absent)"}\nNew target: ${local?.targets.join(", ") || "(delete remote bookmark)"}\n\n`;
     const dryRun = await network(root, ["--at-op", operationId, ...mutationArgs(action), "--dry-run"], signal);
-    caution = pushCaution(pushChanges(dryRun).find(item => item.name === action.name), remote.name);
+    caution = pushCaution(action.name, remote.name, dryRun);
     if (caution) summary = `Warning: ${caution}\n\n${summary}`;
     summary += dryRun;
     summary += "\nThis publishes commits to the remote. Local undo cannot undo a push. JJ rejects a push if the remote changed since the last fetch.";
