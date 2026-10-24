@@ -1617,6 +1617,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function stop() {
     if (stopped) return;
     stopped = true;
+    // jj runs detached from the terminal, so a fetch or push still running would outlive the app.
+    repository.cancelNetwork();
     renderer.off("palette", applyTerminalColors);
     clearInterval(refreshTimer);
     clearTimeout(resultTimer);

@@ -22,6 +22,8 @@ if (args.includes("--help") || args.includes("-h")) {
     const renderer = await createCliRenderer({ exitOnCtrlC: false });
     try {
       const app = createApp(renderer, repository, theme, saveThemePreference, keys.bindings, { preset: keys.custom ? "custom" : keys.preset });
+      // Closing the terminal hangs up the app but not jj, which runs detached; stopping the app cancels a running fetch or push.
+      process.once("SIGHUP", () => { app.stop(); process.exit(129); });
       await app.start();
     } catch (error) {
       renderer.destroy();

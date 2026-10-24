@@ -1,5 +1,5 @@
 import { label, type Bookmark, type PreparedMutation, type Remote, type RemoteMutation } from "./model";
-import { CancelledError, run } from "./jj-process";
+import { CancelledError, NETWORK_TIMEOUT_MS, run } from "./jj-process";
 import { logRevisions } from "./log-snapshot";
 import { mutationArgs } from "./mutation";
 
@@ -56,9 +56,9 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
   }
 }
 
-// Network commands have no timeout: a large fetch can take minutes. The caller cancels them through the signal.
+// A large fetch can take minutes, so network commands get a long backstop timeout and the caller cancels them through the signal.
 async function network(root: string, args: string[], signal?: AbortSignal): Promise<string> {
-  try { return await run(root, args, true, {}, { timeoutMs: null, signal }); }
+  try { return await run(root, args, true, {}, { timeoutMs: NETWORK_TIMEOUT_MS, signal }); }
   catch (error) {
     if (error instanceof CancelledError) throw error;
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nRemote operation failed. For authentication, configure Git credentials or SSH in your terminal. After a rejected push, fetch and push again. If the connection was interrupted, fetch to check the remote before retrying.`);

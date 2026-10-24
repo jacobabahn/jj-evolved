@@ -1849,3 +1849,28 @@ test("a remote push applies at once and reports its target, but a remote deletio
     await Bun.$`rm -rf ${remote}`.quiet();
   }
 }, 15_000);
+
+test("quitting during a fetch stops jj and the git processes it started", async () => {
+  const t = await setup();
+  const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };
+  // An ext:: remote whose transport never answers stands in for a stalled connection.
+  Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.ext.allow", GIT_CONFIG_VALUE_0: "always" });
+  const stalled = async () => (await Bun.$`pgrep -f ${"sleep 37"}`.nothrow().quiet()).exitCode === 0;
+  try {
+    await t.f.jj("git", "remote", "add", "origin", "ext::sleep 37");
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Fetch origin");
+    t.screen.mockInput.pressKey("f");
+    for (let attempt = 0; attempt < 300 && !(t.repo.networkActive && await stalled()); attempt++) await Bun.sleep(10);
+    expect(t.repo.networkActive).toBe(true);
+    t.screen.mockInput.pressKey("c", { ctrl: true });
+    for (let attempt = 0; attempt < 300 && (t.repo.networkActive || await stalled()); attempt++) await Bun.sleep(10);
+    expect(t.repo.networkActive).toBe(false);
+    expect(await stalled()).toBe(false);
+  } finally {
+    for (const [key, value] of [["GIT_CONFIG_COUNT", saved.count], ["GIT_CONFIG_KEY_0", saved.key], ["GIT_CONFIG_VALUE_0", saved.value]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await t.cleanup();
+  }
+}, 15_000);
