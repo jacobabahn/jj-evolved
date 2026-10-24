@@ -1954,6 +1954,24 @@ test("g then s fetches at once, then previews a rebase of the selected stack ont
   }
 }, 20_000);
 
+test("g then s without a trunk bookmark fetches and says so instead of claiming the stack is based on trunk", async () => {
+  const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
+  try {
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Sync with trunk");
+    t.screen.mockInput.pressKey("s");
+    await t.until("No trunk bookmark found");
+    expect(t.screen.captureCharFrame()).not.toContain("Already based on trunk");
+    expect(t.screen.captureCharFrame()).not.toContain("Rebase preview");
+  } finally {
+    await t.cleanup();
+    await Bun.$`rm -rf ${remote}`.quiet();
+  }
+}, 15_000);
+
 test("g then p advances the nearest ancestor bookmark and pushes without asking, and offers a picker for several", async () => {
   const t = await setup();
   const remote = `${t.f.path}-remote.git`;

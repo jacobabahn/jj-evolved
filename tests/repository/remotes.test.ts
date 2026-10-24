@@ -359,10 +359,12 @@ test("syncing with trunk rebases the whole stack after a fetch and explains when
   const f = await remoteFixture();
   const publisher = await fixture();
   try {
+    const top = async () => (await f.repo.snapshot("@")).revisions[0]!;
+    // trunk() falls back to root() without a trunk bookmark; that is reported, not taken as being based on trunk.
+    expect(await f.repo.trunkRebase(await top())).toEqual({ kind: "no-trunk", reason: "No trunk bookmark found, so there is nothing to rebase onto." });
     await f.jj("bookmark", "create", "main", "-r", "feature");
     await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "main" }));
     await f.jj("new", "-m", "Top of the stack");
-    const top = async () => (await f.repo.snapshot("@")).revisions[0]!;
     expect(await f.repo.trunkRebase(await top())).toMatchObject({ kind: "current", reason: expect.stringContaining("Already based on trunk") });
     await publisher.jj("git", "remote", "add", "origin", f.remote);
     await publisher.jj("git", "fetch", "--remote", "origin");

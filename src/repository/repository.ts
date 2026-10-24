@@ -66,11 +66,14 @@ export class Repository {
   // `jj rebase -b X -d D` is `-s roots(D..X) -d D`, so a stack with one root is the existing rebase with descendants.
   async trunkRebase(revision: Revision): Promise<TrunkRebase> {
     const id = revision.commitId, name = shortChangeId(revision);
-    const [trunks, roots, immutable] = await Promise.all([
+    const [trunks, roots, immutable, fallback] = await Promise.all([
       logRevisions(this.root, "trunk()"), logRevisions(this.root, `roots(trunk()..${id})`), logRevisions(this.root, `${id} & immutable()`),
+      logRevisions(this.root, "trunk() & root()"),
     ]);
     const [trunk] = trunks, [root] = roots;
     if (!trunk) throw new Error("trunk() does not resolve to a revision in this repository.");
+    // Without a main, master or trunk bookmark on a remote, trunk() falls back to the root commit, which is no trunk to sync with.
+    if (fallback.length) return { kind: "no-trunk", reason: "No trunk bookmark found, so there is nothing to rebase onto." };
     if (trunk.commitId === id) return { kind: "blocked", reason: `${name} is trunk itself, so there is no stack to sync.` };
     if (immutable.length) return { kind: "blocked", reason: `${name} is immutable, so its stack cannot be rebased onto trunk.` };
     if (!root) return { kind: "current", reason: "Already part of trunk; nothing to rebase." };
