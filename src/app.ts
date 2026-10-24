@@ -1,15 +1,16 @@
 import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
 import { contextView, loadHistory, searchScope, type LoadedHistory, type NavigationView, type Search } from "./revisions/history-view";
 import { actionForKey, defaultBindings, inlineActions, keyLabel, presetNames, type Keybindings, type Action } from "./ui/keybindings";
-import { applyCompletion, revsetCompletions, type Completion } from "./revisions/revset-completion";
+import { applyCompletion, historyCompletions, revsetCompletions, type Completion } from "./revisions/revset-completion";
+import { memoryRevsetHistory, recordRevset, type RevsetHistoryStore } from "./revisions/revset-history";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
 import { setTerminalColors, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
 import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
 import { ChangePreview } from "./preview/change-preview";
 import {
-  BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable,
-  TextRenderable, TextareaRenderable, type CliRenderer, type KeyEvent, type TerminalColors,
+  BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable, StyledText,
+  TextRenderable, TextareaRenderable, fg, type CliRenderer, type KeyEvent, type TerminalColors,
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
@@ -19,7 +20,7 @@ import { RevisionLog } from "./revisions/revision-log";
 import { FileList } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
-import { shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote } from "./repository/model";
+import { shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
 
@@ -66,7 +67,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
     { title: "Search & revsets", rows: [
-      [keys(["filter"]), "Enter a revset; empty restores the jj log default; Tab completes bookmarks and functions"],
+      [keys(["filter"]), "Enter a revset; empty restores the jj log default; recent revsets are suggested on open"],
       [keys(["search"]), "Search descriptions, bookmarks and ID prefixes in the active revset"],
       [keys(["nextMatch", "previousMatch"]), "Next / previous search match, wrapping"],
       [keys(["clearSearch"]), "Clear the accepted search"],
@@ -109,6 +110,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       ["j/k or arrows", "Choose an item"],
       ["Enter", "Apply / confirm; newline in the description editor"],
       ["^S/^D", "Save the description"],
+      ["Tab/Shift-Tab", "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); ^N/^P and arrows also work"],
       ["PgDn / PgUp", "Scroll the overlay preview"],
       ["Esc", "Go back one level, or cancel at the top; press twice to discard description edits"],
     ] },
@@ -121,7 +123,7 @@ function fieldColors(colors: Theme) {
 function chooserColors(colors: Theme) {
   return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
 }
-export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, bindings: Keybindings = defaultBindings, options: { refreshIntervalMs?: number; preset?: string } = {}) {
+export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, bindings: Keybindings = defaultBindings, options: { refreshIntervalMs?: number; preset?: string; revsetHistory?: RevsetHistoryStore } = {}) {
   const bindingLabel = (action: Action) => keyLabel(bindings, action);
   const presetLabel = options.preset ?? (bindings === defaultBindings ? "jjui" : "custom");
   setTheme(renderer, theme);
@@ -197,6 +199,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let completionItems: Completion[] = [];
   let completionOriginal = "";
   let completionIndex = -1;
+  // The value the revset prompt opened with: until it changes, the suggestions are the recent revsets.
+  let revsetOpened = "";
+  let revsetHistory: string[] = [];
+  let revsetSymbols: { tags: string[]; aliases: RevsetAlias[] } = { tags: [], aliases: [] };
+  const historyStore = options.revsetHistory ?? memoryRevsetHistory();
+  let historySaved = Promise.resolve();
   let completing = false;
   let busy = false;
   let running: Promise<void> | null = null;
@@ -637,13 +645,26 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind !== "revset" || completing) return;
     completionOriginal = input.value;
     completionIndex = -1;
-    completionItems = revsetCompletions(input.value, input.cursorOffset, currentBookmarks);
+    const untouched = input.value === revsetOpened;
+    const recent = historyCompletions(input.value, revsetHistory, untouched);
+    completionItems = untouched && recent.length ? recent
+      : [...recent, ...revsetCompletions(input.value, input.cursorOffset, { bookmarks: currentBookmarks, ...revsetSymbols })];
     renderCompletions();
   }
   function renderCompletions() {
     suggestions.visible = prompt.kind === "revset";
+    if (!completionItems.length) { suggestions.content = "No suggestions"; return; }
     const first = Math.max(0, completionIndex - 3);
-    suggestions.content = completionItems.length ? terminalText(completionItems.slice(first, first + 4).map((item, index) => `${first + index === completionIndex ? ">" : " "} ${item.label}`).join("\n") + `\n${completionItems.length} suggestions`) : "No suggestions";
+    const visible = completionItems.slice(first, first + 4);
+    const width = Math.min(36, Math.max(...visible.map(item => item.label.length)));
+    const recent = completionItems[0]!.kind === "history" && completionItems.every(item => item.kind === "history");
+    suggestions.content = new StyledText([
+      ...visible.flatMap((item, index) => [
+        fg(colors.text)(terminalText(`${first + index === completionIndex ? ">" : " "} ${item.label.padEnd(width)}  `)),
+        fg(colors.muted)(terminalText(item.detail) + "\n"),
+      ]),
+      fg(colors.muted)(`${completionItems.length} ${recent ? "recent revset" : "suggestion"}${completionItems.length === 1 ? "" : "s"}`),
+    ]);
   }
   function completeRevset(backwards: boolean) {
     if (!completionItems.length) return;
@@ -750,7 +771,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (next.kind === "revset") {
       overlay.height = 15;
       overlay.keys = { left: [["Enter", "apply"], ["Tab/Shift-Tab", "complete"]], right: [exit("cancel")] };
+      revsetOpened = input.value;
       updateCompletions();
+      // Tags and aliases arrive after the prompt opens; bookmarks come from the last refresh.
+      void repository.revsetSymbols().then(symbols => {
+        revsetSymbols = symbols;
+        if (prompt === next && completionIndex < 0) updateCompletions();
+      }).catch(() => {});
     }
     if (next.kind === "confirm") overlay.keys = { left: [["Enter", "apply"], ["p", "refresh preview"], previewScroll], right: [exit("cancel")] };
   }
@@ -760,7 +787,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const value = current.kind === "describe" ? descriptionInput.plainText : input.value;
     if (current.kind === "text") { current.accept(value); return; }
     if (current.kind === "confirm") { await run("Applying jj operation…", applyReviewed); return; }
-    if (current.kind === "revset") await run("Loading revset…", async () => { await refresh(value.trim() || defaultRevset); closePrompt(); });
+    if (current.kind === "revset") await run("Loading revset…", async () => {
+      await refresh(value.trim() || defaultRevset);
+      closePrompt();
+      revsetHistory = recordRevset(revsetHistory, value);
+      // Recording waits for the startup load, so the loaded entries can't replace this one.
+      historySaved = historySaved.then(() => historyStore.record(value)).then(entries => { revsetHistory = entries; })
+        .catch(error => report(`Couldn't save revset history: ${errorText(error)}`, true));
+    });
     else if (current.kind === "describe") await run("Applying jj operation…", async () => {
       if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) await applyReviewed();
     });
@@ -1486,7 +1520,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (key.name === "return") { key.preventDefault(); void submit(); }
   }
   function revsetKey(key: KeyEvent) {
-    if (!isBusy() && key.name === "tab") { key.preventDefault(); completeRevset(key.shift); }
+    const backwards = key.name === "up" || (key.ctrl && key.name === "p") || (key.name === "tab" && key.shift);
+    const forwards = key.name === "down" || (key.ctrl && key.name === "n") || (key.name === "tab" && !key.shift);
+    if (!isBusy() && (backwards || forwards)) { key.preventDefault(); completeRevset(backwards); }
     else dialogKey(key);
   }
   function confirmKey(key: KeyEvent, state: Extract<Prompt, { kind: "confirm" }>) {
@@ -1639,6 +1675,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // from the result, because the renderer may already have cached it and a cached palette emits no event.
     renderer.on("palette", applyTerminalColors);
     void renderer.getPalette().then(detected => { if (!stopped) applyTerminalColors(detected); }).catch(() => {});
+    historySaved = historyStore.load().then(entries => { revsetHistory = entries; }).catch(error => report(`Couldn't read revset history: ${errorText(error)}`, true));
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
     if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }

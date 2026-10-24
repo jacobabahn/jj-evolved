@@ -192,7 +192,7 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    name: "completion", title: "Revset bookmark completion",
+    name: "completion", title: "Revset completion, signatures and recent revsets",
     async run(ui) {
       await ui.resize(80, 24);
       ui.key("L");
@@ -206,6 +206,21 @@ export const scenarios: Scenario[] = [
       await ui.until("revset: ancestors(feature)");
       await ui.until("Ready.");
       await ui.capture("Completed expression applied");
+      ui.key("L");
+      ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+      await ui.type("desc");
+      await ui.until("descendants(x, [depth])");
+      await ui.capture("Function signatures");
+      ui.key("ARROW_DOWN");
+      await ui.type("@");
+      ui.key("RETURN");
+      await ui.until("revset: descendants(@)");
+      await ui.until("Ready.");
+      ui.key("L");
+      await ui.until("1 recent revset");
+      await ui.capture("Recent revsets on reopening");
+      ui.key("ESCAPE");
+      await ui.until("revset: descendants(@)");
     },
   },
   {
