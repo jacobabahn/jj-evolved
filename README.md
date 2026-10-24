@@ -20,14 +20,14 @@ Both marked changes move together, preserving their order above `main`. Review t
 
 Recovery is part of that workflow: inspect earlier versions of a change, review an undo, or restore a repository operation from the same interface. For detailed file editing, the app hands off to your configured JJ tools.
 
-If your everyday work centers on reviewing and reshaping local stacks, that is the experience this project is built around. It also supports reviewed fetch/push and configurable browse keys; scripted workflows and custom themes are still outside its scope. See [current scope](#current-scope) for the remaining limits.
+If your everyday work centers on reviewing and reshaping local stacks, that is the experience this project is built around. It also supports fetch/push and configurable browse keys; scripted workflows and custom themes are still outside its scope. See [current scope](#current-scope) for the remaining limits.
 
 ## What you can do
 
 - **Explore your history.** Browse JJ’s native graph, inspect changed files and diffs, filter with revsets and bookmark/function completion, and search descriptions, bookmarks, or IDs across the active revset.
 - **Edit a stack.** Create, describe, edit, rebase, squash, split, absorb, and abandon changes. Rebase and squash show the proposed and current graphs side by side before you apply.
 - **Manage bookmarks.** Create, rename, delete, or move bookmarks, including by dragging a bookmark onto another revision. Labels in the graph show whether a bookmark is in step with its remote, ahead or behind (`[name ↑2↓1]`), or not pushed yet (`[name*]`).
-- **Sync with remotes.** Publish a change in one step (bookmark, track, push), review fetches, bring a stack up to date with trunk (fetch, then a previewed rebase), push a selected bookmark, and manage bookmark tracking.
+- **Sync with remotes.** Publish a change in one step (bookmark, track, push), fetch, bring a stack up to date with trunk (fetch, then a previewed rebase), push a selected bookmark, and manage bookmark tracking.
 - **Review and recover.** Browse a change’s evolution, inspect repository operations, undo the latest operation, or restore an earlier state.
 - **Use your existing editors.** Open JJ’s configured description, diff, and merge tools for external editing, interactive splits and squashes, and conflict resolution.
 
@@ -77,8 +77,8 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `s` / `a` | Split selected files / preview abandoning the change |
 | `A` / `v` | Preview absorb / browse change evolution |
 | `b` / `g` / `o` / `u` | Bookmarks / Git menu / operation history / undo preview |
-| `g` `p` | Publish the selected change after one review: push its bookmark, advance the nearest ancestor bookmark to it, or name a new one |
-| `g` `f` | Fetch from the default remote after a review |
+| `g` `p` | Publish the selected change: push its bookmark, advance the nearest ancestor bookmark to it, or name a new one |
+| `g` `f` | Fetch from the default remote |
 | `g` `s` | Sync with trunk: fetch, then preview rebasing the selected change's stack onto `trunk()` |
 | `w` | Show working-copy status |
 | `t` | Choose a theme |

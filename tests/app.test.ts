@@ -589,7 +589,9 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     t.screen.mockInput.pressEnter();
     await t.until("Keep original description");
     t.choose("Edit second description");
-    await t.until("Second change description  [Enter");
+    await t.until("Enter apply");
+    expect(t.screen.renderer.root.findDescendantById("prompt-label")?.visible).toBe(true);
+    expect(t.screen.captureCharFrame()).toContain("Second change description");
     await t.prompt("Second group", true);
     await t.until("Review before applying");
     await t.until("Second change: Second group");
@@ -774,7 +776,8 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     };
     const before = await t.repo.operationId();
     t.screen.mockInput.pressKey("r");
-    await t.until("[ ] include descendants (4 changes) · Tab toggle");
+    await t.until("[ ] include descendants (4 changes)");
+    expect(t.screen.captureCharFrame()).toContain("Tab descendants");
     expect(marked(source.commitId)).toBe(true);
     expect(marked(left.commitId)).toBe(false);
     t.screen.mockInput.pressKey("s");
@@ -825,7 +828,8 @@ test("inline rebase scope, load more and preview toggle follow custom bindings w
     t.screen.mockInput.pressKey("j");
     await t.until("+ hello from jj-evolved");
     t.screen.mockInput.pressKey("r");
-    await t.until("[ ] include descendants (2 changes) · x toggle");
+    await t.until("[ ] include descendants (2 changes)");
+    expect(t.screen.captureCharFrame()).toContain("x descendants");
     const preview = t.screen.renderer.root.findDescendantById("preview");
     if (!preview) throw new Error("Missing preview");
     t.screen.mockInput.pressKey("p");
@@ -1036,7 +1040,7 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
     await t.overlayReady("Git remotes");
     expect(t.chooser().options.map(option => option.value)).toEqual(["Git remotes", "feature", "solo"]);
     expect(t.chooser().options.map(option => option.description)).toEqual([
-      "Fetch and push with a review", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
+      "Fetch and push", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
     ]);
     t.choose("solo");
     await t.until("Push to origin");
@@ -1056,7 +1060,7 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
     expect(t.screen.captureCharFrame()).toContain("r keep it on origin");
     expect(await pushed()).toBe("refs/heads/feature");
     t.screen.mockInput.pressEnter();
-    await t.until("Bookmark delete completed");
+    await t.until("Deleted feature here and on origin");
     expect(await pushed()).toBe("");
     expect((await t.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
   } finally { await t.cleanup(); await Bun.$`rm -rf ${remote}`.quiet(); }
@@ -1146,6 +1150,7 @@ for (const flow of ["new menu", "form"] as const) {
       const write = spyOn(t.repo, "apply").mockImplementation(async prepared => {
         await apply(prepared);
         reload = spyOn(t.repo, "snapshot").mockRejectedValue(new Error("Graph unavailable"));
+        return null;
       });
       try {
         if (flow === "new menu") t.choose("New child"); else t.screen.mockInput.pressEnter();
@@ -1854,7 +1859,7 @@ test("g then p names a bookmark on the selected change, then tracks and pushes i
     expect(frame).toContain("Tracking: start tracking published@origin");
     expect((await t.repo.bookmarks()).some(item => item.name === "published")).toBe(false);
     t.screen.mockInput.pressEnter();
-    await t.until("git-publish completed");
+    await t.until("Published published to origin");
     const bookmarks = await t.repo.bookmarks();
     expect(bookmarks.find(item => item.name === "published" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [revision.commitId] });
     const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/published"], { stdout: "pipe" });
@@ -1962,7 +1967,7 @@ test("g then p advances the nearest ancestor bookmark without asking, and offers
     t.screen.mockInput.pressKey("p");
     await t.overlayReady("Review before applying");
     t.screen.mockInput.pressEnter();
-    await t.until("git-publish completed");
+    await t.until("Published feature to origin");
     const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/feature"], { stdout: "pipe" });
     expect((await new Response(pushed.stdout).text()).trim()).toBe(revision.commitId);
     await t.f.jj("bookmark", "create", "second", "-r", "@");
@@ -1976,5 +1981,83 @@ test("g then p advances the nearest ancestor bookmark without asking, and offers
   } finally {
     await t.cleanup();
     await Bun.$`rm -rf ${remote}`.quiet();
+  }
+}, 15_000);
+
+test("a remote push applies at once and reports its target, but a remote deletion stops for review", async () => {
+  const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
+  const offers = async (name: string) => {
+    for (let attempt = 0; attempt < 150 && !t.chooser().options.some(option => option.name === name); attempt++) await Bun.sleep(10);
+  };
+  const pushFeature = async (ready: string) => {
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Git remotes");
+    t.choose("Git remotes");
+    await offers("origin");
+    t.choose("origin");
+    await t.until("Push bookmark");
+    t.choose("Push bookmark");
+    await t.until(ready);
+    t.choose("feature");
+  };
+  try {
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    await pushFeature("Publish this bookmark");
+    await t.until("Pushed feature to origin");
+    expect(t.screen.captureCharFrame()).toMatch(/added at [0-9a-f]{8}/);
+    await t.f.jj("bookmark", "delete", "feature");
+    await pushFeature("Delete the remote bookmark after a review");
+    await t.overlayReady("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain("Warning: This deletes feature on origin.");
+    expect((await t.repo.bookmarks()).some(item => item.name === "feature" && item.remote === "origin")).toBe(true);
+    t.screen.mockInput.pressEnter();
+    await t.until("Pushed feature to origin");
+    expect(t.screen.captureCharFrame()).toMatch(/deleted \(was [0-9a-f]{8}\)/);
+    expect((await t.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+  } finally {
+    await t.cleanup();
+    await Bun.$`rm -rf ${remote}`.quiet();
+  }
+}, 15_000);
+
+test("a running fetch shows Esc cancel in the footer, and Escape or quitting stops jj and its git processes", async () => {
+  const t = await setup();
+  const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };
+  // An ext:: remote whose transport never answers stands in for a stalled connection.
+  Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.ext.allow", GIT_CONFIG_VALUE_0: "always" });
+  const stalled = async () => (await Bun.$`pgrep -f ${"^[^ ]*sleep 37$"}`.nothrow().quiet()).exitCode === 0;
+  try {
+    await t.f.jj("git", "remote", "add", "origin", "ext::sleep 37");
+    const fetch = async () => {
+      t.screen.mockInput.pressKey("f");
+      for (let attempt = 0; attempt < 300 && !(t.repo.networkActive && await stalled()); attempt++) await Bun.sleep(10);
+      expect(t.repo.networkActive).toBe(true);
+    };
+    const footer = () => t.screen.captureCharFrame().trimEnd().split("\n").at(-1) ?? "";
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Fetch origin");
+    await fetch();
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).toContain("Fetching from origin…");
+    expect(t.screen.captureCharFrame()).not.toContain("Esc cancels");
+    expect(footer().trim()).toBe("Esc cancel");
+    t.screen.mockInput.pressEscape();
+    await t.until("Fetch cancelled.");
+    expect(t.repo.networkActive).toBe(false);
+    expect(await stalled()).toBe(false);
+    expect(footer()).toContain("Esc close");
+    // The Git menu stays open after the cancelled fetch.
+    await fetch();
+    t.screen.mockInput.pressKey("c", { ctrl: true });
+    for (let attempt = 0; attempt < 300 && (t.repo.networkActive || await stalled()); attempt++) await Bun.sleep(10);
+    expect(t.repo.networkActive).toBe(false);
+    expect(await stalled()).toBe(false);
+  } finally {
+    for (const [key, value] of [["GIT_CONFIG_COUNT", saved.count], ["GIT_CONFIG_KEY_0", saved.key], ["GIT_CONFIG_VALUE_0", saved.value]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await t.cleanup();
   }
 }, 15_000);

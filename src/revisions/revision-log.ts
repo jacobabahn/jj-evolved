@@ -199,7 +199,7 @@ export class RevisionLog extends ScrollBoxRenderable {
       this.dropIndex = this.destinationAt(event.x, event.y);
       const destination = this.dropIndex === null ? null : this.revisions[this.dropIndex];
       const operation = this.drag.action === "bookmark" ? `Move ${this.drag.bookmark.name}` : `Rebase ${this.drag.revision.changeId.slice(0, 8)} (only this change)`;
-      this.onDragHint(`${operation} → ${destination?.changeId.slice(0, 8) || "choose another change"} · release to preview · Esc cancel`);
+      this.onDragHint(`${operation} → ${destination?.changeId.slice(0, 8) || "choose another change"}  release to preview  Esc cancel`);
       this.paintSelection([previousDrop, this.dropIndex, ...started ? this.dragIndexes(this.drag) : []]);
     } else if (event.type === "up" && event.button === 0) {
       const drag = this.drag;
