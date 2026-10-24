@@ -102,7 +102,7 @@ export async function prepareDeletion(root: string, action: DeleteAction, bookma
   if (!tracked) throw new Error(`${there} is no longer a tracked remote bookmark. Reload bookmarks.`);
   const remote = (await remoteList(root)).find(item => item.name === action.remote);
   if (!remote) throw new Error("This Git remote no longer exists. Reload remotes.");
-  return { remoteUrl: remote.url, summary: `Then push the deletion to ${remote.name} (${remote.url}):\n  delete ${there}, last fetched at ${tracked.targets.join(", ")}\n\nDeleting the bookmark on ${remote.name} cannot be undone locally: undo restores only the local bookmark. JJ rejects the push if the remote changed since the last fetch.` };
+  return { remoteUrl: remote.url, summary: `Then push the deletion to ${remote.name} (${remote.url}):\n  delete ${there}, last fetched at ${tracked.targets.join(", ")}\n\nDeleting the bookmark on ${remote.name} cannot be undone locally. Undo does not bring back the local bookmark either: the deletion and the push are two operations, and undo reverts the push, which changes nothing here. To get the local bookmark back, restore the operation before the deletion from operation history. JJ rejects the push if the remote changed since the last fetch.` };
 }
 
 // Like a publish, the whole deletion is cancellable: Escape during the local deletion stops the push before it starts.

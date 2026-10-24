@@ -315,11 +315,22 @@ test("deleting a tracked bookmark stays local by default and can also delete it 
     const both = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin", push: true });
     expect(both.summary).toContain(`delete feature@origin, last fetched at ${target}`);
     expect(both.summary).toContain("cannot be undone locally");
+    expect(both.summary).toContain("undo reverts the push, which changes nothing here");
     expect(await f.repo.operationId()).toBe(before);
     expect(await refs(f.remote)).toBe(`refs/heads/feature ${target}\n`);
-    await f.repo.apply(both);
+    expect(await f.repo.apply(both)).toMatch(/^Deleted feature here and on origin\nwas [0-9a-f]{8}$/);
     expect(await refs(f.remote)).toBe("");
     expect((await f.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+    // What the review says about recovery: undo reverts only the push and leaves the bookmark deleted,
+    // while restoring the operation before the deletion brings the local bookmark back.
+    const [push, deletion, previous] = await f.repo.operations(3);
+    expect(deletion!.description).toBe("delete bookmark feature");
+    await f.repo.apply(await f.repo.prepare({ kind: "undo", operation: push! }));
+    expect((await f.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+    await f.repo.apply(await f.repo.prepare({ kind: "restore", operation: previous! }));
+    expect((await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)?.targets).toEqual([target]);
+    expect(await refs(f.remote)).toBe("");
+    await f.jj("bookmark", "delete", "feature");
     await f.jj("bookmark", "create", "feature", "-r", target);
     await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
     await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin" }));
