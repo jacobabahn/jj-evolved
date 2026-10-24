@@ -219,6 +219,39 @@ test("publish never infers a conflicted bookmark, which the push would refuse", 
   } finally { await f.cleanup(); await publisher.cleanup(); }
 });
 
+// Puts a jj on PATH that runs the real one, then writes a bookmark from "another process" right after any command whose
+// arguments include `trigger`, which is the window between a publish's local step and its push.
+async function withIntruder<T>(trigger: string, work: () => Promise<T>): Promise<T> {
+  const real = Bun.which("jj")!;
+  const dir = await mkdtemp(join(tmpdir(), "jj-intruder-"));
+  await Bun.write(join(dir, "jj"), `#!/bin/sh\n"${real}" "$@"\ncode=$?\ncase " $* " in *" ${trigger} "*) "${real}" --ignore-working-copy bookmark create intruder -r @ >/dev/null 2>&1;; esac\nexit $code\n`);
+  await Bun.$`chmod +x ${join(dir, "jj")}`.quiet();
+  const path = process.env.PATH;
+  process.env.PATH = `${dir}:${path}`;
+  try { return await work(); } finally { process.env.PATH = path; await rm(dir, { recursive: true, force: true }); }
+}
+
+test("a publish or remote deletion refuses to push when another jj command writes after its local step", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const publish = await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision });
+    await withIntruder("create", async () => { await expect(f.repo.apply(publish)).rejects.toThrow("Another jj command changed the repository during this publish, so nothing was pushed to origin."); });
+    expect(await refs(f.remote)).toBe("");
+    const bookmarks = await f.repo.bookmarks();
+    expect(bookmarks.find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
+    expect(bookmarks.some(item => item.name === "intruder")).toBe(true);
+    // Without the intruder, publishing again pushes.
+    await f.jj("bookmark", "delete", "intruder");
+    await f.repo.apply(await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision }));
+    expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
+    await f.jj("bookmark", "delete", "intruder");
+    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "next", remote: "origin", push: true });
+    await withIntruder("delete", async () => { await expect(f.repo.apply(deletion)).rejects.toThrow("Another jj command changed the repository during this deletion, so nothing was pushed to origin."); });
+    expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
+  } finally { await f.cleanup(); }
+});
+
 test("the suggested bookmark name follows templates.git_push_bookmark", async () => {
   const f = await remoteFixture();
   try {

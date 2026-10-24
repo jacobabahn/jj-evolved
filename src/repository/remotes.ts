@@ -80,11 +80,13 @@ async function preparePublish(root: string, action: PublishAction, bookmarks: Bo
 
 // The whole publish is cancellable, so Escape during its local steps stops the push before it starts; the local
 // commands themselves never receive the signal, so none of them is interrupted halfway.
-async function applyPublish(root: string, action: PublishAction, bookmarks: Bookmark[], signal: AbortSignal): Promise<string> {
+async function applyPublish(root: string, action: PublishAction, bookmarks: Bookmark[], operationId: string, signal: AbortSignal): Promise<string> {
   const { local, remote, placed } = publishState(action, bookmarks);
-  if (!placed) await run(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", action.name]);
-  if (!remote) await run(root, mutationArgs({ kind: "bookmark-track", remote: action.remote, name: action.name }));
-  try { return pushReport("Published", action, await network(root, ["--at-op", await latestOperation(root), ...mutationArgs(action)], signal)); }
+  const interrupted = `Another jj command changed the repository during this publish, so nothing was pushed to ${action.remote}. Check the bookmark ${action.name}, then publish again.`;
+  let pinned = operationId;
+  if (!placed) pinned = await localStep(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", action.name], pinned, interrupted);
+  if (!remote) pinned = await localStep(root, mutationArgs({ kind: "bookmark-track", remote: action.remote, name: action.name }), pinned, interrupted);
+  try { return pushReport("Published", action, await network(root, ["--at-op", pinned, ...mutationArgs(action)], signal)); }
   catch (error) {
     const kept = `The local bookmark ${action.name} is set and tracks ${action.remote}`;
     if (error instanceof CancelledError && !error.started) throw new Error(`Publish cancelled before the push started; nothing was sent to ${action.remote}.\n${kept}. Publish again to push it.`);
@@ -106,10 +108,11 @@ export async function prepareDeletion(root: string, action: DeleteAction, bookma
 }
 
 // Like a publish, the whole deletion is cancellable: Escape during the local deletion stops the push before it starts.
-async function applyDeletion(root: string, action: DeleteAction & { remote: string }, signal: AbortSignal): Promise<string> {
-  await run(root, mutationArgs(action));
+async function applyDeletion(root: string, action: DeleteAction & { remote: string }, operationId: string, signal: AbortSignal): Promise<string> {
+  const pinned = await localStep(root, mutationArgs(action), operationId,
+    `Another jj command changed the repository during this deletion, so nothing was pushed to ${action.remote}. The local bookmark ${action.name} was deleted; to delete it on ${action.remote} too, choose ${action.name} in the bookmark browser, then Push deletion.`);
   try {
-    const output = await network(root, ["--at-op", await latestOperation(root), ...mutationArgs({ kind: "git-push", remote: action.remote, name: action.name })], signal);
+    const output = await network(root, ["--at-op", pinned, ...mutationArgs({ kind: "git-push", remote: action.remote, name: action.name })], signal);
     const change = pushChanges(output).find(item => item.name === action.name);
     return `Deleted ${action.name} here and on ${action.remote}${change?.kind === "delete" ? `\nwas ${short(change.from)}` : ""}`;
   }
@@ -121,8 +124,18 @@ async function applyDeletion(root: string, action: DeleteAction & { remote: stri
   }
 }
 
-async function latestOperation(root: string): Promise<string> {
-  return (await run(root, ["--ignore-working-copy", "op", "log", "--no-graph", "--limit", "1", "-T", "id"])).trim();
+/**
+ * Runs one local step of a publish or remote deletion and returns the operation it created, which the push is then pinned to.
+ * That operation must directly follow `parent`, starting from the reviewed one: if another jj process wrote in between,
+ * the head would include its changes and the push would publish them, so `interrupted` is thrown instead. The step
+ * ignores the working copy so that a snapshot of file edits cannot slip in as an operation of its own.
+ */
+async function localStep(root: string, args: string[], parent: string, interrupted: string): Promise<string> {
+  await run(root, ["--ignore-working-copy", ...args]);
+  const output = await run(root, ["--ignore-working-copy", "op", "log", "--no-graph", "--limit", "1", "-T", 'id ++ " " ++ parents.map(|p| p.id()).join(",")']);
+  const [id = "", parents = ""] = output.trim().split(" ");
+  if (parents !== parent) throw new Error(interrupted);
+  return id;
 }
 
 /** Runs the network part of a remote action, giving it the signal that cancels it. */
@@ -241,8 +254,8 @@ export async function applyRemote(root: string, prepared: PreparedMutation, book
   if (!("remote" in action)) throw new Error("Expected a remote action.");
   const remote = (await remoteList(root)).find(item => item.name === action.remote);
   if (!remote || remote.url !== prepared.remoteUrl) throw new Error("Remote configuration changed since this preview. Review the action again.");
-  if (action.kind === "git-publish") return await scope(signal => applyPublish(root, action, bookmarks, signal));
-  if (action.kind === "bookmark-delete") return await scope(signal => applyDeletion(root, { ...action, remote: remote.name }, signal));
+  if (action.kind === "git-publish") return await scope(signal => applyPublish(root, action, bookmarks, prepared.operationId, signal));
+  if (action.kind === "bookmark-delete") return await scope(signal => applyDeletion(root, { ...action, remote: remote.name }, prepared.operationId, signal));
   // Pin the operation so concurrent local edits cannot change the reviewed push targets.
   const args = ["--at-op", prepared.operationId, ...mutationArgs(action)];
   if (action.kind === "git-fetch") {
