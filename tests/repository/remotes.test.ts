@@ -294,6 +294,19 @@ test("only fetch and push commands can be cancelled, not tracking changes or loc
   } finally { await f.cleanup(); }
 });
 
+test("cancelling a publish during its local steps stops the push before it starts", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const applying = f.repo.apply(await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision }));
+    for (let attempt = 0; attempt < 1000 && !f.repo.networkActive; attempt++) await Bun.sleep(1);
+    f.repo.cancelNetwork();
+    await expect(applying).rejects.toThrow("Publish cancelled before the push started; nothing was sent to origin.\nThe local bookmark next is set and tracks origin. Publish again to push it.");
+    expect(await refs(f.remote)).toBe("");
+    expect((await f.repo.bookmarks()).find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
+  } finally { await f.cleanup(); }
+});
+
 test("cancelNetwork stops a fetch that is waiting on the remote", async () => {
   const f = await remoteFixture();
   const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };

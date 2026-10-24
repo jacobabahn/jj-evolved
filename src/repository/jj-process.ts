@@ -11,6 +11,7 @@ export const NETWORK_TIMEOUT_MS = 10 * 60_000;
 
 export async function run(path: string, args: string[], diagnostics = false, env: NodeJS.ProcessEnv = {}, options: RunOptions = {}): Promise<string> {
   if (!Bun.which("jj")) throw new Error("jj is not installed. Install Jujutsu, then run jj-evolved again.");
+  if (options.signal?.aborted) throw new CancelledError(false);
   const proc = Bun.spawn(["jj", "--no-pager", "--color=never", ...args], {
     // Every jj leads its own process group (setsid), so a timeout or cancellation signals the whole group and also
     // stops the git and ssh processes jj starts; killing only jj leaves them running, and a cancelled push could
@@ -23,19 +24,19 @@ export async function run(path: string, args: string[], diagnostics = false, env
   let timedOut = false;
   const stop = () => { try { process.kill(-proc.pid, "SIGTERM"); } catch { proc.kill(); } };
   const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
-  if (signal?.aborted) stop(); else signal?.addEventListener("abort", stop, { once: true });
+  signal?.addEventListener("abort", stop, { once: true });
   try {
     const [stdout, stderr, code] = await Promise.all([
       new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
     ]);
-    if (code !== 0 && signal?.aborted) throw new CancelledError();
+    if (code !== 0 && signal?.aborted) throw new CancelledError(true);
     if (code !== 0 && timedOut) throw new Error(`jj command exceeded ${timeoutMs >= 60_000 ? `${timeoutMs / 60_000} minutes` : `${timeoutMs / 1000} seconds`} and was stopped.${stderr.trim() ? `\n${terminalText(stderr.trim())}` : ""}`);
     if (code !== 0) throw new Error(terminalText(stderr.trim()) || "jj command failed.");
     return diagnostics ? stdout + stderr : stdout;
   } finally { clearTimeout(timer); signal?.removeEventListener("abort", stop); }
 }
 
-/** Thrown when a command was stopped through its abort signal. */
+/** Thrown when a command was stopped through its abort signal; `started` is false when it was cancelled before it ran. */
 export class CancelledError extends Error {
-  constructor() { super("Cancelled."); this.name = "CancelledError"; }
+  constructor(readonly started: boolean) { super("Cancelled."); this.name = "CancelledError"; }
 }

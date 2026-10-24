@@ -53,8 +53,10 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
   const operationId = (await run(root, ["--ignore-working-copy", "op", "log", "--no-graph", "--limit", "1", "-T", "id"])).trim();
   try { return pushReport("Published", action, await network(root, ["--at-op", operationId, ...mutationArgs(action)], signal)); }
   catch (error) {
+    const kept = `The local bookmark ${action.name} is set and tracks ${action.remote}`;
+    if (error instanceof CancelledError && !error.started) throw new Error(`Publish cancelled before the push started; nothing was sent to ${action.remote}.\n${kept}. Publish again to push it.`);
     const reason = error instanceof CancelledError ? "Push cancelled. The remote may already have the new target; fetch to check" : error instanceof Error ? error.message : String(error);
-    throw new Error(`${reason}\nThe local bookmark ${action.name} is set and tracks ${action.remote}; only the push failed. Publish again to retry.`);
+    throw new Error(`${reason}\n${kept}; only the push failed. Publish again to retry.`);
   }
 }
 
@@ -182,7 +184,7 @@ export async function applyRemote(root: string, prepared: PreparedMutation, book
   if (action.kind === "git-push") {
     try { return pushReport("Pushed", action, await scope(signal => network(root, args, signal))); }
     catch (error) {
-      if (error instanceof CancelledError) throw new Error(`Push cancelled. ${action.name}@${action.remote} may already have the new target; fetch to check before pushing again.`);
+      if (error instanceof CancelledError) throw new Error(error.started ? `Push cancelled. ${action.name}@${action.remote} may already have the new target; fetch to check before pushing again.` : `Push cancelled before it started; nothing was sent to ${action.remote}.`);
       throw error;
     }
   }
