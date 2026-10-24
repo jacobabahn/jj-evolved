@@ -42,7 +42,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
       if (input?.visible) break;
       await Bun.sleep(10);
     }
-    await until("Search in revset:");
+    await until("Search in revset ·");
     const node = screen.renderer.root.findDescendantById("search-input");
     if (!(node instanceof InputRenderable)) throw new Error("Missing search input");
     node.value = query;
@@ -70,7 +70,8 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await Bun.write(`${t.f.path}/unsnapshotted.txt`, "navigation must leave this alone\n");
     await t.search("FEATURE");
     const searching = await t.until("1/1");
-    expect(searching).toContain("Enter keep  Esc cancel");
+    expect(searching).toContain("Enter keep");
+    expect(searching).toContain("Esc cancel");
     expect(searching).toContain("┃*");
     expect(t.list().getSelectedIndex()).not.toBe(original);
     t.screen.mockInput.pressEscape();
@@ -89,14 +90,16 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await t.until("No matches");
     expect(t.list().getSelectedIndex()).toBe(original);
     t.screen.mockInput.pressEscape();
-    await t.until("1/1");
+    expect(await t.until("1/1")).toContain("' \" match");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(80);
     const frame = await t.until("revset: @ | parents(@)");
-    expect(frame).not.toContain("Search in revset:");
+    expect(frame).not.toContain("Search in revset");
     expect(frame).toContain("/ search");
-    expect(frame).toContain("'/\" match");
-    expect(frame).toContain("@ work");
+    // Match keys only appear while a search is active; Space stays pinned at 80 columns.
+    expect(frame).not.toContain("' \" match");
+    expect(frame).toContain("Tab focus preview");
+    expect(frame).toContain("Space actions");
     expect(await t.repo.operationId()).toBe(operation);
     expect(await Bun.file(`${t.f.path}/unsnapshotted.txt`).text()).toBe("navigation must leave this alone\n");
   } finally { await t.cleanup(); }
@@ -285,7 +288,7 @@ test("selection moves repaint only the affected rows and keep search markers", a
     await t.search("FEATURE");
     await t.until("1/1");
     t.screen.mockInput.pressEnter();
-    await t.until("next/prev");
+    await t.until("Esc clear search");
     const list = t.list() as unknown as { paintRow: (row: { revisionIndex: number | null }) => void };
     const paintRow = list.paintRow.bind(list);
     const painted = new Set<number | null>();

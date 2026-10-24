@@ -374,7 +374,8 @@ export const scenarios: Scenario[] = [
       ui.key("j");
       await ui.until("+ hello from jj-evolved");
       ui.key("r");
-      await ui.until("[ ] include descendants (3 changes) · Tab toggle");
+      await ui.until("[ ] include descendants (3 changes)");
+      assert(ui.screen.captureCharFrame().includes("Tab descendants"));
       assert(marked("Initial feature") && !marked("Next change") && !marked("Follow-up"));
       await ui.capture("Inline rebase starts with the change alone");
       ui.key("s");
@@ -487,7 +488,8 @@ export const scenarios: Scenario[] = [
     async run(ui) {
       const editor = () => ui.node("description-input") as TextareaRenderable;
       ui.key("RETURN");
-      await ui.until("^S save · Enter newline · Esc cancel");
+      await ui.until("^S save  Enter newline");
+      assert(ui.screen.captureCharFrame().includes("Esc cancel"));
       await ui.capture("Description editor opens with save and newline hints");
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.type("Add login form");
@@ -506,7 +508,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Enter newline");
       await ui.type(" (draft)");
       ui.key("ESCAPE");
-      await ui.until("Unsaved changes · Esc again discards · ^S saves");
+      await ui.until("Unsaved changes. Esc again discards, ^S saves.");
       assert.equal(editor().visible, true);
       await ui.capture("First Escape warns about unsaved edits instead of discarding");
       ui.key("ESCAPE");

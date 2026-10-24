@@ -171,7 +171,8 @@ test("arrow keys choose aliases, tags and signatures as you type; reopening offe
 
   // Reopening lists earlier expressions, most recent first, excluding the active one.
   ui.key("L");
-  await ui.until("1 recent revset ·");
+  await ui.until("1 recent revset");
+  expect(ui.screen.captureCharFrame()).not.toContain("Tab/↓");
   expect(ui.screen.captureCharFrame()).toContain("zz_initial");
   ui.key("ARROW_UP"); expect(input.value).toBe("zz_initial");
   ui.key("ESCAPE");

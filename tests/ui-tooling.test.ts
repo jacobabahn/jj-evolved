@@ -26,6 +26,10 @@ for (const width of [80, 120]) {
     const styles = matchingStyles(ui, "Next change");
     expect(styles).toHaveLength(2);
     expect(styles).toMatchSnapshot(`selected revision ${width}`);
+    const footer = ui.node("shortcuts");
+    const footerStyles = ui.screen.captureSpans().lines.slice(footer.screenY, footer.screenY + footer.height)
+      .map(line => line.spans.map(span => ({ text: span.text, fg: rgbToHex(span.fg), bg: rgbToHex(span.bg), attributes: span.attributes })));
+    expect(footerStyles).toMatchSnapshot(`footer styles ${width}`);
     ui.key("?");
     await ui.until("Keyboard reference");
     const preview = ui.node("action-overlay");
@@ -34,7 +38,6 @@ for (const width of [80, 120]) {
       .map(line => Array.from(line).slice(preview.screenX, preview.screenX + preview.width).join(""))
       .join("\n");
     expect(text).toMatchSnapshot(`help layout ${width}`);
-    expect(matchingStyles(ui, "j/k move")).toMatchSnapshot(`footer styles ${width}`);
   }, { theme: "dark", width, height: 30 }), 15_000);
 }
 
