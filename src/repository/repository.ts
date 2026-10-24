@@ -33,6 +33,8 @@ export class Repository {
   private diffChars = 0;
   private diffGeneration = 0;
   private networkAbort: AbortController | null = null;
+  /** Called when a fetch or push starts or finishes, so the app can show or hide its cancel key. */
+  onNetworkChange: (() => void) | null = null;
   private constructor(readonly root: string) {}
 
   static async open(path: string): Promise<Repository> {
@@ -270,7 +272,8 @@ export class Repository {
   private readonly withNetwork: NetworkScope = async work => {
     const controller = new AbortController();
     this.networkAbort = controller;
+    this.onNetworkChange?.();
     try { return await work(controller.signal); }
-    finally { if (this.networkAbort === controller) this.networkAbort = null; }
+    finally { if (this.networkAbort === controller) { this.networkAbort = null; this.onNetworkChange?.(); } }
   };
 }

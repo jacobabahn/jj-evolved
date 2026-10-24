@@ -1850,19 +1850,34 @@ test("a remote push applies at once and reports its target, but a remote deletio
   }
 }, 15_000);
 
-test("quitting during a fetch stops jj and the git processes it started", async () => {
+test("a running fetch shows Esc cancel in the footer, and Escape or quitting stops jj and its git processes", async () => {
   const t = await setup();
   const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };
   // An ext:: remote whose transport never answers stands in for a stalled connection.
   Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.ext.allow", GIT_CONFIG_VALUE_0: "always" });
-  const stalled = async () => (await Bun.$`pgrep -f ${"sleep 37"}`.nothrow().quiet()).exitCode === 0;
+  const stalled = async () => (await Bun.$`pgrep -f ${"^[^ ]*sleep 37$"}`.nothrow().quiet()).exitCode === 0;
   try {
     await t.f.jj("git", "remote", "add", "origin", "ext::sleep 37");
+    const fetch = async () => {
+      t.screen.mockInput.pressKey("f");
+      for (let attempt = 0; attempt < 300 && !(t.repo.networkActive && await stalled()); attempt++) await Bun.sleep(10);
+      expect(t.repo.networkActive).toBe(true);
+    };
+    const footer = () => t.screen.captureCharFrame().trimEnd().split("\n").at(-1) ?? "";
     t.screen.mockInput.pressKey("g");
     await t.overlayReady("Fetch origin");
-    t.screen.mockInput.pressKey("f");
-    for (let attempt = 0; attempt < 300 && !(t.repo.networkActive && await stalled()); attempt++) await Bun.sleep(10);
-    expect(t.repo.networkActive).toBe(true);
+    await fetch();
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).toContain("Fetching from origin…");
+    expect(t.screen.captureCharFrame()).not.toContain("Esc cancels");
+    expect(footer().trim()).toBe("Esc cancel");
+    t.screen.mockInput.pressEscape();
+    await t.until("Fetch cancelled.");
+    expect(t.repo.networkActive).toBe(false);
+    expect(await stalled()).toBe(false);
+    expect(footer()).toContain("Esc close");
+    // The Git menu stays open after the cancelled fetch.
+    await fetch();
     t.screen.mockInput.pressKey("c", { ctrl: true });
     for (let attempt = 0; attempt < 300 && (t.repo.networkActive || await stalled()); attempt++) await Bun.sleep(10);
     expect(t.repo.networkActive).toBe(false);

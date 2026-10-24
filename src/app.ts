@@ -151,6 +151,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
   overlay.onKeys = paintShortcuts;
+  repository.onNetworkChange = () => { if (!stopped) paintShortcuts(); };
   const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
   const overlayText = new ChangePreview(renderer, "overlay-preview-text");
   const comparison = new TreeComparisonView(renderer, "confirmation-trees");
@@ -284,6 +285,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   // Each mode lists the keys that work in it, most important first; the right group stays pinned at any width.
   function shortcutLines(): ShortcutLine[] {
+    // While a fetch or push runs, Escape cancels it and the mode's other keys wait, so that is the only key shown.
+    // The footer keeps its height so the layout does not shift.
+    if (repository.networkActive) return modeShortcutLines().map((_, index, lines) => index === lines.length - 1 ? { left: [], right: [["Esc", "cancel"]] } : { left: [] });
+    return modeShortcutLines();
+  }
+  function modeShortcutLines(): ShortcutLine[] {
     const key = (action: Action) => keyLabel(bindings, action, true);
     const pair = (first: Action, second: Action) => bothKeys(key(first), key(second));
     const move = pair("down", "up"), page = pair("pageDown", "pageUp");
@@ -812,10 +819,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const edit = back || (previous.kind === "text" ? goBack : previous.kind === "confirm" ? previous.edit : null);
     return { back, edit };
   }
-  /** The status shown while a fetch or push runs, naming the key that cancels it. */
+  /** The status shown while a fetch or push runs; the footer shows the key that cancels it. */
   function networkLabel(action: Mutation): string | null {
-    if (action.kind === "git-fetch") return `Fetching from ${action.remote}… Esc cancels`;
-    if (action.kind === "git-push" || action.kind === "git-publish") return `Pushing ${action.name} to ${action.remote}… Esc cancels`;
+    if (action.kind === "git-fetch") return `Fetching from ${action.remote}…`;
+    if (action.kind === "git-push" || action.kind === "git-publish") return `Pushing ${action.name} to ${action.remote}…`;
     return null;
   }
   function confirm(action: Mutation) {
@@ -1617,6 +1624,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function stop() {
     if (stopped) return;
     stopped = true;
+    repository.onNetworkChange = null;
     // jj runs detached from the terminal, so a fetch or push still running would outlive the app.
     repository.cancelNetwork();
     renderer.off("palette", applyTerminalColors);
