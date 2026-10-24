@@ -791,8 +791,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       await refresh(value.trim() || defaultRevset);
       closePrompt();
       revsetHistory = recordRevset(revsetHistory, value);
-      const entries = revsetHistory;
-      historySaved = historySaved.then(() => historyStore.save(entries)).catch(error => report(`Couldn't save revset history: ${errorText(error)}`, true));
+      // Recording waits for the startup load, so the loaded entries can't replace this one.
+      historySaved = historySaved.then(() => historyStore.record(value)).then(entries => { revsetHistory = entries; })
+        .catch(error => report(`Couldn't save revset history: ${errorText(error)}`, true));
     });
     else if (current.kind === "describe") await run("Applying jj operation…", async () => {
       if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) await applyReviewed();
@@ -1674,7 +1675,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // from the result, because the renderer may already have cached it and a cached palette emits no event.
     renderer.on("palette", applyTerminalColors);
     void renderer.getPalette().then(detected => { if (!stopped) applyTerminalColors(detected); }).catch(() => {});
-    void historyStore.load().then(entries => { revsetHistory = entries; }).catch(error => report(`Couldn't read revset history: ${errorText(error)}`, true));
+    historySaved = historyStore.load().then(entries => { revsetHistory = entries; }).catch(error => report(`Couldn't read revset history: ${errorText(error)}`, true));
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
     if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }

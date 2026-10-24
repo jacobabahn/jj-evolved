@@ -7,7 +7,8 @@ export const revsetHistoryLimit = 50;
 /** Where successfully applied revsets are kept between sessions. */
 export interface RevsetHistoryStore {
   load(): Promise<string[]>;
-  save(entries: readonly string[]): Promise<void>;
+  /** Records an applied expression on top of the stored history, which another instance may have changed, and returns the result. */
+  record(expression: string): Promise<string[]>;
 }
 
 /** Moves an applied expression to the front, without duplicates; empty input (the default revset) isn't recorded. */
@@ -19,7 +20,7 @@ export function recordRevset(entries: readonly string[], expression: string): st
 
 export function memoryRevsetHistory(initial: readonly string[] = []): RevsetHistoryStore {
   let entries = [...initial];
-  return { load: async () => [...entries], save: async next => { entries = [...next]; } };
+  return { load: async () => [...entries], record: async expression => [...(entries = recordRevset(entries, expression))] };
 }
 
 export function revsetHistoryPath() {
@@ -45,17 +46,20 @@ async function readHistoryFile(path: string): Promise<HistoryFile> {
 export function fileRevsetHistory(root: string, path = revsetHistoryPath()): RevsetHistoryStore {
   return {
     async load() { return (await readHistoryFile(path)).repositories[root]?.slice(0, revsetHistoryLimit) ?? []; },
-    async save(entries) {
-      const file = await readHistoryFile(path);
-      file.repositories[root] = entries.slice(0, revsetHistoryLimit);
+    async record(expression) {
+      // Reading just before writing keeps entries other repositories and other app instances saved meanwhile.
+      const { repositories } = await readHistoryFile(path);
+      const entries = recordRevset(repositories[root]?.slice(0, revsetHistoryLimit) ?? [], expression);
+      repositories[root] = entries;
       await mkdir(dirname(path), { recursive: true });
       const temporary = `${path}.${crypto.randomUUID()}.tmp`;
       try {
-        await writeFile(temporary, `${JSON.stringify(file, null, 2)}\n`, { flag: "wx" });
+        await writeFile(temporary, `${JSON.stringify({ repositories }, null, 2)}\n`, { flag: "wx" });
         await rename(temporary, path);
       } finally {
         await rm(temporary, { force: true });
       }
+      return entries;
     },
   };
 }

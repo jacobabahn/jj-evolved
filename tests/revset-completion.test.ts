@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InputRenderable } from "@opentui/core";
 import { revsetCompletions, applyCompletion, historyCompletions } from "../src/revisions/revset-completion";
-import { fileRevsetHistory, recordRevset, revsetHistoryLimit } from "../src/revisions/revset-history";
+import { fileRevsetHistory, recordRevset, revsetHistoryLimit, type RevsetHistoryStore } from "../src/revisions/revset-history";
 import { Repository } from "../src/repository/repository";
 import { fixture } from "./fixture";
 import { createUiFixture } from "../tooling/ui";
@@ -72,21 +72,72 @@ test("history suggests recent expressions that extend the whole input", () => {
   expect(recordRevset(Array.from({ length: revsetHistoryLimit }, (_, index) => `${index}`), "new")).toHaveLength(revsetHistoryLimit);
 });
 
-test("history files keep each repository's entries and tolerate a missing or corrupt file", async () => {
+test("history files keep each repository's entries and tolerate a missing file", async () => {
   const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
   try {
     const path = join(directory, "state", "revset-history.json");
     const first = fileRevsetHistory("/repo/one", path), second = fileRevsetHistory("/repo/two", path);
     expect(await first.load()).toEqual([]);
-    await first.save(["main", "all()"]);
-    await second.save(["tags()"]);
+    expect(await first.record("all()")).toEqual(["all()"]);
+    expect(await first.record("main")).toEqual(["main", "all()"]);
+    await second.record("tags()");
     expect(await first.load()).toEqual(["main", "all()"]);
     expect(await second.load()).toEqual(["tags()"]);
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ repositories: { "/repo/one": ["main", "all()"], "/repo/two": ["tags()"] } });
-    await writeFile(path, "{ not json");
-    expect(await first.load()).toEqual([]);
-    await first.save(["mine()"]);
-    expect(await first.load()).toEqual(["mine()"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("two app instances on one repository both keep the revsets they apply", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "revset-history.json");
+    const first = fileRevsetHistory("/repo", path), second = fileRevsetHistory("/repo", path);
+    await Promise.all([first.load(), second.load()]);
+    await first.record("mine()");
+    // The second instance loaded before the first recorded, but recording merges with the file as it is now.
+    expect(await second.record("tags()")).toEqual(["tags()", "mine()"]);
+    expect(await first.record("all()")).toEqual(["all()", "tags()", "mine()"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a revset applied before the saved history loads is merged with it, not overwritten", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "revset-history.json");
+    let root = "";
+    let releaseLoad = () => {};
+    const loadGate = new Promise<void>(resolve => { releaseLoad = resolve; });
+    const records: string[] = [];
+    // The repository root is only known once the fixture exists; the load is held until then.
+    const store: RevsetHistoryStore = {
+      load: async () => { await loadGate; return fileRevsetHistory(root, path).load(); },
+      record: async expression => { records.push(expression); return fileRevsetHistory(root, path).record(expression); },
+    };
+    await using ui = await createUiFixture({ width: 80, height: 24, revsetHistory: store });
+    root = ui.repo.root;
+    await writeFile(path, JSON.stringify({ repositories: { [root]: ["mine()"], "/other/repo": ["tags()"] } }));
+    ui.key("L"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+    await ui.type("all()");
+    ui.key("RETURN");
+    await ui.until("revset: all()");
+    await ui.until("Ready.");
+    await Bun.sleep(50);
+    // Nothing is recorded until the saved history has loaded.
+    expect(records).toEqual([]);
+    releaseLoad();
+    const deadline = performance.now() + 3000;
+    while (!records.length && performance.now() < deadline) await Bun.sleep(10);
+    await Bun.sleep(50);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ repositories: { [root]: ["all()", "mine()"], "/other/repo": ["tags()"] } });
+    // The prompt offers both the loaded and the newly applied revset.
+    ui.key("L");
+    await ui.until("1 recent revset");
+    expect(ui.screen.captureCharFrame()).toContain("mine()");
+    ui.key("ESCAPE");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -1,4 +1,5 @@
 import type { Keybindings } from "../src/ui/keybindings";
+import type { RevsetHistoryStore } from "../src/revisions/revset-history";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { SelectRenderable, type Renderable, type SelectOption } from "@opentui/core";
@@ -12,6 +13,7 @@ import { recordScreen, styledFrame, writeRecording } from "./recording";
 type Target = { id: string; instance: number };
 type FixtureOptions = {
   bindings?: Keybindings;
+  revsetHistory?: RevsetHistoryStore;
   width?: number;
   height?: number;
   theme?: ThemeName;
@@ -32,7 +34,7 @@ export async function createUiFixture(options: FixtureOptions = {}) {
     let app: ReturnType<typeof createApp> | undefined;
     try {
       const repo = await Repository.open(f.path);
-      app = createApp(screen.renderer, repo, themes[options.theme ?? "terminal"], undefined, options.bindings);
+      app = createApp(screen.renderer, repo, themes[options.theme ?? "terminal"], undefined, options.bindings, { revsetHistory: options.revsetHistory });
       await app.start();
       await screen.renderOnce();
       let disposed = false;
