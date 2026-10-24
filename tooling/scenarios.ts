@@ -616,7 +616,7 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    name: "publish", title: "Publish a change: g then p advances the nearest bookmark, or pushes under another name",
+    name: "publish", title: "Publish a change: g then p advances the nearest bookmark and pushes; n pushes under another name",
     async run(ui) {
       const remote = `${ui.f.path}/.jj/demo-remote.git`;
       const git = Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "pipe" });
@@ -632,23 +632,25 @@ export const scenarios: Scenario[] = [
       await ui.until("Advance feature here and push");
       await ui.capture("g opens the Git menu, which names the bookmark p will use");
       ui.key("p");
-      await ui.until("Advance bookmark feature by 1 commit");
-      await ui.capture("p skips the name prompt: one review covers the advance, tracking and push");
+      await ui.until("Published feature to origin");
+      await ui.settled();
+      await ui.capture("p advances feature to the change and pushes it without a further prompt");
+      const commit = (await ui.repo.snapshot("@")).revisions[0]!.commitId;
+      const pushed = (name: string) => Bun.spawn(["git", "--git-dir", remote, "rev-parse", `refs/heads/${name}`], { stdout: "pipe" });
+      assert.equal((await new Response(pushed("feature").stdout).text()).trim(), commit);
+      ui.key("g");
+      await ui.until("Push under another name");
+      await ui.capture("With one bookmark inferred, n pushes the change under another name");
       ui.key("n");
       await ui.until("Bookmark to push to origin");
       await ui.capture("n asks for another name, starting from the one jj would generate");
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
       await ui.type("login");
       ui.key("RETURN");
-      await ui.until("Tracking: start tracking login@origin");
-      await ui.capture("The review for a new bookmark");
-      ui.key("RETURN");
       await ui.until("Published login to origin");
       await ui.settled();
       await ui.capture("The bookmark is created, tracked and pushed");
-      const commit = (await ui.repo.snapshot("@")).revisions[0]!.commitId;
-      const pushed = Bun.spawn(["git", "--git-dir", remote, "rev-parse", "refs/heads/login"], { stdout: "pipe" });
-      assert.equal((await new Response(pushed.stdout).text()).trim(), commit);
+      assert.equal((await new Response(pushed("login").stdout).text()).trim(), commit);
     },
   },
   {
