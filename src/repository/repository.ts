@@ -1,5 +1,5 @@
 import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
+import { remoteList, defaultPushRemote, prepareRemote, applyRemote, type NetworkScope } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -194,8 +194,7 @@ export class Repository {
       case "git-publish":
       case "bookmark-track":
       case "bookmark-untrack": {
-        const bookmarks = await this.bookmarks();
-        const preview = await this.withNetwork(signal => prepareRemote(this.root, action, bookmarks, operationId, signal));
+        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId, this.withNetwork);
         summary = preview.summary; remoteUrl = preview.remoteUrl; caution = preview.caution;
         break;
       }
@@ -255,10 +254,7 @@ export class Repository {
   async apply(prepared: PreparedMutation): Promise<string | null> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    if (prepared.remoteUrl !== undefined) {
-      const bookmarks = await this.bookmarks();
-      return await this.withNetwork(signal => applyRemote(this.root, prepared, bookmarks, signal));
-    }
+    if (prepared.remoteUrl !== undefined) return await applyRemote(this.root, prepared, await this.bookmarks(), this.withNetwork);
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
     return null;
@@ -270,10 +266,11 @@ export class Repository {
   /** Stops the running fetch or push, if any. */
   cancelNetwork() { this.networkAbort?.abort(); }
 
-  private async withNetwork<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  /** Makes only the fetch or push itself cancellable, not the local steps around it such as tracking changes. */
+  private readonly withNetwork: NetworkScope = async work => {
     const controller = new AbortController();
     this.networkAbort = controller;
     try { return await work(controller.signal); }
     finally { if (this.networkAbort === controller) this.networkAbort = null; }
-  }
+  };
 }

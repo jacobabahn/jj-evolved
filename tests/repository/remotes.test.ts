@@ -274,6 +274,26 @@ test("a push dry run that does not show the bookmark's change stops for review",
   expect(pushCaution("feature", "origin", "Changes to push to origin:\n  bookmark: feature [rewrite e7dba9d55b13]\n")).toContain("does not say how this push changes feature@origin");
 });
 
+test("only fetch and push commands can be cancelled, not tracking changes or local preparation", async () => {
+  const f = await remoteFixture();
+  // Samples networkActive while the work runs; each step spawns jj, which takes far longer than a millisecond.
+  const cancellable = async <T>(work: Promise<T>) => {
+    let done = false, seen = false;
+    void work.finally(() => { done = true; }).catch(() => {});
+    while (!done) { seen ||= f.repo.networkActive; await Bun.sleep(1); }
+    return { seen, result: await work };
+  };
+  try {
+    const dryRun = await cancellable(f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    expect(dryRun.seen).toBe(true);
+    expect((await cancellable(f.repo.apply(dryRun.result))).seen).toBe(true);
+    const untrack = await cancellable(f.repo.prepare({ kind: "bookmark-untrack", remote: "origin", name: "feature" }));
+    expect(untrack.seen).toBe(false);
+    expect((await cancellable(f.repo.apply(untrack.result))).seen).toBe(false);
+    expect((await cancellable(f.repo.prepare({ kind: "git-fetch", remote: "origin" }))).seen).toBe(false);
+  } finally { await f.cleanup(); }
+});
+
 test("cancelNetwork stops a fetch that is waiting on the remote", async () => {
   const f = await remoteFixture();
   const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };

@@ -44,7 +44,9 @@ async function preparePublish(root: string, action: PublishAction, bookmarks: Bo
   return summary;
 }
 
-async function applyPublish(root: string, action: PublishAction, bookmarks: Bookmark[], signal?: AbortSignal): Promise<string> {
+// The whole publish is cancellable, so Escape during its local steps stops the push before it starts; the local
+// commands themselves never receive the signal, so none of them is interrupted halfway.
+async function applyPublish(root: string, action: PublishAction, bookmarks: Bookmark[], signal: AbortSignal): Promise<string> {
   const { local, remote, placed } = publishState(action, bookmarks);
   if (!placed) await run(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", action.name]);
   if (!remote) await run(root, mutationArgs({ kind: "bookmark-track", remote: action.remote, name: action.name }));
@@ -55,6 +57,10 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
     throw new Error(`${reason}\nThe local bookmark ${action.name} is set and tracks ${action.remote}; only the push failed. Publish again to retry.`);
   }
 }
+
+/** Runs the network part of a remote action, giving it the signal that cancels it. */
+export type NetworkScope = <T>(work: (signal: AbortSignal) => Promise<T>) => Promise<T>;
+const uncancellable: NetworkScope = work => work(new AbortController().signal);
 
 // A large fetch can take minutes, so network commands get a long backstop timeout and the caller cancels them through the signal.
 async function network(root: string, args: string[], signal?: AbortSignal): Promise<string> {
@@ -128,7 +134,7 @@ export function fetchReport(remote: string, output: string): string {
   return `Fetched ${remote} · ${changes.length} bookmark${changes.length === 1 ? "" : "s"} changed\n${shown}${changes.length > 3 ? `, +${changes.length - 3} more` : ""}`;
 }
 
-export async function prepareRemote(root: string, action: RemoteMutation, bookmarks: Bookmark[], operationId: string, signal?: AbortSignal) {
+export async function prepareRemote(root: string, action: RemoteMutation, bookmarks: Bookmark[], operationId: string, scope = uncancellable) {
   const remote = (await remoteList(root)).find(item => item.name === action.remote);
   if (!remote) throw new Error("This Git remote no longer exists. Reload remotes.");
   let summary = `Remote: ${remote.name}\nURL: ${remote.url}\n\n`;
@@ -144,7 +150,7 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
     if (!local && !previous?.tracked) throw new Error("No local or tracked deleted bookmark to push.");
     if (local?.conflict || previous?.conflict) throw new Error("Resolve this bookmark's conflict before pushing.");
     summary += `Push only bookmark: ${action.name}\nLast fetched target: ${previous?.targets.join(", ") || "(absent)"}\nNew target: ${local?.targets.join(", ") || "(delete remote bookmark)"}\n\n`;
-    const dryRun = await network(root, ["--at-op", operationId, ...mutationArgs(action), "--dry-run"], signal);
+    const dryRun = await scope(signal => network(root, ["--at-op", operationId, ...mutationArgs(action), "--dry-run"], signal));
     caution = pushCaution(action.name, remote.name, dryRun);
     if (caution) summary = `Warning: ${caution}\n\n${summary}`;
     summary += dryRun;
@@ -161,20 +167,20 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
 }
 
 /** Applies a reviewed remote action and returns a short report of what changed, or null for tracking changes. */
-export async function applyRemote(root: string, prepared: PreparedMutation, bookmarks: Bookmark[], signal?: AbortSignal): Promise<string | null> {
+export async function applyRemote(root: string, prepared: PreparedMutation, bookmarks: Bookmark[], scope = uncancellable): Promise<string | null> {
   const action = prepared.action;
   if (!("remote" in action)) throw new Error("Expected a remote action.");
   const remote = (await remoteList(root)).find(item => item.name === action.remote);
   if (!remote || remote.url !== prepared.remoteUrl) throw new Error("Remote configuration changed since this preview. Review the action again.");
-  if (action.kind === "git-publish") return await applyPublish(root, action, bookmarks, signal);
+  if (action.kind === "git-publish") return await scope(signal => applyPublish(root, action, bookmarks, signal));
   // Pin the operation so concurrent local edits cannot change the reviewed push targets.
   const args = ["--at-op", prepared.operationId, ...mutationArgs(action)];
   if (action.kind === "git-fetch") {
-    try { return fetchReport(action.remote, await network(root, args, signal)); }
+    try { return fetchReport(action.remote, await scope(signal => network(root, args, signal))); }
     catch (error) { if (error instanceof CancelledError) throw new Error("Fetch cancelled."); throw error; }
   }
   if (action.kind === "git-push") {
-    try { return pushReport("Pushed", action, await network(root, args, signal)); }
+    try { return pushReport("Pushed", action, await scope(signal => network(root, args, signal))); }
     catch (error) {
       if (error instanceof CancelledError) throw new Error(`Push cancelled. ${action.name}@${action.remote} may already have the new target; fetch to check before pushing again.`);
       throw error;
