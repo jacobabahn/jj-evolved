@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
+import { fetchReport, pushCaution, pushChanges } from "../../src/repository/remotes";
 import { fixture } from "../fixture";
 
 async function remoteFixture() {
@@ -203,3 +204,129 @@ test("the default push remote follows git.push, then origin, then a lone remote"
     expect((await f.repo.defaultPushRemote([{ name: "upstream", url: f.remote }]))?.name).toBe("upstream");
   } finally { await f.cleanup(); }
 });
+
+test("pushes that delete or drop commits from a remote bookmark carry a caution; forward pushes do not", async () => {
+  const f = await remoteFixture();
+  try {
+    const added = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" });
+    expect(added.caution).toBeUndefined();
+    expect(await f.repo.apply(added)).toMatch(/^Pushed feature to origin\nadded at [0-9a-f]{8}$/);
+    await f.jj("bookmark", "set", "feature", "-r", "@");
+    const forward = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" });
+    expect(forward.caution).toBeUndefined();
+    expect(await f.repo.apply(forward)).toMatch(/^Pushed feature to origin\nmoved forward [0-9a-f]{8} → [0-9a-f]{8}$/);
+    await f.jj("bookmark", "set", "feature", "--allow-backwards", "-r", "@-");
+    const backward = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" });
+    expect(backward.caution).toContain("moves feature@origin backward");
+    expect(backward.summary).toStartWith("Warning: This moves feature@origin backward");
+    await f.jj("bookmark", "delete", "feature");
+    const deletion = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" });
+    expect(deletion.caution).toBe("This deletes feature on origin.");
+    expect(await f.repo.apply(deletion)).toMatch(/^Pushed feature to origin\ndeleted \(was [0-9a-f]{8}\)$/);
+  } finally { await f.cleanup(); }
+});
+
+test("a non-ASCII bookmark, which jj quotes in push output, still stops for review before its deletion", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.jj("bookmark", "create", "é", "-r", "feature");
+    const added = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "é" });
+    expect(added.summary).toContain('bookmark: "é" [add to');
+    expect(added.caution).toBeUndefined();
+    expect(await f.repo.apply(added)).toMatch(/^Pushed é to origin\nadded at [0-9a-f]{8}$/);
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "é" }))).toBe("é is already up to date on origin");
+    await f.jj("bookmark", "delete", "é");
+    const deletion = await f.repo.prepare({ kind: "git-push", remote: "origin", name: "é" });
+    expect(deletion.caution).toBe("This deletes é on origin.");
+    expect(await f.repo.apply(deletion)).toMatch(/^Pushed é to origin\ndeleted \(was [0-9a-f]{8}\)$/);
+    expect(await refs(f.remote)).not.toContain("refs/heads/");
+  } finally { await f.cleanup(); }
+});
+
+test("fetch and push report when there was nothing to do", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }))).toBe("feature is already up to date on origin");
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "origin" }))).toBe("Fetched origin\nalready up to date");
+  } finally { await f.cleanup(); }
+});
+
+test("push and fetch output parse into changes and reports", () => {
+  expect(pushChanges("Changes to push to origin:\n  bookmark: main [move sideways from 1b233ebc90ae to da0e4cdd6b90]\n  bookmark: other [add to da0e4cdd6b90]\nDry-run requested, not pushing.")).toEqual([
+    { name: "main", kind: "sideways", from: "1b233ebc90ae", to: "da0e4cdd6b90" },
+    { name: "other", kind: "add", to: "da0e4cdd6b90" },
+  ]);
+  expect(fetchReport("origin", "bookmark: main@origin [updated] tracked\nbookmark: newb@origin [new] untracked\n")).toBe("Fetched origin · 2 bookmarks changed\nmain updated, newb new");
+  expect(pushChanges('  bookmark: "é" [delete from e7dba9d55b13]\n  bookmark: "a \\"b\\"" [add to da0e4cdd6b90]\n  bookmark: feat+x [add to da0e4cdd6b90]')).toEqual([
+    { name: "é", kind: "delete", from: "e7dba9d55b13" },
+    { name: 'a "b"', kind: "add", to: "da0e4cdd6b90" },
+    { name: "feat+x", kind: "add", to: "da0e4cdd6b90" },
+  ]);
+  expect(fetchReport("origin", 'bookmark: "ü"@origin [new] untracked\n')).toBe("Fetched origin · 1 bookmark changed\nü new");
+  expect(fetchReport("origin", "bookmark: a@origin [new] untracked\nbookmark: b@origin [new] untracked\nbookmark: c@origin [new] untracked\nbookmark: d@origin [deleted] untracked\n"))
+    .toBe("Fetched origin · 4 bookmarks changed\na new, b new, c new, +1 more");
+});
+
+test("a push dry run that does not show the bookmark's change stops for review", () => {
+  expect(pushCaution("feature", "origin", "Bookmark feature@origin already matches feature\nNothing changed.\n")).toBeUndefined();
+  expect(pushCaution("feature", "origin", "Changes to push to origin:\n  bookmark: other [add to da0e4cdd6b90]\n")).toContain("does not say how this push changes feature@origin");
+  expect(pushCaution("feature", "origin", "Changes to push to origin:\n  bookmark: feature [rewrite e7dba9d55b13]\n")).toContain("does not say how this push changes feature@origin");
+});
+
+test("only fetch and push commands can be cancelled, not tracking changes or local preparation", async () => {
+  const f = await remoteFixture();
+  // Samples networkActive while the work runs; each step spawns jj, which takes far longer than a millisecond.
+  const cancellable = async <T>(work: Promise<T>) => {
+    let done = false, seen = false;
+    void work.finally(() => { done = true; }).catch(() => {});
+    while (!done) { seen ||= f.repo.networkActive; await Bun.sleep(1); }
+    return { seen, result: await work };
+  };
+  try {
+    const dryRun = await cancellable(f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    expect(dryRun.seen).toBe(true);
+    expect((await cancellable(f.repo.apply(dryRun.result))).seen).toBe(true);
+    const untrack = await cancellable(f.repo.prepare({ kind: "bookmark-untrack", remote: "origin", name: "feature" }));
+    expect(untrack.seen).toBe(false);
+    expect((await cancellable(f.repo.apply(untrack.result))).seen).toBe(false);
+    expect((await cancellable(f.repo.prepare({ kind: "git-fetch", remote: "origin" }))).seen).toBe(false);
+  } finally { await f.cleanup(); }
+});
+
+test("cancelling a publish during its local steps stops the push before it starts", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("@")).revisions[0]!;
+    const applying = f.repo.apply(await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision }));
+    for (let attempt = 0; attempt < 1000 && !f.repo.networkActive; attempt++) await Bun.sleep(1);
+    f.repo.cancelNetwork();
+    await expect(applying).rejects.toThrow("Publish cancelled before the push started; nothing was sent to origin.\nThe local bookmark next is set and tracks origin. Publish again to push it.");
+    expect(await refs(f.remote)).toBe("");
+    expect((await f.repo.bookmarks()).find(item => item.name === "next" && !item.remote)?.targets).toEqual([revision.commitId]);
+  } finally { await f.cleanup(); }
+});
+
+test("cancelNetwork stops a fetch that is waiting on the remote", async () => {
+  const f = await remoteFixture();
+  const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };
+  // An ext:: remote whose transport never answers stands in for a stalled connection.
+  Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.ext.allow", GIT_CONFIG_VALUE_0: "always" });
+  try {
+    await f.jj("git", "remote", "add", "slow", "ext::sleep 30");
+    const prepared = await f.repo.prepare({ kind: "git-fetch", remote: "slow" });
+    const started = performance.now();
+    const applying = f.repo.apply(prepared);
+    await Bun.sleep(300);
+    expect(f.repo.networkActive).toBe(true);
+    f.repo.cancelNetwork();
+    await expect(applying).rejects.toThrow("Fetch cancelled.");
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(f.repo.networkActive).toBe(false);
+  } finally {
+    for (const [key, value] of [["GIT_CONFIG_COUNT", saved.count], ["GIT_CONFIG_KEY_0", saved.key], ["GIT_CONFIG_VALUE_0", saved.value]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await f.cleanup();
+  }
+}, 40_000);

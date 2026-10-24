@@ -8,13 +8,13 @@ type ReviewState =
 
 type ApplyResult =
   | { kind: "not-ready" | "disposed" }
-  | { kind: "applied"; action: Mutation; refreshError: string | null };
+  | { kind: "applied"; action: Mutation; refreshError: string | null; report?: string };
 
 export class MutationReview {
   private state: ReviewState = { kind: "idle" };
 
   constructor(
-    private readonly repository: Pick<Repository, "prepare" | "apply">,
+    private readonly repository: Pick<Repository, "prepare"> & { apply(prepared: PreparedMutation): Promise<string | null | void> },
     private readonly refresh: (action: Mutation) => Promise<void>,
   ) {}
 
@@ -42,8 +42,9 @@ export class MutationReview {
     const { prepared } = this.state;
     const applying: ReviewState = { kind: "applying" };
     this.state = applying;
+    let report: string | null | void;
     try {
-      await this.repository.apply(prepared);
+      report = await this.repository.apply(prepared);
     } catch (error) {
       if (this.state !== applying) return { kind: "disposed" };
       this.state = { kind: "idle" };
@@ -59,7 +60,7 @@ export class MutationReview {
     }
     if (this.state !== applying) return { kind: "disposed" };
     this.state = { kind: "applied" };
-    return { kind: "applied", action: prepared.action, refreshError };
+    return { kind: "applied", action: prepared.action, refreshError, ...(report ? { report } : {}) };
   }
 
   cancel() {

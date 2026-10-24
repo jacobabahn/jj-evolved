@@ -1,5 +1,5 @@
 import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
+import { remoteList, defaultPushRemote, prepareRemote, applyRemote, type NetworkScope } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -32,6 +32,9 @@ export class Repository {
   private readonly pendingDiffs = new Map<string, Promise<string>>();
   private diffChars = 0;
   private diffGeneration = 0;
+  private networkAbort: AbortController | null = null;
+  /** Called when a fetch or push starts or finishes, so the app can show or hide its cancel key. */
+  onNetworkChange: (() => void) | null = null;
   private constructor(readonly root: string) {}
 
   static async open(path: string): Promise<Repository> {
@@ -185,6 +188,7 @@ export class Repository {
     await this.assertCurrent(targets, operationId);
     let summary: string;
     let remoteUrl: string | undefined;
+    let caution: string | undefined;
     let rebasing: Revision[] = [];
     switch (action.kind) {
       case "git-fetch":
@@ -192,8 +196,8 @@ export class Repository {
       case "git-publish":
       case "bookmark-track":
       case "bookmark-untrack": {
-        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId);
-        summary = preview.summary; remoteUrl = preview.remoteUrl;
+        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId, this.withNetwork);
+        summary = preview.summary; remoteUrl = preview.remoteUrl; caution = preview.caution;
         break;
       }
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
@@ -245,14 +249,31 @@ export class Repository {
     const trees = action.kind === "rebase" || action.kind === "squash"
       ? await projectedTree(this.root, action, operationId, rebasing) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
-    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }) };
+    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(caution ? { caution } : {}) };
   }
 
-  async apply(prepared: PreparedMutation): Promise<void> {
+  /** Applies a prepared mutation; remote actions return a short report of what changed. */
+  async apply(prepared: PreparedMutation): Promise<string | null> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    if (prepared.remoteUrl !== undefined) { await applyRemote(this.root, prepared, await this.bookmarks()); return; }
+    if (prepared.remoteUrl !== undefined) return await applyRemote(this.root, prepared, await this.bookmarks(), this.withNetwork);
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
+    return null;
   }
+
+  /** True while a fetch or push can be stopped with cancelNetwork(). */
+  get networkActive() { return this.networkAbort !== null; }
+
+  /** Stops the running fetch or push, if any. */
+  cancelNetwork() { this.networkAbort?.abort(); }
+
+  /** Makes only the fetch or push itself cancellable, not the local steps around it such as tracking changes. */
+  private readonly withNetwork: NetworkScope = async work => {
+    const controller = new AbortController();
+    this.networkAbort = controller;
+    this.onNetworkChange?.();
+    try { return await work(controller.signal); }
+    finally { if (this.networkAbort === controller) { this.networkAbort = null; this.onNetworkChange?.(); } }
+  };
 }
