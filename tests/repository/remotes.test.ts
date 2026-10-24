@@ -255,12 +255,29 @@ test("bookmarks report ahead and behind counts for tracked remotes and mark loca
     await f.jj("new", "@--", "-m", "Side change");
     await f.jj("bookmark", "set", "feature", "-r", "@");
     expect(await state()).toEqual({ ahead: 1, behind: 2, localOnly: ["solo@"] });
-    // An untracked remote bookmark has no counts and leaves the local bookmark unpushed.
+    // An untracked remote bookmark has no counts, but the name is on the remote, so the local bookmark is not unpushed.
     await f.jj("bookmark", "untrack", "feature", "--remote", "origin");
-    expect(await state()).toEqual({ ahead: undefined, behind: undefined, localOnly: ["feature@", "solo@"] });
+    expect(await state()).toEqual({ ahead: undefined, behind: undefined, localOnly: ["solo@"] });
     // Without a remote there is nowhere to push to, so nothing is marked.
     expect((await (await Repository.open(plain.path)).bookmarks()).some(item => item.localOnly)).toBe(false);
   } finally { await f.cleanup(); await plain.cleanup(); }
+});
+
+test("a local bookmark created beside a fetched, untracked remote bookmark is not marked unpushed", async () => {
+  const f = await remoteFixture();
+  const publisher = await fixture();
+  try {
+    await publisher.jj("git", "remote", "add", "origin", f.remote);
+    await publisher.jj("bookmark", "create", "topic", "-r", "@-");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:topic");
+    await f.jj("git", "fetch", "--remote", "origin");
+    const remote = (await f.repo.bookmarks()).find(item => item.name === "topic" && item.remote === "origin")!;
+    expect(remote.tracked).toBe(false);
+    await f.jj("bookmark", "create", "topic", "-r", remote.targets[0]!);
+    const local = (await f.repo.bookmarks()).find(item => item.name === "topic" && !item.remote)!;
+    expect(local.targets).toEqual(remote.targets);
+    expect(local.localOnly).toBeUndefined();
+  } finally { await f.cleanup(); await publisher.cleanup(); }
 });
 
 test("deleting a tracked bookmark stays local by default and can also delete it on the remote", async () => {

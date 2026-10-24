@@ -245,12 +245,13 @@ test("bookmark badges fold a synced remote into the local badge and show ahead, 
       local("split", a), remote("split", b, { ahead: 2, behind: 1 }),
       local("solo", a, { localOnly: true }), remote("solo", a, {}, "git"),
       local("plain", a),
-      local("mine", a, { localOnly: true }), remote("mine", a, { tracked: false, ahead: undefined, behind: undefined }),
+      // An untracked remote copy means the name is on the remote, so the repository does not mark it local-only.
+      local("mine", a), remote("mine", a, { tracked: false, ahead: undefined, behind: undefined }),
       { ...local("torn", [...a, ...b], { localOnly: true }), conflict: true },
     ]);
     await screen.waitForVisualIdle();
     const [first, second] = screen.captureCharFrame().split("\n").filter(line => line.includes("○")).map(line => line.match(/\[[^\]]+\]/g));
-    expect(first).toEqual(["[synced]", "[ahead ↑2]", "[behind ↓1]", "[split ↑2↓1]", "[solo*]", "[plain]", "[mine*]", "[mine@origin]", "[torn*!]"]);
+    expect(first).toEqual(["[synced]", "[ahead ↑2]", "[behind ↓1]", "[split ↑2↓1]", "[solo*]", "[plain]", "[mine]", "[mine@origin]", "[torn*!]"]);
     expect(second).toEqual(["[ahead@origin]", "[behind@origin]", "[split@origin]", "[torn*!]"]);
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
 });

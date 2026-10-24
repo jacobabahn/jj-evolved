@@ -170,7 +170,8 @@ export class Repository {
       ...(ahead === undefined ? {} : { ahead: number(ahead), behind: number(behind) }),
     }));
     if (!remotes.length) return bookmarks;
-    const pushed = new Set(bookmarks.filter(item => isRealRemote(item) && item.tracked && item.targets.length).map(item => item.name));
+    // Any remote bookmark of the name counts, tracked or not: the name is on that remote already.
+    const pushed = new Set(bookmarks.filter(item => isRealRemote(item) && item.targets.length).map(item => item.name));
     return bookmarks.map(item => item.remote || !item.targets.length || pushed.has(item.name) ? item : { ...item, localOnly: true });
   }
 
