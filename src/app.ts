@@ -110,7 +110,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       ["j/k or arrows", "Choose an item"],
       ["Enter", "Apply / confirm; newline in the description editor"],
       ["^S/^D", "Save the description"],
-      ["Tab/Shift-Tab", "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); arrows also work"],
+      ["Tab/Shift-Tab", "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); ^N/^P and arrows also work"],
       ["PgDn / PgUp", "Scroll the overlay preview"],
       ["Esc", "Go back one level, or cancel at the top; press twice to discard description edits"],
     ] },
