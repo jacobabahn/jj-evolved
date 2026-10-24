@@ -589,7 +589,9 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     t.screen.mockInput.pressEnter();
     await t.until("Keep original description");
     t.choose("Edit second description");
-    await t.until("Second change description  [Enter");
+    await t.until("Enter apply");
+    expect(t.screen.renderer.root.findDescendantById("prompt-label")?.visible).toBe(true);
+    expect(t.screen.captureCharFrame()).toContain("Second change description");
     await t.prompt("Second group", true);
     await t.until("Review before applying");
     await t.until("Second change: Second group");
@@ -774,7 +776,8 @@ test("rebase scope marks branches and merges, updates on toggle, and reports fil
     };
     const before = await t.repo.operationId();
     t.screen.mockInput.pressKey("r");
-    await t.until("[ ] include descendants (4 changes) · Tab toggle");
+    await t.until("[ ] include descendants (4 changes)");
+    expect(t.screen.captureCharFrame()).toContain("Tab descendants");
     expect(marked(source.commitId)).toBe(true);
     expect(marked(left.commitId)).toBe(false);
     t.screen.mockInput.pressKey("s");
@@ -825,7 +828,8 @@ test("inline rebase scope, load more and preview toggle follow custom bindings w
     t.screen.mockInput.pressKey("j");
     await t.until("+ hello from jj-evolved");
     t.screen.mockInput.pressKey("r");
-    await t.until("[ ] include descendants (2 changes) · x toggle");
+    await t.until("[ ] include descendants (2 changes)");
+    expect(t.screen.captureCharFrame()).toContain("x descendants");
     const preview = t.screen.renderer.root.findDescendantById("preview");
     if (!preview) throw new Error("Missing preview");
     t.screen.mockInput.pressKey("p");

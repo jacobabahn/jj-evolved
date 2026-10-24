@@ -13,6 +13,7 @@ import {
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
+import { keyPair, shortcutBar, type Shortcut, type ShortcutLine } from "./ui/shortcut-bar";
 import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
 import { FileList } from "./revisions/file-list";
@@ -52,13 +53,13 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["refresh"]), "Refresh history now; external changes also refresh automatically"],
       [keys(["help"]), "Show this help"],
       [keys(["lastError"]), `Show the last error in full; Esc or ${keyLabel(bindings, "diff")} returns to the diff`],
-      [`${keys(["quit"])} / Ctrl-C`, "Quit"],
+      [`${keys(["quit"])} / ^C`, "Quit"],
     ] },
     { title: "Preview pane", rows: [
       [keys(["togglePreview"]), "Hide or show the preview; the graph expands when hidden"],
-      [keys(["pageUp", "pageDown"]), "Scroll the preview by page"],
-      [keys(["previewUp", "previewDown"]), "Scroll the preview by line, keeping graph focus"],
-      [keys(["previewHalfUp", "previewHalfDown"]), "Scroll the preview by half page"],
+      [keys(["pageDown", "pageUp"]), "Scroll the preview by page"],
+      [keys(["previewDown", "previewUp"]), "Scroll the preview by line, keeping graph focus"],
+      [keys(["previewHalfDown", "previewHalfUp"]), "Scroll the preview by half page"],
       [keys(["diff"]), "Show the selected revision's diff"],
       [keys(["files"]), "Expand changed files under the revision; j/k file, Enter focus diff, h/Left/Esc collapse"],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
@@ -107,8 +108,8 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
     { title: "In prompts (fixed keys; browse overrides do not apply)", rows: [
       ["j/k or arrows", "Choose an item"],
       ["Enter", "Apply / confirm; newline in the description editor"],
-      ["Ctrl-S or Ctrl-D", "Save the description"],
-      ["PgUp / PgDn", "Scroll the overlay preview"],
+      ["^S/^D", "Save the description"],
+      ["PgDn / PgUp", "Scroll the overlay preview"],
       ["Esc", "Go back one level, or cancel at the top; press twice to discard description edits"],
     ] },
   ];
@@ -142,14 +143,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, width: "100%", height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
-  const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: `temporary view (up to 40) | + outside filter | ${bindingLabel("return")} return` });
+  const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) · + outside filter" });
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
-  const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 3, flexShrink: 0, visible: false, fg: colors.accent });
-  const filesShortcuts = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} file  Enter focus diff  ${bindingLabel("focus")} focus  ${bindingLabel("togglePreview")} preview  ${bindingLabel("pageUp")}/${bindingLabel("pageDown")} scroll\nh/Left/Esc/${bindingLabel("files")} collapse  ${bindingLabel("quit")} quit`;
-  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, fg: colors.accent });
+  const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 2, flexShrink: 0, visible: false, fg: colors.accent });
+  const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, wrapMode: "none", fg: colors.accent });
   const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
+  overlay.onKeys = paintShortcuts;
   const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
   const overlayText = new ChangePreview(renderer, "overlay-preview-text");
   const comparison = new TreeComparisonView(renderer, "confirmation-trees");
@@ -190,6 +191,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let pickerSearch: RevisionSearch | ListSearch<Choice> | null = null;
   let prompt: Prompt = { kind: "browse" };
+  let helpReturn: Extract<Prompt, { kind: "files" }> | null = null;
+  let footer: { signature: string; colors: Theme } | null = null;
   let levels: (() => void)[] = [];
   let completionItems: Completion[] = [];
   let completionOriginal = "";
@@ -230,7 +233,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   });
   function isBusy() { return busy || review.applying; }
   // Help is a read-only overlay and expanded files stay in the graph, so refreshes continue underneath both.
-  const idle = () => prompt.kind === "browse" || prompt.kind === "help" || prompt.kind === "files";
+  // Help opened from the files view pauses refreshes, so the expanded files are still there when it closes.
+  const idle = () => prompt.kind === "browse" || (prompt.kind === "help" && !helpReturn) || prompt.kind === "files";
   const statusShown = () => ["Working-copy status", "Status error"].includes(previewTitle);
   let focus: "list" | "preview" = "list";
 
@@ -242,7 +246,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     message.content = terminalText(text);
   }
   function errorSummary(text: string) {
-    const suffix = ` · ${bindingLabel("lastError")} full error`;
+    const suffix = `  ${bindingLabel("lastError")} full error`;
     const line = text.split("\n")[0] ?? "";
     const room = Math.max(8, renderer.width - suffix.length);
     return `${line.length > room ? `${line.slice(0, room - 1)}…` : line}${suffix}`;
@@ -261,10 +265,60 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     listBox.borderColor = prompt.kind === "inline" ? colors.mode : focus === "list" ? colors.accent : colors.border;
     preview.borderColor = focus === "preview" ? colors.accent : colors.border;
     setPreviewTitle(previewTitle);
-    const move = `${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)}`;
-    shortcuts.content = prompt.kind === "files" ? filesShortcuts : `${move} move  ${bindingLabel("filter")} revset  ${bindingLabel("search")} search  ${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} match  ${bindingLabel("workingCopy")} work  ${bindingLabel("parent")}/${bindingLabel("child")} ancestry  ${bindingLabel("return")} return\n${focus === "preview"
-      ? `${move} scroll  ${bindingLabel("pageDown")}/${bindingLabel("pageUp")} page  ${bindingLabel("previewHalfDown")}/${bindingLabel("previewHalfUp")} half page  ${bindingLabel("focus")} back to revisions`
-      : `${bindingLabel("diff")} diff  ${bindingLabel("describe")} describe  ${bindingLabel("rebase")}/${bindingLabel("squash")} rebase/squash  ${bindingLabel("actions")} actions  ${bindingLabel("help")} help  ${bindingLabel("quit")} quit`}`;
+    paintShortcuts();
+  }
+  // Runs after every key and prompt change, so it only re-renders when the shown keys or the width change.
+  function paintShortcuts() {
+    // Actions a user has unbound drop out of the footer rather than reading "unbound".
+    const bound = (items: Shortcut[] = []) => items.filter(([keys]) => !keys.includes("unbound"));
+    const lines = shortcutLines().map(({ left, right }) => ({ left: bound(left), right: bound(right) }));
+    const signature = JSON.stringify([lines, renderer.width]);
+    if (footer?.signature === signature && footer.colors === colors) return;
+    footer = { signature, colors };
+    shortcuts.height = lines.length;
+    shortcuts.content = shortcutBar(lines, renderer.width, colors);
+  }
+  // A pair with one unbound half still shows the half that works; a fully unbound pair reads "unbound" and is dropped.
+  function bothKeys(first: string, second: string) {
+    return first === "unbound" ? second : second === "unbound" ? first : keyPair(first, second);
+  }
+  // Each mode lists the keys that work in it, most important first; the right group stays pinned at any width.
+  function shortcutLines(): ShortcutLine[] {
+    const key = (action: Action) => keyLabel(bindings, action, true);
+    const pair = (first: Action, second: Action) => bothKeys(key(first), key(second));
+    const move = pair("down", "up"), page = pair("pageDown", "pageUp");
+    const togglePreview: Shortcut = [key("togglePreview"), preview.visible ? "hide preview" : "show preview"];
+    const quit: Shortcut[] = [[key("help"), "help"], [key("quit"), "quit"]];
+    switch (prompt.kind) {
+      case "browse": break;
+      case "files": return [
+        { left: focus === "preview"
+          ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
+          : [[move, "file"], ["Enter", "focus diff"], ...(preview.visible ? [[key("focus"), "focus preview"] as Shortcut] : []), [page, "scroll diff"], togglePreview] },
+        { left: [[bothKeys("Esc", key("files")), "collapse"]], right: quit },
+      ];
+      case "inline": return [{
+        left: [[move, "destination"], ...(prompt.action.kind === "rebase" ? [[key("rebaseScope"), "descendants"] as Shortcut] : []), ["Enter", "preview"],
+          [key("search"), "search"], [key("loadMore"), "load more"], [page, "scroll preview"], togglePreview],
+        right: [["Esc", "cancel"]],
+      }];
+      case "search": return [{ left: [["Enter", "keep"]], right: [["Esc", "cancel"]] }];
+      case "help": return [{ left: [[move, "scroll"], ["PgDn/PgUp", "page"]], right: [[bothKeys("Esc", key("help")), "close"]] }];
+      case "form": return [prompt.form.keys];
+      default: return [pickerSearch?.active ? { left: [["^N/^P", "choose"], ["Enter", "select"]], right: [["Esc", "clear"]] } : overlay.keys];
+    }
+    if (focus === "preview") return [
+      { left: [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"]] },
+      { left: [[key("focus"), "back to revisions"], togglePreview], right: [[key("actions"), "actions"], ...quit] },
+    ];
+    const searching = search.query.length > 0;
+    return [
+      { left: [[move, "move"], ...(returnPoint ? [[key("return"), "return"] as Shortcut] : []), [key("filter"), "revset"], [key("search"), "search"],
+        preview.visible ? [key("focus"), "focus preview"] : togglePreview,
+        ...(searching ? [[pair("nextMatch", "previousMatch"), "match"], [key("clearSearch"), "clear search"]] as Shortcut[] : []), [pair("parent", "child"), "parent/child"], [key("workingCopy"), "working copy"]] },
+      { left: [[key("describe"), "describe"], [key("diff"), "diff"], [key("new"), "new"], [key("edit"), "edit"], [key("rebase"), "rebase"], [key("squash"), "squash"]],
+        right: [[key("actions"), "actions"], ...quit] },
+    ];
   }
   function setFocus(next: typeof focus) {
     if (!preview.visible) next = "list";
@@ -299,7 +353,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     setMessage("");
     list.mouseSelectionEnabled = false;
     overlay.report("");
-    overlay.hints.content = "Enter apply/select  Esc cancel  PgUp/Dn preview";
+    overlay.keys = { left: [["Enter", "select"], previewScroll], right: [["Esc", "cancel"]] };
     list.blur();
     preview.blur();
   }
@@ -461,9 +515,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     searchStatus.visible = search.query.length > 0 || prompt.kind === "search";
     const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
     const position = search.matches.length ? (index < 0 ? `${search.matches.length} matches` : `${index + 1}/${search.matches.length}`) : search.query ? "No matches" : "Type to search";
-    const hints = prompt.kind === "search" ? "Enter keep  Esc cancel" : `${bindingLabel("nextMatch")}/${bindingLabel("previousMatch")} next/prev`;
-    searchStatus.content = terminalText(`Search in revset: ${position} | ${hints} | ${search.query}`);
+    searchStatus.content = terminalText(`Search in revset · ${position}${search.query ? ` · ${search.query}` : ""}`);
     list.markNavigation(new Set(search.matches.map(item => item.commitId)), outsideFilter);
+    paintShortcuts();
   }
   async function navigate(target: Revision, request?: number) {
     let index = revisions.findIndex(item => item.commitId === target.commitId);
@@ -589,7 +643,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function renderCompletions() {
     suggestions.visible = prompt.kind === "revset";
     const first = Math.max(0, completionIndex - 3);
-    suggestions.content = completionItems.length ? terminalText(completionItems.slice(first, first + 4).map((item, index) => `${first + index === completionIndex ? ">" : " "} ${item.label}`).join("\n") + `\n${completionItems.length} suggestions · Tab / Shift-Tab cycle`) : "No suggestions · Enter applies your expression";
+    suggestions.content = completionItems.length ? terminalText(completionItems.slice(first, first + 4).map((item, index) => `${first + index === completionIndex ? ">" : " "} ${item.label}`).join("\n") + `\n${completionItems.length} suggestions`) : "No suggestions";
   }
   function completeRevset(backwards: boolean) {
     if (!completionItems.length) return;
@@ -601,17 +655,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     completing = false;
     renderCompletions();
   }
-  function escHint(top: string) { return `Esc ${levels.length ? "back" : top}`; }
+  // Overlay keys are fixed (see "In prompts" in help); only the list movement follows the bindings.
+  const choose = bothKeys(keyLabel(bindings, "down", true), keyLabel(bindings, "up", true));
+  const previewScroll: Shortcut = ["PgDn/PgUp", "scroll preview"];
+  function exit(top: string): Shortcut { return ["Esc", levels.length ? "back" : top]; }
   function pushLevel() {
     const current = prompt;
     if (current.kind === "picker") {
-      const chosen = current.choices[chooser.getSelectedIndex()], hints = overlay.hints.content;
+      const chosen = current.choices[chooser.getSelectedIndex()], keys = overlay.keys;
       levels.push(() => {
         pick(current.title, current.all, { attach: current.attach, replace: true });
         let index = chosen ? current.all.indexOf(chosen) : -1;
         if (index < 0 && chosen) index = current.all.findIndex(choice => choice.name === chosen.name && choice.description === chosen.description);
         if (index >= 0) chooser.setSelectedIndex(index);
-        overlay.hints.content = hints;
+        overlay.keys = keys;
       });
     } else if (current.kind === "text") {
       const value = input.value;
@@ -672,8 +729,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlayPreview.visible = false;
     }
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
-    if (next.kind === "text") overlay.hints.content = `Enter apply  ${escHint("cancel")}`;
-    promptLabel.content = terminalText(`${label}  [${next.kind === "describe" ? "^S save" : "Enter apply"} · ${escHint("cancel")}]`);
+    if (next.kind === "text") overlay.keys = { left: [["Enter", "apply"]], right: [exit("cancel")] };
+    promptLabel.content = terminalText(label);
     promptLabel.visible = next.kind !== "confirm";
     input.placeholder = "";
     input.value = terminalText(value);
@@ -688,14 +745,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
       next.original = descriptionInput.plainText;
-      overlay.hints.content = `^S save · Enter newline · ${escHint("cancel")}`;
+      overlay.keys = { left: [["^S", "save"], ["Enter", "newline"]], right: [exit("cancel")] };
     }
     if (next.kind === "revset") {
       overlay.height = 15;
-      overlay.hints.content = `Tab complete/cycle  Enter apply  ${escHint("cancel")}`;
+      overlay.keys = { left: [["Enter", "apply"], ["Tab/Shift-Tab", "complete"]], right: [exit("cancel")] };
       updateCompletions();
     }
-    if (next.kind === "confirm") overlay.hints.content = `Enter apply  p refresh preview  ${escHint("cancel")}  PgUp/Dn scroll`;
+    if (next.kind === "confirm") overlay.keys = { left: [["Enter", "apply"], ["p", "refresh preview"], previewScroll], right: [exit("cancel")] };
   }
   async function submit() {
     if (isBusy()) return;
@@ -775,7 +832,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             : action.revision.description.split("\n")[0] || "(no description)";
           overlay.context.content = highlightJjText(`Source ${shortChangeId(action.revision)} / ${action.revision.commitId.slice(0, 12)}\n${context}`, revisionPrefixes([action.revision]), colors);
         }
-        overlay.hints.content = "Enter apply  Esc choose destination  p refresh preview  PgUp/Dn scroll";
+        overlay.keys = { ...overlay.keys, right: [["Esc", "choose destination"]] };
       }
     }, true);
   }
@@ -829,7 +886,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }));
     chooser.setSelectedIndex(Math.max(0, themeNames.findIndex(name => themes[name] === original)));
     chooser.focus();
-    overlay.hints.content = "j/k preview  Enter save  Esc restore";
+    overlay.keys = { left: [[choose, "preview"], ["Enter", "save"]], right: [["Esc", "restore"]] };
     previewTheme();
   }
 
@@ -888,7 +945,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.visible = true;
     chooser.showDescription = true;
     chooser.focus();
-    overlay.hints.content = `j/k choose  Enter select  ${escHint("close")}  PgUp/Dn preview`;
+    overlay.keys = { left: [[choose, "choose"], ["Enter", "select"], previewScroll], right: [exit("close")] };
     showChoices(choices);
     options.attach?.();
   }
@@ -911,8 +968,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           if (!matches.length) showOverlay("No matching destinations. Edit the search or press Escape to clear it.", "Destinations");
           overlay.report(`${matches.length} destinations`);
         });
+        pickerSearch.onActiveChange = paintShortcuts;
         overlay.fields.add(pickerSearch.input);
-        overlay.hints.content = `j/k choose · / search all destinations · Enter select · ${escHint("close")}`;
+        overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "search all destinations"], previewScroll] };
       } });
       if (searchImmediately) pickerSearch?.start();
     }, true);
@@ -946,7 +1004,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       list.mouseSelectionEnabled = false;
       list.blur();
       expandFiles(revision, files);
-      shortcuts.content = filesShortcuts;
       setFocus("list");
       if (files.length) void loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
     }, true);
@@ -961,7 +1018,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   // A third of the graph, so a large change scrolls within its list and the surrounding history stays in view.
   function maxFileRows() { return Math.max(3, Math.floor(list.viewport.height / 3)); }
   // Keeps expanded files on their change across refreshes: a rewritten commit reloads its files, a vanished change collapses them.
-  async function followFiles() {
+  // force re-expands even when the commit is unchanged, for a refresh that landed while help covered the files.
+  async function followFiles(force = false) {
     if (prompt.kind !== "files") return;
     const current = prompt;
     const revision = selected();
@@ -970,8 +1028,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       report("Collapsed changed files: the change left the graph.");
       return;
     }
-    if (revision.commitId === current.revision.commitId) return;
-    const files = await repository.files(revision);
+    const unchanged = revision.commitId === current.revision.commitId;
+    if (unchanged && !force) return;
+    const files = unchanged ? current.files : await repository.files(revision);
     if (stopped || prompt !== current) return;
     prompt = { kind: "files", revision, files };
     expandFiles(revision, files, fileList.selectedFile?.path);
@@ -1113,7 +1172,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       });
       pick("Change evolution", choices, { replace: operationId !== undefined });
       chooser.setSelectedIndex(selectedIndex);
-      overlay.hints.content = `j/k version  Enter preview  ${escHint("close")}  PgUp/Dn scroll`;
+      overlay.keys = { ...overlay.keys, left: [[choose, "version"], ["Enter", "preview"], ["PgDn/PgUp", "scroll"]] };
       if (!page.entries.length) showOverlay("No evolution history is available for this revision.", "Change evolution");
     }, true);
   }
@@ -1135,8 +1194,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         catch (error) { if (prompt.kind === "browse") report(errorText(error), true); throw error; }
       }, moving => list.markSource(revisions.findIndex(item => item.commitId === revision.commitId), new Set(moving.map(item => item.commitId))));
     form.onError = text => { lastError = text; };
+    form.onKeys = paintShortcuts;
     app.add(form);
     prompt = { kind: "form", form };
+    paintShortcuts();
     setMessage("");
     list.mouseSelectionEnabled = false;
     list.blur();
@@ -1222,8 +1283,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         showChoices(matches);
         if (!matches.length) showOverlay("No matching actions. Edit the filter or press Escape to clear it.", "Actions");
       }, "Filter actions by name");
+      pickerSearch.onActiveChange = paintShortcuts;
       overlay.fields.add(pickerSearch.input);
-      overlay.hints.content = `j/k choose  / filter  Enter select  ${escHint("close")}  PgUp/Dn preview`;
+      overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "filter"], previewScroll] };
     } });
   }
   function describeExternally(revision: Revision) {
@@ -1257,6 +1319,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     helpBox.add(new TextRenderable(renderer, { id: "help-footer", content: "Commands use your installed jj and its repository rules.", fg: colors.muted, flexShrink: 0, marginTop: 1 }));
   }
   function showHelp() {
+    helpReturn = prompt.kind === "files" ? prompt : null;
     activateOverlay(`Help · keys: ${presetLabel}`, false);
     prompt = { kind: "help" };
     input.blur();
@@ -1268,7 +1331,20 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     overlayPreview.title = " Keyboard reference ";
     overlayPreview.scrollTo(0);
     overlay.context.content = terminalText(`Keyboard reference · ${presetLabel === "custom" ? "custom bindings from keybindings.json" : `${presetLabel} preset`}\nSwitch: --keys ${presetNames.join("|")}, JJ_EVOLVED_KEYS, keybindings.json`);
-    overlay.hints.content = `Esc/${bindingLabel("help")} close  j/k scroll  PgUp/PgDn page`;
+  }
+  // Help over the files view returns to it; from anywhere else it closes like any prompt.
+  function closeHelp() {
+    const files = helpReturn;
+    helpReturn = null;
+    if (!files) { closePrompt(); return; }
+    overlay.visible = false;
+    helpBox.visible = false;
+    overlayText.visible = true;
+    prompt = files;
+    setFocus(focus);
+    // A refresh that started before help opened may have redrawn the graph without the files.
+    void followFiles(true).catch(error => report(errorText(error), true));
+    scheduleFocusRefresh();
   }
   function updateInlineHint() {
     if (prompt.kind !== "inline") return;
@@ -1279,9 +1355,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const outside = moving.filter(revision => !visible.has(revision.commitId)).length;
     list.markSource(revisions.findIndex(revision => revision.commitId === source.commitId), new Set(moving.map(revision => revision.commitId)));
     const scope = prompt.action.kind === "rebase"
-      ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""} · ${bindingLabel("rebaseScope")} toggle`
+      ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""}`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}\n● will move · ${keyLabel(bindings, "down", true)}/${keyLabel(bindings, "up", true)} destination · ${bindingLabel("search")} search · ${bindingLabel("loadMore")} load more · Enter preview · Esc cancel`);
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
@@ -1319,6 +1395,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function onResize(width: number) {
     updateFilesTitle(width);
+    paintPanes();
     // The graph's new height is known once layout runs, so the cap follows on the next frame.
     if (prompt.kind === "files") renderer.once("frame", () => { if (prompt.kind === "files") fileList.setMaxRows(maxFileRows()); });
   }
@@ -1343,6 +1420,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (key.name === "escape" && repository.networkActive) { key.preventDefault(); repository.cancelNetwork(); report("Cancelling…"); return; }
     (keyHandlers[prompt.kind] as (key: KeyEvent, state: Prompt) => void)(key, prompt);
+    if (!stopped) paintShortcuts();
   }
   function searchKey(key: KeyEvent) {
     if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
@@ -1362,7 +1440,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function helpKey(key: KeyEvent) {
     key.preventDefault();
     const move = moveKey(key);
-    if (key.name === "escape" || actionForKey(bindings, key) === "help") closePrompt();
+    if (key.name === "escape" || actionForKey(bindings, key) === "help") closeHelp();
     else if (move) overlayPreview.scrollBy(move);
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
   }
@@ -1371,6 +1449,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (action === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
     if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
     if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (action === "help") { key.preventDefault(); showHelp(); return; }
     if (action === "focus" || key.name === "return") {
       key.preventDefault();
       if (key.name === "return" && !preview.visible) setPreviewVisible(true);
@@ -1449,7 +1528,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function describeKey(key: KeyEvent, state: Extract<Prompt, { kind: "describe" }>) {
     if (isBusy()) { key.preventDefault(); return; }
     if (state.discard && key.name !== "escape") { state.discard = false; overlay.report(""); }
-    if (key.name === "escape" && !state.discard && descriptionInput.plainText !== state.original) { key.preventDefault(); state.discard = true; report("Unsaved changes · Esc again discards · ^S saves", true); }
+    if (key.name === "escape" && !state.discard && descriptionInput.plainText !== state.original) { key.preventDefault(); state.discard = true; report("Unsaved changes. Esc again discards, ^S saves.", true); }
     else if (key.name === "escape") { key.preventDefault(); goBack(); }
     else if (key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
     else if (key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
