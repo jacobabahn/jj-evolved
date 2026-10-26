@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { parseThemeName, themes, themeNames } from "./ui/theme";
 import { createCliRenderer } from "@opentui/core";
 import { createApp } from "./app";
+import { fileRevsetHistory } from "./revisions/revset-history";
 import { Repository } from "./repository/repository";
 
 const args = process.argv.slice(2);
@@ -21,7 +22,9 @@ if (args.includes("--help") || args.includes("-h")) {
     const repository = await Repository.open(positionals[0] ?? process.cwd());
     const renderer = await createCliRenderer({ exitOnCtrlC: false });
     try {
-      const app = createApp(renderer, repository, theme, saveThemePreference, keys.bindings, { preset: keys.custom ? "custom" : keys.preset });
+      const app = createApp(renderer, repository, theme, saveThemePreference, keys.bindings, {
+        preset: keys.custom ? "custom" : keys.preset, revsetHistory: fileRevsetHistory(repository.root),
+      });
       // Closing the terminal hangs up the app but not jj, which runs detached; stopping the app cancels a running fetch or push.
       process.once("SIGHUP", () => { app.stop(); process.exit(129); });
       await app.start();

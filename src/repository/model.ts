@@ -63,6 +63,7 @@ export interface Operation { id: string; description: string; time: string; curr
  * localOnly marks a local bookmark that is on no remote, in a repository that has remotes.
  */
 export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean; tracked?: boolean; ahead?: number; behind?: number; localOnly?: boolean }
+export interface RevsetAlias { name: string; definition: string }
 export function isRealRemote(bookmark: Bookmark): boolean { return bookmark.remote !== "" && bookmark.remote !== "git"; }
 /** True when two bookmarks of one name point at the same commit, which is what "in sync" means for a local and a remote. */
 export function sameTarget(a: Bookmark, b: Bookmark): boolean {

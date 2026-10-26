@@ -1,9 +1,16 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { InputRenderable } from "@opentui/core";
-import { revsetCompletions, applyCompletion } from "../src/revisions/revset-completion";
+import { revsetCompletions, applyCompletion, historyCompletions } from "../src/revisions/revset-completion";
+import { fileRevsetHistory, recordRevset, revsetHistoryLimit, type RevsetHistoryStore } from "../src/revisions/revset-history";
+import { Repository } from "../src/repository/repository";
+import { fixture } from "./fixture";
 import { createUiFixture } from "../tooling/ui";
-const bookmarks = ["main", "map", "release-", "feature/topic"].map(name => ({ name, remote: "", targets: [], conflict: false }));
-bookmarks.push({ name: "main", remote: "origin", targets: [], conflict: false });
+const list = ["main", "map", "release-", "feature/topic"].map(name => ({ name, remote: "", targets: [], conflict: false }));
+list.push({ name: "main", remote: "origin", targets: [], conflict: false });
+const bookmarks = { bookmarks: list };
 
 test("completion replaces only the cursor token and preserves surrounding expression", () => {
   const value = "ancestors(ma) | @";
@@ -25,9 +32,158 @@ test("quoted bookmarks, remote symbols, existing calls, and escaped quotes", () 
   expect(revsetCompletions("main@o", 6, bookmarks)[0]?.text).toBe("main@origin");
   const quoted = 'parents("feature/to") | @';
   expect(applyCompletion(quoted, revsetCompletions(quoted, 19, bookmarks)[0]!).value).toBe('parents("feature/topic") | @');
-  expect(applyCompletion("anc(@)", revsetCompletions("anc(@)", 3, [])[0]!).value).toBe("ancestors(@)");
+  expect(applyCompletion("anc(@)", revsetCompletions("anc(@)", 3, {})[0]!).value).toBe("ancestors(@)");
   const weird = [{ name: 'odd"name', remote: "remote-", targets: [], conflict: false }];
-  expect(revsetCompletions('"odd\\"', 6, weird)[0]?.text).toBe('"odd\\"name"@"remote-"');
+  expect(revsetCompletions('"odd\\"', 6, { bookmarks: weird })[0]?.text).toBe('"odd\\"name"@"remote-"');
+});
+
+test("functions show signatures and place the cursor between parentheses that take arguments", () => {
+  const [ancestors] = revsetCompletions("ance | @", 4, {});
+  expect(ancestors).toMatchObject({ kind: "function", label: "ancestors(x, [depth])", detail: "same as ::x" });
+  expect(applyCompletion("ance | @", ancestors!)).toEqual({ value: "ancestors() | @", cursor: 10 });
+  const [all] = revsetCompletions("al", 2, {});
+  expect(applyCompletion("al", all!)).toEqual({ value: "all()", cursor: 5 });
+});
+
+test("aliases and tags complete alongside bookmarks", () => {
+  const symbols = {
+    tags: ["v1.0", "release"],
+    aliases: [{ name: "wip", definition: "description(wip)" }, { name: "by(x, y)", definition: "author(x)\n  | committer(y)" }, { name: "mine_open()", definition: "mine() & ~::trunk()" }],
+  };
+  const tags = revsetCompletions("v1", 2, symbols);
+  expect(tags).toMatchObject([{ kind: "tag", label: "v1.0", text: '"v1.0"', detail: "tag" }]);
+  expect(revsetCompletions("rel", 3, { ...symbols, ...bookmarks }).map(item => [item.label, item.kind])).toEqual([["release", "tag"], ["release-", "bookmark"]]);
+  expect(revsetCompletions("wi", 2, symbols)[0]).toMatchObject({ kind: "alias", text: "wip", detail: "alias: description(wip)" });
+  const by = revsetCompletions("x | b", 5, symbols).find(item => item.kind === "alias")!;
+  expect(by).toMatchObject({ label: "by(x, y)", detail: "alias: author(x) | committer(y)" });
+  expect(applyCompletion("x | b", by)).toEqual({ value: "x | by()", cursor: 7 });
+  expect(applyCompletion("mine_o", revsetCompletions("mine_o", 6, symbols)[0]!).value).toBe("mine_open()");
+  // Inside a quoted or remote symbol only names apply, never functions or aliases.
+  expect(revsetCompletions('"wi', 3, symbols)).toEqual([]);
+});
+
+test("history suggests recent expressions that extend the whole input", () => {
+  const history = ["main | @", "mine()", "all()"];
+  expect(historyCompletions("all()", history, true).map(item => item.text)).toEqual(["main | @", "mine()"]);
+  expect(historyCompletions("mi", history, false).map(item => item.text)).toEqual(["mine()"]);
+  expect(applyCompletion("m", historyCompletions("m", history, false)[0]!)).toEqual({ value: "main | @", cursor: 8 });
+  expect(recordRevset(history, "  all() ")).toEqual(["all()", "main | @", "mine()"]);
+  expect(recordRevset(history, " ")).toEqual(history);
+  expect(recordRevset(Array.from({ length: revsetHistoryLimit }, (_, index) => `${index}`), "new")).toHaveLength(revsetHistoryLimit);
+});
+
+test("history files keep each repository's entries and tolerate a missing file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "state", "revset-history.json");
+    const first = fileRevsetHistory("/repo/one", path), second = fileRevsetHistory("/repo/two", path);
+    expect(await first.load()).toEqual([]);
+    expect(await first.record("all()")).toEqual(["all()"]);
+    expect(await first.record("main")).toEqual(["main", "all()"]);
+    await second.record("tags()");
+    expect(await first.load()).toEqual(["main", "all()"]);
+    expect(await second.load()).toEqual(["tags()"]);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ repositories: { "/repo/one": ["main", "all()"], "/repo/two": ["tags()"] } });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("two app instances on one repository both keep the revsets they apply", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "revset-history.json");
+    const first = fileRevsetHistory("/repo", path), second = fileRevsetHistory("/repo", path);
+    await Promise.all([first.load(), second.load()]);
+    await first.record("mine()");
+    // The second instance loaded before the first recorded, but recording merges with the file as it is now.
+    expect(await second.record("tags()")).toEqual(["tags()", "mine()"]);
+    expect(await first.record("all()")).toEqual(["all()", "tags()", "mine()"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a corrupt history file is backed up before a fresh one replaces it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "revset-history.json");
+    const store = fileRevsetHistory("/repo/one", path);
+    for (const corrupt of ["{ not json", '["not", "a", "history"]']) {
+      await writeFile(path, corrupt);
+      expect(await store.load()).toEqual([]);
+      // Loading alone leaves the file untouched.
+      expect(await readFile(path, "utf8")).toBe(corrupt);
+      expect(await store.record("mine()")).toEqual(["mine()"]);
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ repositories: { "/repo/one": ["mine()"] } });
+      const backups = (await readdir(directory)).filter(name => name.endsWith(".bak"));
+      expect(backups).toHaveLength(1);
+      expect(backups[0]).toStartWith("revset-history.json.");
+      expect(await readFile(join(directory, backups[0]!), "utf8")).toBe(corrupt);
+      await rm(join(directory, backups[0]!));
+    }
+    // A valid file is rewritten in place, without a backup.
+    await store.record("all()");
+    expect((await readdir(directory)).filter(name => name.endsWith(".bak"))).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a revset applied before the saved history loads is merged with it, not overwritten", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jj-evolved-history-"));
+  try {
+    const path = join(directory, "revset-history.json");
+    let root = "";
+    let releaseLoad = () => {};
+    const loadGate = new Promise<void>(resolve => { releaseLoad = resolve; });
+    const records: string[] = [];
+    // The repository root is only known once the fixture exists; the load is held until then.
+    const store: RevsetHistoryStore = {
+      load: async () => { await loadGate; return fileRevsetHistory(root, path).load(); },
+      record: async expression => { records.push(expression); return fileRevsetHistory(root, path).record(expression); },
+    };
+    await using ui = await createUiFixture({ width: 80, height: 24, revsetHistory: store });
+    root = ui.repo.root;
+    await writeFile(path, JSON.stringify({ repositories: { [root]: ["mine()"], "/other/repo": ["tags()"] } }));
+    ui.key("L"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+    await ui.type("all()");
+    ui.key("RETURN");
+    await ui.until("revset: all()");
+    await ui.until("Ready.");
+    await Bun.sleep(50);
+    // Nothing is recorded until the saved history has loaded.
+    expect(records).toEqual([]);
+    releaseLoad();
+    const deadline = performance.now() + 3000;
+    while (!records.length && performance.now() < deadline) await Bun.sleep(10);
+    await Bun.sleep(50);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ repositories: { [root]: ["all()", "mine()"], "/other/repo": ["tags()"] } });
+    // The prompt offers both the loaded and the newly applied revset.
+    ui.key("L");
+    await ui.until("1 recent revset");
+    expect(ui.screen.captureCharFrame()).toContain("mine()");
+    ui.key("ESCAPE");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("the repository lists local tags and configured aliases, without jj's internal ones", async () => {
+  const f = await fixture();
+  try {
+    await f.jj("tag", "set", "v1.0", "-r", "@-");
+    await f.jj("config", "set", "--repo", 'revset-aliases."by(x, y)"', "author(x)");
+    await f.jj("config", "set", "--repo", "revset-aliases.wip", "description(wip)");
+    const { tags, aliases } = await (await Repository.open(f.path)).revsetSymbols();
+    expect(tags).toEqual(["v1.0"]);
+    expect(aliases).toContainEqual({ name: "by(x, y)", definition: "author(x)" });
+    expect(aliases).toContainEqual({ name: "wip", definition: "description(wip)" });
+    expect(aliases.map(alias => alias.name)).toContain("trunk()");
+    expect(aliases.some(alias => alias.name.startsWith("builtin_"))).toBe(false);
+  } finally {
+    await f.cleanup();
+  }
 });
 
 test("80-column revset completion types, cycles, applies, cancels and preserves invalid view", async () => {
@@ -54,9 +210,64 @@ test("80-column revset completion types, cycles, applies, cancels and preserves 
   ui.key("RETURN"); await ui.until("doesn't exist");
   await Bun.sleep(20);
   expect(ui.screen.captureCharFrame()).toContain("revset: main");
+  expect(input.value).toBe("does_not_exist");
   ui.key("ESCAPE");
   await Bun.sleep(80);
   await ui.until("revset: main");
   expect(ui.screen.renderer.root.findDescendantById("action-overlay")?.visible).toBe(false);
   expect(await ui.repo.operationId()).toBe(operation);
+});
+
+test("arrow keys choose aliases, tags and signatures as you type; reopening offers recent revsets", async () => {
+  await using ui = await createUiFixture({ width: 80, height: 24, prepare: async f => {
+    await f.jj("tag", "set", "v1.0", "-r", "@-");
+    await f.jj("config", "set", "--repo", "revset-aliases.zz_initial", 'description("Initial")');
+  } });
+  ui.key("L"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+  const input = ui.node("prompt-input") as InputRenderable;
+  await ui.type("zz");
+  await ui.until("alias: description(\"Initial\")");
+  ui.key("ARROW_DOWN"); expect(input.value).toBe("zz_initial");
+  ui.key("RETURN");
+  await ui.until("revset: zz_initial");
+  await ui.until("Ready.");
+
+  ui.key("L"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+  await ui.type("v1");
+  await ui.until("v1.0");
+  ui.key("ARROW_DOWN"); expect(input.value).toBe('"v1.0"');
+  ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+  await ui.type("ancestors");
+  await ui.until("ancestors(x, [depth])");
+  ui.key("ARROW_DOWN"); expect(input.value).toBe("ancestors()");
+  expect(input.cursorOffset).toBe("ancestors(".length);
+  await ui.type("@");
+  ui.key("RETURN");
+  await ui.until("revset: ancestors(@)");
+  await ui.until("Ready.");
+
+  // Reopening lists earlier expressions, most recent first, excluding the active one.
+  ui.key("L");
+  await ui.until("1 recent revset");
+  expect(ui.screen.captureCharFrame()).not.toContain("Tab/↓");
+  expect(ui.screen.captureCharFrame()).toContain("zz_initial");
+  ui.key("ARROW_UP"); expect(input.value).toBe("zz_initial");
+  ui.key("ESCAPE");
+  await ui.until("revset: ancestors(@)");
+  // Typing filters history to expressions extending the input, above the token completions.
+  ui.key("L"); ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
+  await ui.type("zz_");
+  await ui.until("recent");
+  ui.key("ARROW_DOWN"); expect(input.value).toBe("zz_initial");
+  ui.key("ESCAPE");
+});
+
+test("help lists the revset completion keys in prompt notation", async () => {
+  await using ui = await createUiFixture({ width: 200, height: 120 });
+  ui.key("?");
+  await ui.until("In prompts");
+  const frame = ui.screen.captureCharFrame();
+  expect(frame).toMatch(/Tab\/Shift-Tab +Next \/ previous revset suggestion/);
+  expect(frame).toContain("^N/^P and arrows also work");
+  expect(frame).not.toContain("Tab / Shift-Tab");
 });

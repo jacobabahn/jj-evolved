@@ -21,7 +21,7 @@ The graph opens on the revset `jj log` shows by default (`revsets.log`), hiding 
 | Inspect a change | Show metadata and the selected revision's Git-format diff. | Empty changes have an explicit empty state. The preview scrolls independently. |
 | Toggle preview | `p` hides or shows the right-hand pane while browsing or choosing an inline destination. | The graph fills the available width when hidden; focus stays on visible content. Enter, status, and help reopen the pane. Confirmation prompts keep `p` for refreshing previews. |
 | View status | Show the actual `jj status` output. | `w` switches the preview to working-copy status. |
-| Filter history | Enter a Jujutsu revset with `L`. An empty input restores the `jj log` default revset (`revsets.log`, falling back to `all()`). | Invalid input shows jj's error, preserving the previous list and filter. No matches shows an empty state. |
+| Filter history | Enter a Jujutsu revset with `L`, with suggestions for functions (with signatures), aliases, bookmarks, tags, and recently applied revsets. An empty input restores the `jj log` default revset (`revsets.log`, falling back to `all()`). | Invalid input shows jj's error, preserving the previous list, filter, and input. No matches shows an empty state. |
 | Refresh | Check every two seconds while browsing; `Ctrl+R` reloads immediately. | Detect external operations and working-copy edits. Preserve selection, accepted search, filter, scroll, and temporary views. Defer during prompts, drags, and actions; discard stale asynchronous reads and stop polling on disposal. |
 | Describe | Enter opens a multiline text area. Enter (or Shift+Enter / Alt+Enter) inserts a newline, `Ctrl+S` or `Ctrl+D` saves, and Escape cancels; a modified description asks for a second Escape before discarding. `D` or **Describe in editor** opens JJ’s external editor. | The description is passed literally, including quotes and shell metacharacters. Existing paragraphs and pasted newlines are preserved. Saving, cancellation, and editor failure return to a refreshed app without switching the working copy. |
 | Resolve conflicts | The Space menu offers **Resolve conflicts** for conflicted revisions. | Launch JJ’s configured merge tool against the selected revision; refresh on exit while preserving the current filter and selection where possible. |
@@ -68,7 +68,7 @@ Commands run through the installed `jj` executable with argument arrays, paging 
 
 - Adding/removing remote configuration, an in-app credential manager, and bulk pushes. Configure authentication with Git credentials or SSH in the terminal.
 - In-app hunk editing and an integrated conflict-resolution editor. Interactive squash and split use JJ's configured external diff editor.
-- Full revset language completion (custom aliases and argument-aware suggestions) and custom themes. Basic completion for bookmarks and common functions is implemented.
+- A full revset parser (completion is token-based) and custom themes.
 - Event-driven filesystem watching; automatic refresh uses polling.
 - Cross-platform and older-jj compatibility guarantees beyond the verified environment.
 
