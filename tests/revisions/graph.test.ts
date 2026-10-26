@@ -226,6 +226,36 @@ test("partial repaints restore conflicted bookmark badges, drop targets and sour
   } finally { log.destroyRecursively(); screen.renderer.destroy(); }
 });
 
+test("bookmark badges fold a synced remote into the local badge and show ahead, behind and local-only state", async () => {
+  const screen = await createTestRenderer({ width: 120, height: 10 });
+  const log = new RevisionLog(screen.renderer);
+  screen.renderer.root.add(log);
+  const revisions = ["a", "b"].map(id => ({
+    changeId: `${id}qwertyu`, changePrefix: id, commitId: id.repeat(40), description: id,
+    author: "Test User", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+  }));
+  const [a, b] = revisions.map(revision => [revision.commitId]) as [string[], string[]];
+  const local = (name: string, targets: string[], extra = {}) => ({ name, remote: "", targets, conflict: false, tracked: false, ...extra });
+  const remote = (name: string, targets: string[], extra = {}, on = "origin") => ({ name, remote: on, targets, conflict: false, tracked: true, ahead: 0, behind: 0, ...extra });
+  try {
+    log.setSnapshot({ root: "/test", revisions, graph: revisions.map(revision => ({ kind: "revision", revision, prefix: "○  " })) }, [
+      local("synced", a), remote("synced", a, {}, "git"), remote("synced", a),
+      local("ahead", a), remote("ahead", b, { ahead: 2 }),
+      local("behind", a), remote("behind", b, { behind: 1 }),
+      local("split", a), remote("split", b, { ahead: 2, behind: 1 }),
+      local("solo", a, { localOnly: true }), remote("solo", a, {}, "git"),
+      local("plain", a),
+      // An untracked remote copy means the name is on the remote, so the repository does not mark it local-only.
+      local("mine", a), remote("mine", a, { tracked: false, ahead: undefined, behind: undefined }),
+      { ...local("torn", [...a, ...b], { localOnly: true }), conflict: true },
+    ]);
+    await screen.waitForVisualIdle();
+    const [first, second] = screen.captureCharFrame().split("\n").filter(line => line.includes("○")).map(line => line.match(/\[[^\]]+\]/g));
+    expect(first).toEqual(["[synced]", "[ahead ↑2]", "[behind ↓1]", "[split ↑2↓1]", "[solo*]", "[plain]", "[mine]", "[mine@origin]", "[torn*!]"]);
+    expect(second).toEqual(["[ahead@origin]", "[behind@origin]", "[split@origin]", "[torn*!]"]);
+  } finally { log.destroyRecursively(); screen.renderer.destroy(); }
+});
+
 test("rows outside the viewport are painted when they scroll into view and after a reused refresh", async () => {
   const screen = await createTestRenderer({ width: 60, height: 20 });
   const log = new RevisionLog(screen.renderer);
