@@ -2,7 +2,7 @@ import { cursorBar, getTheme, hasSelectionBand } from "../ui/theme";
 import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
-import { shortChangeId, type Bookmark, type GraphRow, type Revision, type Snapshot } from "../repository/model";
+import { isRealRemote, sameTarget, shortChangeId, type Bookmark, type GraphRow, type Revision, type Snapshot } from "../repository/model";
 
 
 // Rows are pooled across snapshots: a refresh updates them in place and recreates only badges and conflict markers.
@@ -13,6 +13,21 @@ type DragSource = ({ action: "bookmark" } & BookmarkSource) | { action: "rebase"
 type Drag = DragSource & { kind: "pressed" | "dragging" };
 const changedIds = (before: ReadonlySet<string>, after: ReadonlySet<string>) =>
   [...before].filter(id => !after.has(id)).concat([...after].filter(id => !before.has(id)));
+
+// A local badge carries its sync state: * when it is on no remote, ↑ and ↓ for commits ahead of and behind its tracked
+// remotes. A remote in step with its local bookmark, and the @git mirror of it, add nothing and get no badge of their own.
+function badgeText(bookmark: Bookmark, bookmarks: Bookmark[]): string | null {
+  const others = bookmarks.filter(item => item.name === bookmark.name && item !== bookmark);
+  if (bookmark.remote) {
+    const local = others.find(item => !item.remote);
+    const folded = local && (bookmark.tracked || !isRealRemote(bookmark)) && sameTarget(local, bookmark);
+    return folded ? null : `[${bookmark.name}@${bookmark.remote}${bookmark.conflict ? "!" : ""}]`;
+  }
+  const tracked = others.filter(item => isRealRemote(item) && item.tracked && item.targets.length);
+  const ahead = Math.max(0, ...tracked.map(item => item.ahead ?? 0)), behind = Math.max(0, ...tracked.map(item => item.behind ?? 0));
+  const counts = bookmark.conflict ? "" : `${ahead ? `↑${ahead}` : ""}${behind ? `↓${behind}` : ""}`;
+  return `[${bookmark.name}${bookmark.localOnly ? "*" : ""}${bookmark.conflict ? "!" : ""}${counts && ` ${counts}`}]`;
+}
 
 export class RevisionLog extends ScrollBoxRenderable {
   mouseSelectionEnabled = true;
@@ -83,9 +98,11 @@ export class RevisionLog extends ScrollBoxRenderable {
       if (revision) this.revisionSources.set(painted.label, revision);
       if (heading && revision) {
         for (const [index, bookmark] of bookmarks.filter(item => item.targets.includes(revision.commitId)).entries()) {
+          const text = badgeText(bookmark, bookmarks);
+          if (!text) continue;
           const badge = new TextRenderable(this.ctx, {
             id: `bookmark-${rowIndex}-${index}`, height: 1, marginLeft: 1, flexShrink: 0, selectable: false, wrapMode: "none",
-            content: terminalText(`[${bookmark.name}${bookmark.remote ? `@${bookmark.remote}` : ""}${bookmark.conflict ? "!" : ""}]`),
+            content: terminalText(text),
           });
           painted.node.add(badge);
           painted.badges.push(badge);

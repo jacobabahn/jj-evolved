@@ -1,5 +1,5 @@
-import { label, rebaseScopeSummary, type Remote, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, prepareRemote, applyRemote } from "./remotes";
+import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
+import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, type NetworkScope } from "./remotes";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -15,6 +15,10 @@ function string(value: unknown): string {
 }
 function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") throw new Error("Unexpected jj template field.");
+  return value;
+}
+function number(value: unknown): number {
+  if (typeof value !== "number") throw new Error("Unexpected jj template field.");
   return value;
 }
 function array(value: unknown): unknown[] {
@@ -39,6 +43,9 @@ export class Repository {
   private readonly pendingDiffs = new Map<string, Promise<string>>();
   private diffChars = 0;
   private diffGeneration = 0;
+  private networkAbort: AbortController | null = null;
+  /** Called when a fetch or push starts or finishes, so the app can show or hide its cancel key. */
+  onNetworkChange: (() => void) | null = null;
   private constructor(readonly root: string) {}
 
   static async open(path: string): Promise<Repository> {
@@ -61,6 +68,25 @@ export class Repository {
 
   async rebaseScope(revision: Revision, operationId = "@"): Promise<Revision[]> {
     return logRevisions(this.root, `${revision.commitId}::`, operationId);
+  }
+
+  // `jj rebase -b X -d D` is `-s roots(D..X) -d D`, so a stack with one root is the existing rebase with descendants.
+  async trunkRebase(revision: Revision): Promise<TrunkRebase> {
+    const id = revision.commitId, name = shortChangeId(revision);
+    const [trunks, roots, immutable, fallback] = await Promise.all([
+      logRevisions(this.root, "trunk()"), logRevisions(this.root, `roots(trunk()..${id})`), logRevisions(this.root, `${id} & immutable()`),
+      logRevisions(this.root, "trunk() & root()"),
+    ]);
+    const [trunk] = trunks, [root] = roots;
+    if (!trunk) throw new Error("trunk() does not resolve to a revision in this repository.");
+    // Without a main, master or trunk bookmark on a remote, trunk() falls back to the root commit, which is no trunk to sync with.
+    if (fallback.length) return { kind: "no-trunk", reason: "No trunk bookmark found, so there is nothing to rebase onto." };
+    if (trunk.commitId === id) return { kind: "blocked", reason: `${name} is trunk itself, so there is no stack to sync.` };
+    if (immutable.length) return { kind: "blocked", reason: `${name} is immutable, so its stack cannot be rebased onto trunk.` };
+    if (!root) return { kind: "current", reason: "Already part of trunk; nothing to rebase." };
+    if (roots.length > 1) return { kind: "blocked", reason: `This stack has ${roots.length} roots, which the rebase preview cannot show. Run jj rebase -b ${name} -d 'trunk()' in a terminal.` };
+    if (root.parents.length === 1 && root.parents[0] === trunk.commitId) return { kind: "current", reason: `Already based on trunk (${shortChangeId(trunk)}); nothing to rebase.` };
+    return { kind: "rebase", action: { kind: "rebase", revision: root, destination: trunk, descendants: true } };
   }
 
   async diff(revision: Revision, files: string[] = []): Promise<string> {
@@ -145,9 +171,18 @@ export class Repository {
   }
 
   async bookmarks(): Promise<Bookmark[]> {
-    const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
-      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ ']\n'`]);
-    return tuples(output).map(([name, remote, targets, conflict, tracked]) => ({ tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict) }));
+    // JJ counts from the remote's side, so its "behind" is how far the local bookmark is ahead. Only tracked remotes have counts.
+    const [output, remotes] = await Promise.all([run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
+      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']\n'`]),
+      this.remotes().catch(() => [])]);
+    const bookmarks = tuples(output).map(([name, remote, targets, conflict, tracked, ahead, behind]): Bookmark => ({
+      tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict),
+      ...(ahead === undefined ? {} : { ahead: number(ahead), behind: number(behind) }),
+    }));
+    if (!remotes.length) return bookmarks;
+    // Any remote bookmark of the name counts, tracked or not: the name is on that remote already.
+    const pushed = new Set(bookmarks.filter(item => isRealRemote(item) && item.targets.length).map(item => item.name));
+    return bookmarks.map(item => item.remote || !item.targets.length || pushed.has(item.name) ? item : { ...item, localOnly: true });
   }
 
   /** Local tags and configured revset aliases, for revset completion. jj's internal `builtin_` aliases are omitted. */
@@ -166,6 +201,10 @@ export class Repository {
   async remotes(): Promise<Remote[]> { return remoteList(this.root); }
 
   async defaultPushRemote(remotes: Remote[]): Promise<Remote | undefined> { return defaultPushRemote(this.root, remotes); }
+
+  async publishBookmarks(revision: Revision, bookmarks: Bookmark[]): Promise<PublishBookmarks> { return publishBookmarks(this.root, revision, bookmarks); }
+
+  async generatedBookmarkName(revision: Revision): Promise<string> { return generatedBookmarkName(this.root, revision); }
 
   async files(revision: Revision): Promise<ChangedFile[]> {
     const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
@@ -205,6 +244,7 @@ export class Repository {
     await this.assertCurrent(targets, operationId);
     let summary: string;
     let remoteUrl: string | undefined;
+    let caution: string | undefined;
     let rebasing: Revision[] = [];
     switch (action.kind) {
       case "git-fetch":
@@ -212,8 +252,8 @@ export class Repository {
       case "git-publish":
       case "bookmark-track":
       case "bookmark-untrack": {
-        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId);
-        summary = preview.summary; remoteUrl = preview.remoteUrl;
+        const preview = await prepareRemote(this.root, action, await this.bookmarks(), operationId, this.withNetwork);
+        summary = preview.summary; remoteUrl = preview.remoteUrl; caution = preview.caution;
         break;
       }
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
@@ -247,12 +287,16 @@ export class Repository {
       case "bookmark-move":
       case "bookmark-delete":
       case "bookmark-rename": {
-        const bookmark = (await this.bookmarks()).find(item => !item.remote && item.name === action.name);
+        const bookmarks = await this.bookmarks();
+        const bookmark = bookmarks.find(item => !item.remote && item.name === action.name);
         if (!bookmark) throw new Error("This local bookmark no longer exists. Reload bookmarks.");
         summary = `${action.kind} ${action.name}\nCurrent targets: ${bookmark.targets.join(", ") || "deleted"}`;
         if (action.kind === "bookmark-move") summary += `\nNew target: ${label(action.revision)}`;
         if (action.kind === "bookmark-rename") summary += `\nNew name: ${action.newName}`;
-        if (action.kind === "bookmark-delete") summary += "\nLocal deletion only. Remote bookmarks are not pushed.";
+        if (action.kind === "bookmark-delete") {
+          const preview = await prepareDeletion(this.root, action, bookmarks);
+          summary += `\n${preview.summary}`; remoteUrl = preview.remoteUrl;
+        }
         break;
       }
       case "undo":
@@ -265,14 +309,31 @@ export class Repository {
     const trees = action.kind === "rebase" || action.kind === "squash"
       ? await projectedTree(this.root, action, operationId, rebasing) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
-    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }) };
+    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(caution ? { caution } : {}) };
   }
 
-  async apply(prepared: PreparedMutation): Promise<void> {
+  /** Applies a prepared mutation; remote actions return a short report of what changed. */
+  async apply(prepared: PreparedMutation): Promise<string | null> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    if (prepared.remoteUrl !== undefined) { await applyRemote(this.root, prepared, await this.bookmarks()); return; }
+    if (prepared.remoteUrl !== undefined) return await applyRemote(this.root, prepared, await this.bookmarks(), this.withNetwork);
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
+    return null;
   }
+
+  /** True while a fetch or push can be stopped with cancelNetwork(). */
+  get networkActive() { return this.networkAbort !== null; }
+
+  /** Stops the running fetch or push, if any. */
+  cancelNetwork() { this.networkAbort?.abort(); }
+
+  /** Makes only the fetch or push itself cancellable, not the local steps around it such as tracking changes. */
+  private readonly withNetwork: NetworkScope = async work => {
+    const controller = new AbortController();
+    this.networkAbort = controller;
+    this.onNetworkChange?.();
+    try { return await work(controller.signal); }
+    finally { if (this.networkAbort === controller) { this.networkAbort = null; this.onNetworkChange?.(); } }
+  };
 }
