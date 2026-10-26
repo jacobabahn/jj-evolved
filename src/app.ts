@@ -151,6 +151,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
   overlay.onKeys = paintShortcuts;
+  repository.onNetworkChange = () => { if (!stopped) paintShortcuts(); };
   const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
   const overlayText = new ChangePreview(renderer, "overlay-preview-text");
   const comparison = new TreeComparisonView(renderer, "confirmation-trees");
@@ -284,6 +285,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   // Each mode lists the keys that work in it, most important first; the right group stays pinned at any width.
   function shortcutLines(): ShortcutLine[] {
+    // While a fetch or push runs, Escape cancels it and the mode's other keys wait, so that is the only key shown.
+    // The footer keeps its height so the layout does not shift.
+    if (repository.networkActive) return modeShortcutLines().map((_, index, lines) => index === lines.length - 1 ? { left: [], right: [["Esc", "cancel"]] } : { left: [] });
+    return modeShortcutLines();
+  }
+  function modeShortcutLines(): ShortcutLine[] {
     const key = (action: Action) => keyLabel(bindings, action, true);
     const pair = (first: Action, second: Action) => bothKeys(key(first), key(second));
     const move = pair("down", "up"), page = pair("pageDown", "pageUp");
@@ -759,7 +766,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const current = prompt;
     const value = current.kind === "describe" ? descriptionInput.plainText : input.value;
     if (current.kind === "text") { current.accept(value); return; }
-    if (current.kind === "confirm") { await run("Applying jj operation…", applyReviewed); return; }
+    if (current.kind === "confirm") { await run(networkLabel(current.action) ?? "Applying jj operation…", applyReviewed); return; }
     if (current.kind === "revset") await run("Loading revset…", async () => { await refresh(value.trim() || defaultRevset); closePrompt(); });
     else if (current.kind === "describe") await run("Applying jj operation…", async () => {
       if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) await applyReviewed();
@@ -784,11 +791,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   async function applyReviewed() {
     const outcome = await review.apply();
-    if (outcome.kind === "not-ready") throw new Error("Review the action again before applying. Press p to refresh the preview.");
+    if (outcome.kind === "not-ready") {
+      // Only the review screen and history form bind p to a fresh preview; elsewhere p toggles the preview pane.
+      const reviewing = prompt.kind === "confirm" || prompt.kind === "form";
+      throw new Error(reviewing ? "Review the action again before applying. Press p to refresh the preview." : "The action was interrupted before it ran. Try it again.");
+    }
     if (outcome.kind !== "applied" || stopped) return;
     closePrompt();
     if (outcome.refreshError) throw new Error(outcome.refreshError);
-    result.content = `${outcome.action.kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
+    result.content = outcome.report ?? `${outcome.action.kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
     result.visible = true;
     clearTimeout(resultTimer);
     resultTimer = setTimeout(() => { if (!stopped) result.visible = false; }, 4000);
@@ -801,10 +812,21 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
     openPrompt({ kind: "confirm", action, edit, back }, "Review before applying");
   }
-  function confirm(action: Mutation) {
+  /** Where Escape and a failed apply return to from a review opened over the current prompt. */
+  function reviewReturns() {
     const previous = prompt;
     const back = previous.kind === "inline" ? () => resumeInline(previous) : previous.kind === "confirm" ? previous.back : null;
     const edit = back || (previous.kind === "text" ? goBack : previous.kind === "confirm" ? previous.edit : null);
+    return { back, edit };
+  }
+  /** The status shown while a fetch or push runs; the footer shows the key that cancels it. */
+  function networkLabel(action: Mutation): string | null {
+    if (action.kind === "git-fetch") return `Fetching from ${action.remote}…`;
+    if (action.kind === "git-push" || action.kind === "git-publish") return `Pushing ${action.name} to ${action.remote}…`;
+    return null;
+  }
+  function confirm(action: Mutation) {
+    const { back, edit } = reviewReturns();
     void run("Preparing operation preview…", async () => {
       const prepared = await review.prepare(action);
       if (!prepared) return;
@@ -1059,7 +1081,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       pick("Git remotes", remotes.map(remote => ({
         name: remote.name, description: remote.url,
         choose: () => pick(`Remote ${remote.name}`, [
-          { name: "Fetch", description: "Fetch bookmarks and commits from this remote", choose: () => applyNow(`Fetching from ${remote.name}…`, { kind: "git-fetch", remote: remote.name }) },
+          { name: "Fetch", description: "Fetch bookmarks and commits from this remote", choose: () => applyNow({ kind: "git-fetch", remote: remote.name }) },
           { name: "Push bookmark", description: "Choose one bookmark to publish", choose: () => {
             void run("Loading push bookmarks…", async () => {
               const bookmarks = await repository.bookmarks();
@@ -1067,8 +1089,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
               const names = [...new Set(bookmarks.filter(item => !item.remote || item.remote === remote.name && item.tracked).map(item => item.name))];
               if (!names.length) { showOverlay("No local or tracked deleted bookmarks to push.", "Push bookmark"); return; }
               pick(`Push to ${remote.name}`, names.map(name => ({ name,
-                description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Publish this bookmark" : "Delete the remote bookmark",
-                choose: () => applyNow(`Pushing ${name} to ${remote.name}…`, { kind: "git-push", remote: remote.name, name }),
+                description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Publish this bookmark" : "Delete the remote bookmark after a review",
+                choose: () => applyNow({ kind: "git-push", remote: remote.name, name }),
               })));
             }, true);
           } },
@@ -1092,7 +1114,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const to = preferred ? ` ${preferred.name}` : "";
       pick("Git", [
         ...(revision ? [{ key: "p", hotkey: true, name: existing ? `Push ${existing}` : "Push this change", description: `Name a bookmark here, track it and push to${to || " a remote"} after a review`, choose: () => publish(revision) }] : []),
-        { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits", choose: () => each("Fetch from remote", remote => applyNow(`Fetching from ${remote.name}…`, { kind: "git-fetch", remote: remote.name })) },
+        { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits", choose: () => each("Fetch from remote", remote => applyNow({ kind: "git-fetch", remote: remote.name })) },
         { key: "r", hotkey: true, name: "Remotes", description: "Push another bookmark or a deletion, or fetch from a chosen remote", choose: showRemotes },
       ]);
     }, true);
@@ -1210,13 +1232,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     });
   }
 
-  /** Applies an action without stopping at the review screen. */
-  function applyNow(label: string, action: Mutation) {
+  /** Applies an action without stopping at the review screen, unless its preview carries a caution. */
+  function applyNow(action: Mutation, label = networkLabel(action) ?? "Applying jj operation…") {
+    const { back, edit } = reviewReturns();
     void run(label, async () => {
-      if (await review.prepare(action)) await applyReviewed();
+      const prepared = await review.prepare(action);
+      if (!prepared) return;
+      if (prepared.caution) openReview(action, prepared, edit, back);
+      else await applyReviewed();
     });
   }
-  function createChild(parent: Revision) { applyNow("Creating child change…", { kind: "new", parent }); }
+  function createChild(parent: Revision) { applyNow({ kind: "new", parent }, "Creating child change…"); }
   function matchingChoices(choices: Choice[], query: string) {
     const needle = query.toLowerCase();
     const matches: Choice[] = [];
@@ -1399,6 +1425,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     ++activity;
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
+    if (key.name === "escape" && repository.networkActive) { key.preventDefault(); repository.cancelNetwork(); report("Cancelling…"); return; }
     (keyHandlers[prompt.kind] as (key: KeyEvent, state: Prompt) => void)(key, prompt);
     if (!stopped) paintShortcuts();
   }
@@ -1591,12 +1618,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (!revision) { report("Select a revision first.", true); return; }
       if (action === "describe") { describe(revision); return; }
       if (action === "new") { createChild(revision); return; }
-      applyNow("Switching working copy…", { kind: "edit", revision });
+      applyNow({ kind: "edit", revision }, "Switching working copy…");
     }
   }
   function stop() {
     if (stopped) return;
     stopped = true;
+    repository.onNetworkChange = null;
+    // jj runs detached from the terminal, so a fetch or push still running would outlive the app.
+    repository.cancelNetwork();
     renderer.off("palette", applyTerminalColors);
     clearInterval(refreshTimer);
     clearTimeout(resultTimer);

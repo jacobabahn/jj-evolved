@@ -49,7 +49,8 @@ export interface Operation { id: string; description: string; time: string; curr
 export interface Bookmark { name: string; remote: string; targets: string[]; conflict: boolean; tracked?: boolean }
 export interface ChangedFile { path: string; status: string }
 export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string> }
-export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null; remoteUrl?: string }
+/** `caution` is set when an action that normally applies at once must stop for review, such as a push that deletes a remote bookmark. */
+export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null; remoteUrl?: string; caution?: string }
 
 export function shortChangeId(revision: Pick<Revision, "changeId" | "changePrefix">): string {
   return revision.changeId.slice(0, Math.max(8, revision.changePrefix.length));
