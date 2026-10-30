@@ -450,13 +450,11 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
   try {
     t.screen.mockInput.pressKey(" ");
     await t.until("Actions");
-    t.choose("Create bookmark");
-    await t.until("Bookmark name");
+    t.choose("Set bookmark");
+    await t.until("Set bookmark ─");
     await t.screen.mockInput.typeText("keyboard-bookmark");
     t.screen.mockInput.pressEnter();
-    await t.until("Review before applying");
-    t.screen.mockInput.pressEnter();
-    await t.until("Ready.");
+    await t.until("Bookmark create completed");
     expect((await t.repo.bookmarks()).some(b => b.name === "keyboard-bookmark")).toBe(true);
     t.screen.mockInput.pressKey("b");
     await t.until("Bookmarks");
@@ -486,6 +484,48 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
     await t.until("Restore this operation");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
+  } finally { await t.cleanup(); }
+}, 15_000);
+
+test("B types a new bookmark into the row and creates it; Tab picks an existing one and reviews the move", async () => {
+  const t = await setup();
+  try {
+    const first = (await t.repo.snapshot("all()")).revisions.find(revision => revision.workingCopy)!;
+    t.screen.mockInput.pressKey("B");
+    await t.until("Set bookmark ─");
+    await t.screen.mockInput.typeText("stack-top");
+    t.screen.mockInput.pressEnter();
+    await t.until("[stack-top");
+    expect((await t.repo.bookmarks()).find(b => b.name === "stack-top" && !b.remote)?.targets).toEqual([first.commitId]);
+
+    t.screen.mockInput.pressKey("j");
+    await t.settled();
+    t.screen.mockInput.pressKey("B");
+    await t.until("Set bookmark ─");
+    await t.screen.mockInput.typeText("stack");
+    await t.until("move from");
+    const suggestions = t.screen.renderer.root.findDescendantById("bookmark-suggestions");
+    let owner = suggestions?.parent;
+    while (owner && owner.id !== "revisions") owner = owner.parent;
+    expect(owner?.id).toBe("revisions");
+    t.screen.mockInput.pressTab();
+    await t.screen.renderOnce();
+    t.screen.mockInput.pressEnter();
+    await t.until("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain("bookmark-move stack-top");
+    // Escape returns to the name in the row, ready to submit again.
+    t.screen.mockInput.pressEscape();
+    await t.until("Set bookmark ─");
+    const input = t.screen.renderer.root.findDescendantById("bookmark-input");
+    if (!(input instanceof InputRenderable)) throw new Error("Missing inline bookmark editor");
+    expect(input.value).toBe("stack-top");
+    t.screen.mockInput.pressEnter();
+    await t.until("Review before applying");
+    t.screen.mockInput.pressEnter();
+    await t.until("Bookmark move completed");
+    const moved = (await t.repo.bookmarks()).find(b => b.name === "stack-top" && !b.remote)?.targets;
+    expect(moved).toHaveLength(1);
+    expect(moved).not.toEqual([first.commitId]);
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -623,37 +663,32 @@ test("keyboard file selection splits a change and squashes it back", async () =>
   } finally { await t.cleanup(); }
 }, 15_000);
 
-test("quick-action overlay keeps the graph visible and a failed name editable", async () => {
+test("the bookmark name is typed in the selected row, and a failed name stays editable there", async () => {
   const t = await setup();
   try {
     t.screen.resize(80, 24);
-    t.screen.mockInput.pressKey(" ");
-    t.choose("Create bookmark");
-    await t.until("Bookmark name");
+    t.screen.mockInput.pressKey("B");
+    await t.until("Set bookmark ─");
     const overlay = t.screen.renderer.root.findDescendantById("action-overlay");
-    const input = t.screen.renderer.root.findDescendantById("prompt-input");
-    const graph = t.screen.renderer.root.findDescendantById("revisions");
-    if (!overlay || !input || !graph) throw new Error("Missing overlay layout");
-    expect(overlay.visible).toBe(true);
-    expect(graph.visible).toBe(true);
-    expect(input.y).toBeGreaterThan(overlay.y);
-    expect(input.y + input.height).toBeLessThan(overlay.y + overlay.height);
-    await t.screen.mockInput.typeText("feature");
+    const input = t.screen.renderer.root.findDescendantById("bookmark-input");
+    const row = t.screen.renderer.root.findDescendantById("revision-row-0");
+    if (!overlay || !(input instanceof InputRenderable) || !row) throw new Error("Missing inline bookmark editor");
+    expect(overlay.visible).toBe(false);
+    expect(input.parent).toBe(row);
+    expect(input.focused).toBe(true);
+    await t.screen.mockInput.typeText("bad name");
     t.screen.mockInput.pressEnter();
-    await t.until("Review before applying");
-    t.screen.mockInput.pressEnter();
-    await t.until("already exists");
-    expect(overlay.visible).toBe(true);
-    expect(input.visible).toBe(true);
+    await t.until("invalid value 'bad name'");
+    expect(input.parent).toBe(row);
+    expect(input.value).toBe("bad name");
     t.screen.mockInput.pressKey("a", { ctrl: true });
     t.screen.mockInput.pressKey("k", { ctrl: true });
     await t.screen.mockInput.typeText("fixed-name");
     t.screen.mockInput.pressEnter();
-    await t.until("Review before applying");
-    t.screen.mockInput.pressEnter();
     await t.until("completed");
-    expect(overlay.visible).toBe(false);
+    expect(input.parent).toBeNull();
     expect((await t.repo.bookmarks()).some(b => b.name === "fixed-name")).toBe(true);
+    await t.until("[fixed-name");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -1804,14 +1839,14 @@ test("going back to a filtered action menu restores the full list and the chosen
     const chooser = t.screen.renderer.root.findDescendantById("action-choices");
     if (!(chooser instanceof SelectRenderable)) throw new Error("Missing action picker");
     t.screen.mockInput.pressKey("/");
-    await t.screen.mockInput.typeText("create book");
-    expect(chooser.options.map(option => option.value)).toEqual(["Bookmarks & remotes", "Create bookmark"]);
+    await t.screen.mockInput.typeText("describe");
+    expect(chooser.options.map(option => option.value)).toEqual(["Edit", "Describe", "Describe in editor"]);
     t.screen.mockInput.pressEnter();
-    await t.until("Bookmark name");
+    await t.until("^S save");
     t.screen.mockInput.pressEscape();
     await t.until("Esc close");
     expect(chooser.options.length).toBeGreaterThan(20);
-    expect(chooser.getSelectedOption()?.value).toBe("Create bookmark");
+    expect(chooser.getSelectedOption()?.value).toBe("Describe");
     expect(t.screen.renderer.root.findDescendantById("action-search")?.visible).toBe(false);
   } finally { await t.cleanup(); }
 }, 15_000);

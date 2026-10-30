@@ -58,7 +58,9 @@ export class RevisionLog extends ScrollBoxRenderable {
   private drag: Drag | null = null;
   get dragActive() { return this.drag !== null; }
   private dropIndex: number | null = null;
-  private expansion: { commitId: string; child: Renderable } | null = null;
+  // opens marks the revision as expanded (▾) instead of selected; an inline editor's suggestions keep the selection.
+  private expansion: { commitId: string; child: Renderable; opens: boolean } | null = null;
+  private inline: { commitId: string; child: Renderable } | null = null;
 
   constructor(context: RenderContext) {
     super(context, {
@@ -120,6 +122,7 @@ export class RevisionLog extends ScrollBoxRenderable {
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.revisions.length - 1));
     this.paintSelection();
     if (this.expansion) this.placeExpansion();
+    if (this.inline) this.placeInline();
   }
 
   private createRow(rowIndex: number): Row {
@@ -144,11 +147,11 @@ export class RevisionLog extends ScrollBoxRenderable {
   }
 
   // Shows a renderable beneath a revision's rows, in the graph, until collapsed; false when the revision is not loaded.
-  expand(index: number, child: Renderable) {
+  expand(index: number, child: Renderable, opens = true) {
     const revision = this.revisions[index];
     if (!revision) return false;
     this.collapse();
-    this.expansion = { commitId: revision.commitId, child };
+    this.expansion = { commitId: revision.commitId, child, opens };
     if (!this.placeExpansion()) return false;
     this.paintSelection([index]);
     return true;
@@ -160,6 +163,32 @@ export class RevisionLog extends ScrollBoxRenderable {
     if (this.expansion.child.parent) this.remove(this.expansion.child);
     this.expansion = null;
     this.paintSelection([index]);
+  }
+
+  // Shows a renderable at the end of a revision's heading row, such as an inline name editor, until detached.
+  attachInline(index: number, child: Renderable) {
+    const revision = this.revisions[index];
+    if (!revision) return false;
+    this.detachInline();
+    this.inline = { commitId: revision.commitId, child };
+    return this.placeInline();
+  }
+
+  detachInline() {
+    if (!this.inline) return;
+    this.inline.child.parent?.remove(this.inline.child);
+    this.inline = null;
+  }
+
+  // Rows are reused by position, so a refresh moves the editor to wherever its revision's heading row now is.
+  private placeInline() {
+    const inline = this.inline!;
+    inline.child.parent?.remove(inline.child);
+    const index = this.revisionIndexes.get(inline.commitId);
+    const heading = index === undefined ? undefined : this.revisionRows[index]?.find(row => row.heading);
+    if (!heading) { this.inline = null; return false; }
+    heading.node.add(inline.child);
+    return true;
   }
 
   // The graph lanes that continue below the revision, so expanded rows keep the graph's lines unbroken.
@@ -299,7 +328,7 @@ export class RevisionLog extends ScrollBoxRenderable {
     if (!this.nearViewport(row)) { this.stale.add(row); return; }
     this.stale.delete(row);
     // An expanded revision yields the highlight to its file list and marks itself open instead.
-    const expanded = row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.expansion?.commitId;
+    const expanded = row.revisionIndex !== null && !!this.expansion?.opens && this.revisions[row.revisionIndex]?.commitId === this.expansion.commitId;
     const selected = row.revisionIndex === this.selectedIndex && !expanded;
     const draggingSource = this.drag?.kind === "dragging" && this.drag.action === "rebase" &&
       row.revisionIndex !== null && this.revisions[row.revisionIndex]?.commitId === this.drag.revision.commitId;

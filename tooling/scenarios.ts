@@ -418,15 +418,13 @@ export const scenarios: Scenario[] = [
       await ui.prompt("all()");
       await ui.until("3 revisions");
       ui.key(" ");
-      ui.choose("Create bookmark");
-      await ui.until("Bookmark name");
-      await ui.type("feature");
+      ui.choose("Set bookmark");
+      await ui.until("Set bookmark ─");
+      await ui.type("bad name");
       ui.key("RETURN");
-      await ui.until("Review before applying");
-      ui.key("RETURN");
-      await ui.until("already exists");
-      await ui.capture("Duplicate bookmark error retains the input");
-      assert(ui.node("prompt-input").focused);
+      await ui.until("invalid value 'bad name'");
+      await ui.capture("Invalid bookmark name error retains the input in the row");
+      assert(ui.node("bookmark-input").focused);
       ui.key("ESCAPE");
     },
   },

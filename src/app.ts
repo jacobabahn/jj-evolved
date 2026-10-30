@@ -1,7 +1,7 @@
 import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
 import { contextView, loadHistory, searchScope, type LoadedHistory, type NavigationView, type Search } from "./revisions/history-view";
 import { actionForKey, defaultBindings, inlineActions, keyLabel, presetNames, type Keybindings, type Action } from "./ui/keybindings";
-import { applyCompletion, historyCompletions, revsetCompletions, type Completion } from "./revisions/revset-completion";
+import { applyCompletion, bookmarkNameCompletions, historyCompletions, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { memoryRevsetHistory, recordRevset, type RevsetHistoryStore } from "./revisions/revset-history";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
@@ -10,7 +10,7 @@ import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
 import { ChangePreview } from "./preview/change-preview";
 import {
   BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable, StyledText,
-  TextRenderable, TextareaRenderable, fg, type CliRenderer, type KeyEvent, type TerminalColors,
+  TextRenderable, TextareaRenderable, bg, fg, type CliRenderer, type KeyEvent, type TerminalColors,
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
@@ -41,6 +41,8 @@ type Prompt =
   | { kind: "picker"; title: string; all: Choice[]; choices: Choice[]; attach?: () => void }
   | { kind: "files"; revision: Revision; files: ChangedFile[] }
   | { kind: "text"; label: string; accept: (value: string) => void }
+  // Typing a bookmark name into the revision's row, with suggestions beneath it in the graph.
+  | { kind: "bookmark"; revision: Revision }
   | { kind: "help" }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null; extras: ReviewExtras };
 
@@ -99,6 +101,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["undo"]), "Preview undo of the latest operation"],
     ] },
     { title: "Bookmarks & remotes", rows: [
+      [keys(["setBookmark"]), "Set a bookmark on the selected change: type a new name to create one, or Tab to an existing one to move it here"],
       [keys(["bookmarks"]), "Bookmarks with their sync state: move, rename, push, track or untrack; delete locally or also on the remote"],
       [keys(["git"]), "Git menu: p pushes the selected change under its bookmark, advancing the nearest ancestor bookmark or asking for a name; n pushes it under another name; f fetches; s fetches, then previews rebasing the selected stack onto trunk(); r browses remotes"],
       ["Drag [bookmark]", "Drop a local bookmark onto another change to preview a move; Esc or dropping outside the graph cancels"],
@@ -137,6 +140,9 @@ function syncState(local: Bookmark, remote: Bookmark) {
 
 function fieldColors(colors: Theme) {
   return { textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel };
+}
+function bookmarkFieldColors(colors: Theme) {
+  return { textColor: colors.bookmark, focusedTextColor: colors.bookmark, backgroundColor: colors.graphSelected, focusedBackgroundColor: colors.graphSelected, placeholderColor: colors.muted };
 }
 function chooserColors(colors: Theme) {
   return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
@@ -183,6 +189,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlay.fields.add(input);
   overlay.body.add(descriptionInput);
   const suggestions = new TextRenderable(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text, wrapMode: "none", truncate: true });
+  const bookmarkInput = new InputRenderable(renderer, { id: "bookmark-input", flexGrow: 1, minWidth: 16, marginLeft: 1, placeholder: "bookmark name", ...bookmarkFieldColors(colors) });
+  const bookmarkSuggestions = new TextRenderable(renderer, { id: "bookmark-suggestions", width: "100%", wrapMode: "none", truncate: true, selectable: false });
   overlay.body.add(suggestions);
   overlay.body.add(chooser);
   overlay.body.add(overlayPreview);
@@ -225,6 +233,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const historyStore = options.revsetHistory ?? memoryRevsetHistory();
   let historySaved = Promise.resolve();
   let completing = false;
+  // The input applied by the last Tab: the input reports that change again after a render, which must keep the cycle.
+  let completed: { value: string; cursor: number } | null = null;
   let busy = false;
   let running: Promise<void> | null = null;
   let stopped = false;
@@ -289,7 +299,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     preview.title = ` ${title}${focus === "preview" ? " (focused)" : ""} `;
   }
   function paintPanes() {
-    listBox.borderColor = prompt.kind === "inline" ? colors.mode : focus === "list" ? colors.accent : colors.border;
+    listBox.borderColor = prompt.kind === "inline" || prompt.kind === "bookmark" ? colors.mode : focus === "list" ? colors.accent : colors.border;
     preview.borderColor = focus === "preview" ? colors.accent : colors.border;
     setPreviewTitle(previewTitle);
     paintShortcuts();
@@ -336,6 +346,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         right: [["Esc", "cancel"]],
       }];
       case "search": return [{ left: [["Enter", "keep"]], right: [["Esc", "cancel"]] }];
+      case "bookmark": return [{ left: [["Enter", "set"], ["Tab/Shift-Tab", "complete"]], right: [["Esc", "cancel"]] }];
       case "help": return [{ left: [[move, "scroll"], ["PgDn/PgUp", "page"]], right: [[bothKeys("Esc", key("help")), "close"]] }];
       case "form": return [prompt.form.keys];
       default: return [pickerSearch?.active ? { left: [["^N/^P", "choose"], ["Enter", "select"]], right: [["Esc", "clear"]] } : overlay.keys];
@@ -666,10 +677,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     finally { busy = false; running = null; done.resolve(); scheduleFocusRefresh(); }
   }
+  function completionInput() { return prompt.kind === "bookmark" ? bookmarkInput : input; }
   function updateCompletions() {
-    if (prompt.kind !== "revset" || completing) return;
-    completionOriginal = input.value;
+    if ((prompt.kind !== "revset" && prompt.kind !== "bookmark") || completing) return;
+    const field = completionInput();
+    if (completed && field.value === completed.value && field.cursorOffset === completed.cursor) return;
+    completed = null;
+    completionOriginal = field.value;
     completionIndex = -1;
+    if (prompt.kind === "bookmark") { completionItems = bookmarkNameCompletions(field.value, currentBookmarks, prompt.revision.commitId); renderCompletions(); return; }
     const untouched = input.value === revsetOpened;
     const recent = historyCompletions(input.value, revsetHistory, untouched);
     completionItems = untouched && recent.length ? recent
@@ -677,6 +693,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     renderCompletions();
   }
   function renderCompletions() {
+    if (prompt.kind === "bookmark") { renderBookmarkSuggestions(prompt.revision); return; }
     suggestions.visible = prompt.kind === "revset";
     if (!completionItems.length) { suggestions.content = "No suggestions"; return; }
     const first = Math.max(0, completionIndex - 3);
@@ -691,13 +708,38 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       fg(colors.muted)(`${completionItems.length} ${recent ? "recent revset" : "suggestion"}${completionItems.length === 1 ? "" : "s"}`),
     ]);
   }
+  // Up to four names under the row, continuing the graph's lanes, with the one Tab chose highlighted.
+  function renderBookmarkSuggestions(revision: Revision) {
+    const index = revisions.findIndex(item => item.commitId === revision.commitId);
+    if (!completionItems.length) { list.collapse(); return; }
+    const first = Math.max(0, completionIndex - 3);
+    const visible = completionItems.slice(first, first + 4);
+    const more = completionItems.length - first - visible.length;
+    const width = Math.min(36, Math.max(...visible.map(item => item.label.length)));
+    const lane = terminalText(`  ${list.continuationPrefix(index)}`);
+    bookmarkSuggestions.height = visible.length + (more > 0 ? 1 : 0);
+    bookmarkSuggestions.content = new StyledText([
+      ...visible.flatMap((item, offset) => {
+        const name = terminalText(` ${item.label.padEnd(width)} `);
+        return [
+          fg(colors.muted)(lane),
+          first + offset === completionIndex ? bg(colors.selected)(fg(colors.selectedText)(name)) : fg(colors.bookmark)(name),
+          fg(colors.muted)(` ${terminalText(item.detail)}\n`),
+        ];
+      }),
+      ...(more > 0 ? [fg(colors.muted)(`${lane} +${more} more`)] : []),
+    ]);
+    if (!bookmarkSuggestions.parent) list.expand(index, bookmarkSuggestions, false);
+  }
   function completeRevset(backwards: boolean) {
     if (!completionItems.length) return;
     completionIndex = (completionIndex + (backwards ? (completionIndex < 0 ? 0 : -1) : 1) + completionItems.length) % completionItems.length;
     const result = applyCompletion(completionOriginal, completionItems[completionIndex]!);
+    const field = completionInput();
+    completed = { value: result.value, cursor: result.cursor };
     completing = true;
-    input.value = result.value;
-    input.cursorOffset = result.cursor;
+    field.value = result.value;
+    field.cursorOffset = result.cursor;
     completing = false;
     renderCompletions();
   }
@@ -736,6 +778,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pickerSearch?.dispose();
     pickerSearch = null;
     suggestions.visible = false;
+    bookmarkInput.blur();
+    list.detachInline();
     if (prompt.kind === "form") prompt.form.dispose();
     const keepPreview = prompt.kind === "help";
     prompt = { kind: "browse" };
@@ -762,6 +806,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     scheduleFocusRefresh();
   }
   function openPrompt(next: Exclude<Prompt, { kind: "browse" }>, label: string, value = "") {
+    if (prompt.kind === "bookmark") { bookmarkInput.blur(); list.detachInline(); list.collapse(); }
     pushLevel();
     pickerSearch?.dispose();
     pickerSearch = null;
@@ -769,6 +814,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.visible = false;
     prompt = next;
     suggestions.visible = false;
+    completed = null;
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") {
       overlay.height = 12;
       overlay.top = "20%";
@@ -817,6 +863,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const current = prompt;
     const value = current.kind === "describe" ? descriptionInput.plainText : input.value;
     if (current.kind === "text") { current.accept(value); return; }
+    if (current.kind === "bookmark") { submitBookmark(current.revision); return; }
     if (current.kind === "confirm") {
       let note = "";
       await run(networkLabel(current.action) ?? "Applying jj operation…", async () => { note = await applyReviewed(current.extras.then) ?? ""; });
@@ -879,8 +926,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   /** Where Escape and a failed apply return to from a review opened over the current prompt. */
   function reviewReturns() {
-    const previous = prompt;
-    const back = previous.kind === "inline" ? () => resumeInline(previous) : previous.kind === "confirm" ? previous.back : null;
+    const previous = prompt, typed = bookmarkInput.value;
+    const back = previous.kind === "inline" ? () => resumeInline(previous)
+      : previous.kind === "bookmark" ? () => editBookmark(previous.revision, typed)
+      : previous.kind === "confirm" ? previous.back : null;
     const edit = back || (previous.kind === "text" ? goBack : previous.kind === "confirm" ? previous.edit : null);
     return { back, edit };
   }
@@ -927,6 +976,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       [[overlayPreview], c => ({ borderColor: c.border })],
       [[input, descriptionInput, searchInput], fieldColors],
       [[input, searchInput], c => ({ placeholderColor: c.muted })],
+      [[bookmarkInput], bookmarkFieldColors],
       [[chooser], chooserColors],
     ];
     for (const [widgets, style] of themed) for (const widget of widgets) Object.assign(widget, style(colors));
@@ -1397,6 +1447,32 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       else note = await applyReviewed(then) ?? "";
     }).then(() => { if (note && !stopped && prompt.kind === "browse") report(note); });
   }
+  /** Like jjui's B: the name is typed into the revision's row, with existing local bookmarks offered beneath it. */
+  function editBookmark(revision: Revision, value = "") {
+    closePrompt();
+    if (!list.attachInline(revisions.findIndex(item => item.commitId === revision.commitId), bookmarkInput)) { report("Select a revision first.", true); return; }
+    prompt = { kind: "bookmark", revision };
+    list.mouseSelectionEnabled = false;
+    listBox.title = " Set bookmark ";
+    setMessage("");
+    completing = true;
+    bookmarkInput.value = terminalText(value);
+    completing = false;
+    completed = null;
+    list.blur();
+    bookmarkInput.focus();
+    paintPanes();
+    updateCompletions();
+  }
+  // A new name is created at once (u undoes it); moving an existing bookmark is reviewed, since it may go backwards.
+  function submitBookmark(revision: Revision) {
+    const name = bookmarkInput.value.trim();
+    if (!name) { report("Type a bookmark name.", true); return; }
+    const local = currentBookmarks.find(item => !item.remote && item.name === name);
+    if (local?.targets.length === 1 && local.targets[0] === revision.commitId) { report(`${name} is already on this change.`, true); return; }
+    if (local) confirm({ kind: "bookmark-move", name, revision });
+    else applyNow({ kind: "bookmark-create", name, revision }, "Creating bookmark…");
+  }
   function createChild(parent: Revision) { applyNow({ kind: "new", parent }, "Creating child change…"); }
   function matchingChoices(choices: Choice[], query: string) {
     const needle = query.toLowerCase();
@@ -1428,7 +1504,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       { key: key("abandon"), name: "Abandon", description: "Remove the selected change and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       ...(revision.conflict ? [{ key: key(), name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
       header("Bookmarks & remotes"),
-      { key: key(), name: "Create bookmark", description: "Name the selected change", choose: () => ask("Bookmark name", "", name => confirm({ kind: "bookmark-create", name, revision })) },
+      { key: key("setBookmark"), name: "Set bookmark", description: "Create a bookmark on the selected change, or move an existing one here", choose: () => editBookmark(revision) },
       { key: key("publish"), name: "Publish change", description: "Push under this change's bookmark, advance the nearest one, or name a new one", choose: () => showGit(revision, "publish") },
       { key: key("git"), name: "Git", description: "Push the selected change, fetch, sync its stack with trunk, or browse remotes", choose: () => showGit(revision) },
       header("Inspect"),
@@ -1573,7 +1649,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const keyHandlers: KeyHandlers = {
     browse: browseKey, files: filesKey, inline: inlineKey, search: searchKey, theme: themeKey, help: helpKey,
     form: (key, state) => { if (state.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); } },
-    picker: pickerKey, describe: describeKey, confirm: confirmKey, revset: revsetKey, text: dialogKey,
+    picker: pickerKey, describe: describeKey, confirm: confirmKey, revset: completionKey, bookmark: completionKey, text: dialogKey,
   };
   function onKey(key: KeyEvent) {
     if (stopped) return;
@@ -1667,7 +1743,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (key.name === "pageup" || key.name === "pagedown") { key.preventDefault(); scrollPage(key, overlayPreview); }
     else if (key.name === "return") { key.preventDefault(); void submit(); }
   }
-  function revsetKey(key: KeyEvent) {
+  function completionKey(key: KeyEvent) {
     const backwards = key.name === "up" || (key.ctrl && key.name === "p") || (key.name === "tab" && key.shift);
     const forwards = key.name === "down" || (key.ctrl && key.name === "n") || (key.name === "tab" && !key.shift);
     if (!isBusy() && (backwards || forwards)) { key.preventDefault(); completeRevset(backwards); }
@@ -1751,6 +1827,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     if (action === "actions") { key.preventDefault(); const revision = selected(); if (revision) actions(revision); return; }
     if (action === "bookmarks") { key.preventDefault(); showBookmarks(); return; }
+    if (action === "setBookmark") { key.preventDefault(); const revision = selected(); if (revision) editBookmark(revision); return; }
     if (action === "git") { key.preventDefault(); showGit(selected()); return; }
     if (action === "publish") { key.preventDefault(); const revision = selected(); if (revision) showGit(revision, "publish"); return; }
     if (action === "operations") { key.preventDefault(); showOperations(); return; }
@@ -1805,6 +1882,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   input.on("input", updateCompletions);
   input.onCursorChange = updateCompletions;
+  bookmarkInput.on("input", updateCompletions);
+  bookmarkInput.onCursorChange = updateCompletions;
   searchInput.on("input", queueSearch);
   list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });

@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InputRenderable } from "@opentui/core";
-import { revsetCompletions, applyCompletion, historyCompletions } from "../src/revisions/revset-completion";
+import { revsetCompletions, applyCompletion, bookmarkNameCompletions, historyCompletions } from "../src/revisions/revset-completion";
 import { fileRevsetHistory, recordRevset, revsetHistoryLimit, type RevsetHistoryStore } from "../src/revisions/revset-history";
 import { Repository } from "../src/repository/repository";
 import { fixture } from "./fixture";
@@ -24,6 +24,23 @@ test("completion replaces only the cursor token and preserves surrounding expres
   }
   expect(applyCompletion('ancestors("ma") | @', revsetCompletions('ancestors("ma") | @', 13, bookmarks)[0]!).value).toBe("ancestors(main) | @");
   expect(revsetCompletions("'ma", 3, bookmarks)[0]?.text).toBe("main");
+});
+
+test("bookmark name completions list local bookmarks, prefix matches first, and say where each moves from", () => {
+  const here = "a".repeat(40), there = "b".repeat(40);
+  const local = [
+    { name: "feature/main-fix", remote: "", targets: [there], conflict: false },
+    { name: "main", remote: "", targets: [there], conflict: false },
+    { name: "maint", remote: "", targets: [here], conflict: false },
+    { name: "main", remote: "origin", targets: [there], conflict: false },
+    { name: "gone", remote: "", targets: [], conflict: false },
+  ];
+  const items = bookmarkNameCompletions("main", local, here);
+  expect(items.map(item => item.label)).toEqual(["maint", "feature/main-fix"]);
+  expect(items[0]?.detail).toBe("already here");
+  expect(items[1]?.detail).toBe(`move from ${there.slice(0, 8)}`);
+  expect(applyCompletion("ma", bookmarkNameCompletions("ma", local, here)[0]!).value).toBe("main");
+  expect(bookmarkNameCompletions("", local, here)).toHaveLength(3);
 });
 
 test("quoted bookmarks, remote symbols, existing calls, and escaped quotes", () => {
@@ -198,6 +215,8 @@ test("80-column revset completion types, cycles, applies, cancels and preserves 
   await ui.until("4 suggestions");
   const input = ui.node("prompt-input") as InputRenderable;
   ui.key("TAB"); expect(input.value).toBe("main");
+  // A render between presses must not restart the cycle.
+  await ui.screen.renderOnce();
   ui.key("TAB"); expect(input.value).toBe("main@git");
   ui.key("TAB", { shift: true }); expect(input.value).toBe("main");
   ui.key("RETURN");

@@ -55,6 +55,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `A` | Preview absorbing the selected change's edits into mutable ancestors |
 | `v` | Browse the selected change's evolution and preview each version's rewrite diff |
 | Space | Open the action menu, grouped into Edit, History, Bookmarks & remotes, Inspect and Repository; each item shows its effective key and `/` filters by name |
+| `B` | Set a bookmark by typing its name in the selected change's row. A new name is created at once (`u` undoes it); Tab through the local bookmarks listed under the row to move one here, which opens a review first |
 | `b` | Browse bookmarks with their sync state; move, rename, delete, push, track, or untrack |
 | `g` | Git menu: `p` publishes the selected change, `f` fetches, `s` syncs the selected stack with trunk, `r` browses remotes |
 | `o` | Browse operation history, inspect an operation, or restore its state |
@@ -190,6 +191,7 @@ Available actions and defaults:
 | `rebaseScope` (inline rebase only) | `tab` | same |
 | `absorb`, `evolution` | `A`, `v` | `a`, `v` |
 | `actions`, `bookmarks`, `git`, `operations` | `space`, `b`, `g`, `o` | `space`, `b`, unbound, `o` |
+| `setBookmark` | `B` | `B` |
 | `publish` | unbound | unbound |
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
 
