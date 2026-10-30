@@ -111,6 +111,22 @@ export function historyCompletions(value: string, history: readonly string[], un
     .map(entry => ({ kind: "history", label: entry, detail: "recent", text: entry, start: 0, end: value.length }));
 }
 
+/**
+ * Local bookmark names for the set-bookmark prompt, replacing the whole input. Names starting with the input come
+ * first, then names containing it; the detail says whether choosing one moves it or leaves it on `commitId`.
+ */
+export function bookmarkNameCompletions(value: string, bookmarks: readonly Bookmark[], commitId: string): Completion[] {
+  const typed = value.trim().toLowerCase();
+  const local = bookmarks.filter(item => !item.remote && item.targets.length && item.name.toLowerCase().includes(typed));
+  const rank = (name: string) => name.toLowerCase().startsWith(typed) ? 0 : 1;
+  return local.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
+    .filter(item => item.name !== value.trim())
+    .map(item => ({
+      kind: "bookmark", label: item.name, text: item.name, start: 0, end: value.length,
+      detail: item.targets.includes(commitId) ? "already here" : `move from ${item.targets.map(id => id.slice(0, 8)).join(", ")}`,
+    }));
+}
+
 export function applyCompletion(value: string, item: Completion) {
   return { value: value.slice(0, item.start) + item.text + value.slice(item.end), cursor: item.start + (item.caret ?? item.text.length) };
 }

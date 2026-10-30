@@ -76,6 +76,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `r` / `S` | Choose a rebase / squash destination in the graph; Tab includes descendants |
 | `s` / `a` | Split selected files / preview abandoning the change |
 | `A` / `v` | Preview absorb / browse change evolution |
+| `B` | Set a bookmark on the selected change (new name creates, existing name moves) |
 | `b` / `g` / `o` / `u` | Bookmarks / Git menu / operation history / undo preview |
 | `g` `p` | Publish the selected change: push its bookmark, advance the nearest ancestor bookmark to it, or name a new one |
 | `g` `f` | Fetch from the default remote |
