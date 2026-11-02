@@ -1,4 +1,5 @@
 import type { Revision, Snapshot, GraphRow } from "./model";
+import { read } from "./jj-helper";
 import { run } from "./jj-process";
 import { terminalText } from "../terminal-text";
 
@@ -45,10 +46,12 @@ function parseRevision(value: unknown): Revision {
 
 export async function logSnapshot(root: string, revset: string, readOnly = false, limit = 200): Promise<Snapshot> {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("History limit must be a positive integer.");
-  const log = run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", String(limit), "--revisions", revset, "--template", LOG_TEMPLATE]);
+  const cliLog = () => run(root, [...(readOnly ? ["--ignore-working-copy", "--at-op=@"] : []), "log", "--config", "ui.log-word-wrap=false", "--limit", String(limit), "--revisions", revset, "--template", LOG_TEMPLATE]);
   const countMore = () => run(root, ["--ignore-working-copy", "--at-op=@", "log", "--no-graph", "--limit", String(limit + 1), "-r", revset, "-T", '"x"']);
+  // Only a read-only log can use the helper, which never snapshots.
+  const log = readOnly ? read(root, { kind: "log", revset, template: LOG_TEMPLATE, limit, graph: true }, cliLog) : cliLog();
   // A snapshotting log may create a new operation, so only a read-only log can race the probe.
-  const probe = readOnly ? countMore() : undefined;
+  const probe = readOnly ? read(root, { kind: "log", revset, template: '"x"', limit: limit + 1, graph: false }, countMore) : undefined;
   probe?.catch(() => {});
   const output = await log;
   const revisions: Revision[] = [];
@@ -84,7 +87,9 @@ export function parsePrefixes(output: string): ReadonlyMap<string, string> {
   return prefixes;
 }
 
-export async function logRevisions(root: string, revset: string, operationId = "@", limit?: number): Promise<Revision[]> {
-  const output = await run(root, ["--ignore-working-copy", "--at-op", operationId, "log", "--no-graph", ...(limit ? ["--limit", String(limit)] : []), "-r", revset, "-T", REVISION_TEMPLATE]);
+/** `bulk` marks a read that can walk a whole history, which must not hold up the short reads behind it. */
+export async function logRevisions(root: string, revset: string, operationId = "@", limit?: number, bulk = false): Promise<Revision[]> {
+  const output = await read(root, { kind: "log", revset, template: REVISION_TEMPLATE, ...(limit ? { limit } : {}), graph: false, op: operationId },
+    () => run(root, ["--ignore-working-copy", "--at-op", operationId, "log", "--no-graph", ...(limit ? ["--limit", String(limit)] : []), "-r", revset, "-T", REVISION_TEMPLATE]), { bulk });
   return output.split("\n").filter(Boolean).map(line => parseRevision(JSON.parse(line)));
 }

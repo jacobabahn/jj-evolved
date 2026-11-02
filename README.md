@@ -119,6 +119,8 @@ bun test
 
 Tests require `jj` on your PATH and use disposable repositories. They exercise real JJ operations and the OpenTUI renderer, including keyboard workflows and snapshots.
 
+Reads can optionally go through a small Rust helper, which avoids spawning `jj` for each one on large repositories. Build it with `cargo build --release --manifest-path native/Cargo.toml`; it needs to match your `jj` version, and the app uses `jj` directly when it doesn't, or when the helper is absent. Set `JJ_EVOLVED_HELPER` to another path, or to `off`. See [the implementation notes](docs/implementation.md#read-helper).
+
 To inspect recorded UI scenarios:
 
 ```bash

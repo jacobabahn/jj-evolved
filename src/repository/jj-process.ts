@@ -9,6 +9,15 @@ export interface RunOptions {
 /** A backstop for fetch and push, which the user cancels with Escape: long enough for a large fetch, short enough that a hung connection ends. */
 export const NETWORK_TIMEOUT_MS = 10 * 60_000;
 
+/** The environment every jj-reading process runs in: never prompt, whatever the user's terminal allows. */
+export function jjEnv(env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return { ...process.env, JJ_INTERACTIVE: "0", GIT_TERMINAL_PROMPT: "0", ...env };
+}
+
+export function timeoutMessage(timeoutMs: number): string {
+  return `jj command exceeded ${timeoutMs >= 60_000 ? `${timeoutMs / 60_000} minutes` : `${timeoutMs / 1000} seconds`} and was stopped.`;
+}
+
 export async function run(path: string, args: string[], diagnostics = false, env: NodeJS.ProcessEnv = {}, options: RunOptions = {}): Promise<string> {
   if (!Bun.which("jj")) throw new Error("jj is not installed. Install Jujutsu, then run jj-evolved again.");
   if (options.signal?.aborted) throw new CancelledError(false);
@@ -18,7 +27,7 @@ export async function run(path: string, args: string[], diagnostics = false, env
     // still complete. Detaching also takes jj out of the terminal's session, so Ctrl-C and closing the terminal no
     // longer reach it. Instead the app cancels network commands when it quits, and every command has a timeout.
     cwd: path, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true,
-    env: { ...process.env, JJ_INTERACTIVE: "0", GIT_TERMINAL_PROMPT: "0", ...env },
+    env: jjEnv(env),
   });
   const { timeoutMs = 30_000, signal } = options;
   let timedOut = false;
@@ -30,7 +39,7 @@ export async function run(path: string, args: string[], diagnostics = false, env
       new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
     ]);
     if (code !== 0 && signal?.aborted) throw new CancelledError(true);
-    if (code !== 0 && timedOut) throw new Error(`jj command exceeded ${timeoutMs >= 60_000 ? `${timeoutMs / 60_000} minutes` : `${timeoutMs / 1000} seconds`} and was stopped.${stderr.trim() ? `\n${terminalText(stderr.trim())}` : ""}`);
+    if (code !== 0 && timedOut) throw new Error(`${timeoutMessage(timeoutMs)}${stderr.trim() ? `\n${terminalText(stderr.trim())}` : ""}`);
     if (code !== 0) throw new Error(terminalText(stderr.trim()) || "jj command failed.");
     return diagnostics ? stdout + stderr : stdout;
   } finally { clearTimeout(timer); signal?.removeEventListener("abort", stop); }
