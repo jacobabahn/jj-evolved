@@ -60,6 +60,26 @@ The design keeps both features in `Repository` and the existing overlays. A sepa
 
 After a successful write, `MutationReview` returns an applied result even if refresh fails. Both interaction paths close their overlay and report that the operation succeeded, directing the user to refresh instead of repeating the action. Working-copy-changing actions reset the filter to the default revset and select the working copy. Other actions preserve the active revset and recover selection by commit ID, then a unique change ID.
 
+## Read helper
+
+Each `jj` spawn loads the repository from scratch, which dominates the cost of hot reads on large repositories. `jj-evolved-helper` (`native/`, contract in [`native/PROTOCOL.md`](../native/PROTOCOL.md)) is an optional, long-lived, strictly read-only process built on `jj-cli` and `jj-lib`. Its payloads are byte-identical to the stdout of the CLI command each request mirrors, so the parsers are the same on both paths.
+
+Build it with `cargo build --release --manifest-path native/Cargo.toml`. `JJ_EVOLVED_HELPER` overrides the binary at `native/target/release/jj-evolved-helper` with another path, or disables it with `off`. With no binary the app runs on the CLI alone, silently.
+
+`repository/jj-helper.ts` is internal to the repository module. `read(root, request, fallback)` wraps a CLI invocation at its call site. Routed reads are read-only `logSnapshot` with its `hasMore` probe, `logRevisions`, `Repository.diff`, `files`, `operationId`, and the `jj bookmark list` part of `bookmarks`.
+
+Each root has two lanes, each its own process and FIFO with one request in flight: `fast` by default, and `bulk`, spawned on first use, for reads that can walk a whole history (`navigationRevisions`, `rebaseScope`), so a search cannot hold up selection reads. Processes are unreferenced, so they never keep the event loop open, and exit on stdin EOF. A lane idle for 60 seconds is killed; the next read starts another. Stdout is read through a stream reader and each payload decoded once, because `Response.text()` costs seconds of main-thread CPU on very large payloads.
+
+Invariants:
+
+- The helper never snapshots or writes. Anything that may snapshot, `--no-integrate-operation`, and any call with a custom `env` stay on the CLI. Working-copy edits reach it only after a CLI command snapshots them, which `snapshotOperationId` does before every reload.
+- The CLI is the only source of user-visible errors. `ok:false`, a crash, an unexpected exit, a malformed frame and `ready:false` all re-run the read through its fallback, and the caller cannot tell. That covers invalid revsets, old operations and divergent operation heads.
+- A helper's `jjVersion` and protocol must match `jj --version`, read once per process. The app follows whatever `jj` the user has, so a mismatch disables the helper for the session instead of reading a repository with another jj-lib.
+- Exit 75 means config changed: the read in flight retries once on a new process. Three crashes for a root, across both lanes, end the helper for that root and send its queue to the CLI.
+- A timeout, counted from when a request reaches the head of its lane, kills the lane and throws the same message as `run()` without a CLI fallback, since the CLI would be slower still. A helper that never became ready counts as a crash instead. Requests queued behind a killed lane run on a fresh process.
+
+`tests/repository/jj-helper.test.ts` scripts `tests/fake-helper.ts`, a Bun process speaking the protocol, through each failure, so it needs no Rust build. `tests/repository/jj-helper-real.test.ts` compares both paths on a real repository and skips without the binary.
+
 ## Source organization
 
 | Directory or file | Ownership |

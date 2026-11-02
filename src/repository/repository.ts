@@ -1,5 +1,6 @@
 import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
 import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, type NetworkScope } from "./remotes";
+import { read } from "./jj-helper";
 import { run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
@@ -63,11 +64,11 @@ export class Repository {
   }
 
   async navigationRevisions(revset: string): Promise<Revision[]> {
-    return logRevisions(this.root, revset);
+    return logRevisions(this.root, revset, "@", undefined, true);
   }
 
   async rebaseScope(revision: Revision, operationId = "@"): Promise<Revision[]> {
-    return logRevisions(this.root, `${revision.commitId}::`, operationId);
+    return logRevisions(this.root, `${revision.commitId}::`, operationId, undefined, true);
   }
 
   // `jj rebase -b X -d D` is `-s roots(D..X) -d D`, so a stack with one root is the existing rebase with descendants.
@@ -96,7 +97,9 @@ export class Repository {
     const existing = this.pendingDiffs.get(key);
     if (existing) return existing;
     const generation = this.diffGeneration;
-    const pending: Promise<string> = run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...files.map(literalPath)]).then(output => {
+    const paths = files.map(literalPath);
+    const pending: Promise<string> = read(this.root, { kind: "diff", commitId: revision.commitId, paths },
+      () => run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...paths])).then(output => {
       const text = terminalText(output);
       const { entries, chars, entryChars } = this.diffCacheLimits;
       if (generation !== this.diffGeneration || text.length > entryChars) return text;
@@ -132,7 +135,8 @@ export class Repository {
   }
 
   async operationId(): Promise<string> {
-    return (await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "log", "--no-graph", "--limit", "1", "-T", "id"])).trim();
+    return (await read(this.root, { kind: "opId" },
+      () => run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "log", "--no-graph", "--limit", "1", "-T", "id"]))).trim();
   }
 
   // Snapshots pending working-copy edits first, so external file changes produce a new ID.
@@ -172,8 +176,9 @@ export class Repository {
 
   async bookmarks(): Promise<Bookmark[]> {
     // JJ counts from the remote's side, so its "behind" is how far the local bookmark is ahead. Only tracked remotes have counts.
-    const [output, remotes] = await Promise.all([run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T",
-      `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']\n'`]),
+    const template = `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']\n'`;
+    const [output, remotes] = await Promise.all([
+      read(this.root, { kind: "bookmarks", template }, () => run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T", template])),
       this.remotes().catch(() => [])]);
     const bookmarks = tuples(output).map(([name, remote, targets, conflict, tracked, ahead, behind]): Bookmark => ({
       tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict),
@@ -207,8 +212,9 @@ export class Repository {
   async generatedBookmarkName(revision: Revision): Promise<string> { return generatedBookmarkName(this.root, revision); }
 
   async files(revision: Revision): Promise<ChangedFile[]> {
-    const output = await run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T",
-      `'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'`]);
+    const template = `'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'`;
+    const output = await read(this.root, { kind: "files", commitId: revision.commitId, template },
+      () => run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T", template]));
     return tuples(output).map(([path, status]) => ({ path: string(path), status: string(status) }));
   }
 

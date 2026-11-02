@@ -408,6 +408,9 @@ test("an older diff cannot replace a newer selection", async () => {
 
 test("rapid selection moves read only the settled revision and revisits render cached diffs at once", async () => {
   const f = await fixture();
+  // Counts jj spawns, so the reads must be CLI ones even when a helper is built.
+  const helper = process.env.JJ_EVOLVED_HELPER;
+  process.env.JJ_EVOLVED_HELPER = "off";
   const screen = await createTestRenderer({ width: 100, height: 30 });
   const repo = await Repository.open(f.path);
   const spawn = spyOn(Bun, "spawn");
@@ -438,6 +441,7 @@ test("rapid selection moves read only the settled revision and revisits render c
       for (let attempt = 0; attempt < 100 && !screen.captureCharFrame().includes("Ready."); attempt++) { await Bun.sleep(10); await screen.renderOnce(); }
     }
   } finally {
+    if (helper === undefined) delete process.env.JJ_EVOLVED_HELPER; else process.env.JJ_EVOLVED_HELPER = helper;
     spawn.mockRestore();
     app.stop();
     screen.renderer.destroy();

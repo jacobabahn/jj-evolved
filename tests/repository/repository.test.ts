@@ -50,6 +50,9 @@ test("describes literal text and creates a real child change", async () => {
 
 test("diffs are cached by commit and file list, deduplicated in flight, and failures retry", async () => {
   const f = await fixture();
+  // Counts jj spawns, so the reads must be CLI ones even when a helper is built.
+  const helper = process.env.JJ_EVOLVED_HELPER;
+  process.env.JJ_EVOLVED_HELPER = "off";
   const spawn = spyOn(Bun, "spawn");
   try {
     await Bun.write(join(f.path, "other.txt"), "other file\n");
@@ -82,7 +85,7 @@ test("diffs are cached by commit and file list, deduplicated in flight, and fail
     expect(repo.cachedDiff(current, ["hello.txt"])).toBeUndefined();
     await repo.diff(current);
     expect(diffs()).toBe(7);
-  } finally { spawn.mockRestore(); await f.cleanup(); }
+  } finally { if (helper === undefined) delete process.env.JJ_EVOLVED_HELPER; else process.env.JJ_EVOLVED_HELPER = helper; spawn.mockRestore(); await f.cleanup(); }
 });
 
 test("the diff cache skips oversized diffs and evicts the oldest beyond its size budget", async () => {
