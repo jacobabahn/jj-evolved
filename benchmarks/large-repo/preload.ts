@@ -56,7 +56,18 @@ let spawnId = 0;
   return proc;
 };
 
-const { CliRenderer, RootRenderable } = await import(`${APP}/node_modules/@opentui/core/index.bun.js`);
+const { CliRenderer, RootRenderable, CodeRenderable } = await import(`${APP}/node_modules/@opentui/core/index.bun.js`);
+// Tree-sitter runs in a worker and applies its result on the main thread later, often well after the last frame, so each
+// highlight is a span too and settle waits for it. A highlight with no filetype returns at once and is not counted.
+let highlightId = 0;
+const startHighlight = CodeRenderable.prototype.startHighlight;
+CodeRenderable.prototype.startHighlight = async function (...args: unknown[]) {
+  if (!this._filetype) return startHighlight.apply(this, args);
+  const id = ++highlightId;
+  emit({ k: "hlStart", id, t: Date.now(), chars: this._content.length });
+  try { return await startHighlight.apply(this, args); }
+  finally { emit({ k: "hlEnd", id, t: Date.now() }); flush(); }
+};
 const timed = (proto: any, name: string, kind: string) => {
   const original = proto[name];
   proto[name] = function (...args: unknown[]) {

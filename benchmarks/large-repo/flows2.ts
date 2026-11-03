@@ -24,7 +24,7 @@ async function act(s: Session, go: () => void, o: { min?: number; timeout?: numb
   const preview = s.events.filter(e => e.k === "previewContent" && e.t >= t0 && e.chars > 300).at(-1);
   return { ...buckets(s, t0, d.done, c0, threadCpu(s.pid)), hwm: hwm(s.pid), ...helperUsage(s.pid), timedOut: d.timedOut, chars: preview?.chars, blocks: preview?.blocks, screen: s.screen().split("\n").filter(l => /error|Error|failed|long|exceeded|preview/.test(l)).slice(0, 3).join(" | ").slice(0, 240) };
 }
-const show = (flow: string, r: any) => console.log(`${name} ${flow} wall=${Math.round(r.wall)} jj=${Math.round(r.jjUnion)}(${r.jjCount}p) ts=${Math.round(r.tsMs)} render=${Math.round(r.renderMs)} workers=${Math.round(r.workerCpu)} previewSet=${Math.round(r.previewMs)} stall=${Math.round(r.maxStall)} chars=${r.chars} blocks=${r.blocks} rss=${Math.round(r.hwm)}${r.timedOut ? " TIMEOUT" : ""} ${r.screen ?? ""}`);
+const show = (flow: string, r: any) => console.log(`${name} ${flow} wall=${Math.round(r.wall)} jj=${Math.round(r.jjUnion)}(${r.jjCount}p) ts=${Math.round(r.tsMs)} render=${Math.round(r.renderMs)} workers=${Math.round(r.workerCpu)} previewSet=${Math.round(r.previewMs)} stall=${Math.round(r.maxStall)} hl=${r.highlights} chars=${r.chars} blocks=${r.blocks} rss=${Math.round(r.hwm)}${r.timedOut ? " TIMEOUT" : ""} ${r.screen ?? ""}`);
 if (mode === "diff") {
   const [label, small, big] = [a!, b!, c!];
   const s = await filtered(`${small} | ${big}`);
