@@ -3,7 +3,7 @@
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 export const W = readFileSync("/tmp/jj-bench-path", "utf8").trim();
-export const APP = `${W}/app-ab`;
+export const APP = process.env.BENCH_APP_DIR ?? `${W}/app-ab`;
 const HELPER = process.env.AB_MODE === "on" ? `${W}/helper-bin/jj-evolved-helper` : "off";
 const MODE = process.env.AB_MODE ?? "off";
 const q = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
@@ -64,7 +64,7 @@ export class Session {
   screen() { return this.tmux("capture-pane", "-p", "-t", "b:0.0").out; }
   alive() { return this.pid > 0 && existsSync(`/proc/${this.pid}`); }
   async start() {
-    const preload = this.opts.preload === false ? "" : `--preload=${q(`${W}/scripts-ab/preload.ts`)}`;
+    const preload = this.opts.preload === false ? "" : `--preload=${q(`${import.meta.dir}/preload.ts`)}`;
     const launch = `cd ${q(APP)} && exec env TERM=xterm-256color JJ_CONFIG=${q(`${W}/jj-config.toml`)} XDG_CONFIG_HOME=${q(`${W}/xdg`)} JJ_EVOLVED_THEME=tokyonight JJ_EVOLVED_HELPER=${q(HELPER)} BENCH_TRACE=${q(this.trace)} BENCH_APP=${q(APP)} BENCH_HEARTBEAT=${this.opts.heartbeat === false ? 0 : 1} bun run ${process.env.BENCH_BUNFLAGS ?? ""} ${preload} src/index.ts ${q(this.repo)}`;
     this.started = Date.now();
     this.tmux("new-session", "-d", "-s", "b", "-x", String(this.opts.cols ?? 150), "-y", String(this.opts.rows ?? 40), launch);
@@ -88,22 +88,25 @@ export class Session {
     }
     return null;
   }
-  /** Waits until after `from` nothing but idle polls run, and a later heartbeat proves the main thread is not just blocked. */
+  /** Waits until after `from` nothing but idle polls run, no syntax highlight is pending, and a later heartbeat proves the main thread is not just blocked. */
   async settle(from: number, { quiet = 300, timeout = 180_000, min = 0, frameAfter = 0 }: { quiet?: number; timeout?: number; min?: number; frameAfter?: number } = {}) {
     const limit = Date.now() + timeout;
     while (Date.now() < limit) {
       await sleep(25);
       this.read();
       const open = new Map<number, Ev>();
+      const highlights = new Set<number>();
       let last = from, hb = 0, spawns = 0, framed = !frameAfter;
       for (const e of this.events) {
         if (e.k === "hb") { hb = Math.max(hb, e.t); continue; }
         if (e.t < from && e.k !== "exit") continue;
+        if (e.k === "hlStart") { highlights.add(e.id); last = Math.max(last, e.t); continue; }
+        if (e.k === "hlEnd") { if (highlights.delete(e.id)) last = Math.max(last, e.t); continue; }
         if (e.k === "start") { if (!isPoll(e.args)) { open.set(e.id, e); spawns++; last = Math.max(last, e.t); } }
         else if (e.k === "exit") { if (open.delete(e.id)) last = Math.max(last, e.t); }
         else if (e.k === "root" || e.k === "native") { last = Math.max(last, e.t + e.ms); if (e.t >= frameAfter) framed = true; }
       }
-      if (framed && !open.size && spawns >= min && hb - last >= quiet) return { done: last, timedOut: false };
+      if (framed && !open.size && !highlights.size && spawns >= min && hb - last >= quiet) return { done: last, timedOut: false };
       if (!this.alive()) return { done: last, timedOut: true };
     }
     return { done: Date.now(), timedOut: true };
@@ -143,7 +146,7 @@ export function buckets(s: Session, t0: number, t1: number, cpu0: Record<string,
     jjSum: procs.reduce((n, p) => n + p.ms, 0), jjMaxRss: Math.max(0, ...procs.map(p => p.rss)) / 1024 / 1024,
     procs: procs.map(p => ({ args: p.args.slice(0, 60), ms: p.ms, cpu: Math.round(p.user + p.sys), code: p.code })),
     mainCpu, workerCpu, rootMs, nativeMs, renderMs: rootMs + nativeMs, tsMs: Math.max(0, mainCpu - rootMs - nativeMs),
-    frames: within("native").length, maxStall: Math.max(0, ...stalls),
+    frames: within("native").length, maxStall: Math.max(0, ...stalls), highlights: within("hlEnd").length,
     setSnapshotMs: sum("setSnapshot"), previewMs: sum("previewContent"),
   };
 }
@@ -151,4 +154,4 @@ export const stats = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b), at = (p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))]!;
   return { n: s.length, median: at(0.5), min: s[0]!, max: s.at(-1)! };
 };
-export function save(file: string, record: object) { appendFileSync(`${W}/results-ab/${file}`, JSON.stringify({ at: Date.now(), mode: MODE, load: readFileSync("/proc/loadavg", "utf8").split(" ")[0], ...record }) + "\n"); }
+export function save(file: string, record: object) { appendFileSync(`${process.env.BENCH_RESULTS ?? `${W}/results-ab`}/${file}`, JSON.stringify({ at: Date.now(), mode: MODE, load: readFileSync("/proc/loadavg", "utf8").split(" ")[0], ...record }) + "\n"); }
