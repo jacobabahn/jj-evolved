@@ -6,6 +6,10 @@ import { terminalText } from "../terminal-text";
 // Each block is one child renderable; update returns false when the existing child cannot show the block.
 type Block = { id: string; create: () => Renderable; update: (existing: Renderable) => boolean };
 const signatures = new WeakMap<Renderable, string>();
+// Applying tree-sitter highlights stalls the main thread for about 1.65 ms per KB of highlighted text, plus a few ms per hunk,
+// however the text is split into hunks: a 12 MB diff across 400 files froze the app for about 19 seconds. The budget caps that
+// stall near 300 ms. Past it a hunk keeps its diff colours but not syntax colours.
+export const highlightLimits = { totalChars: 128_000 };
 const styledSignature = (text: StyledText) => JSON.stringify(text.chunks.map(chunk => [chunk.text, chunk.fg?.toInts(), chunk.bg?.toInts(), chunk.attributes]));
 
 export class ChangePreview extends BoxRenderable {
@@ -65,6 +69,7 @@ export class ChangePreview extends BoxRenderable {
         },
       });
     };
+    let highlightedChars = 0;
     const sections = this.value.split(/(?=^diff --git )/m);
     for (const [index, section] of sections.entries()) {
       const id = `${this.id}-${index}`;
@@ -81,10 +86,15 @@ export class ChangePreview extends BoxRenderable {
         const end = lines.findIndex((line, index) => index > 0 && !/^(?:[ +\-]|\\ No newline at end of file)/.test(line));
         const patch = end < 0 ? hunk : lines.slice(0, end).join("\n") + "\n";
         const trailing = end < 0 ? "" : lines.slice(end).join("\n").trim();
-        text(`${id}-hunk-${hunkIndex}`, lines[0] ?? "", theme.hunk);
+        // Hunks are budgeted in document order, so what the user reads first keeps its colours. A hunk that does not fit what is
+        // left is skipped, and smaller hunks after it can still be highlighted.
+        const grammar = pathToFiletype(path ?? "");
+        const skipped = !!grammar && highlightedChars + patch.length > highlightLimits.totalChars;
+        const filetype = skipped ? undefined : grammar;
+        if (filetype) highlightedChars += patch.length;
+        text(`${id}-hunk-${hunkIndex}`, skipped ? `${lines[0] ?? ""}  (diff too large to highlight)` : lines[0] ?? "", theme.hunk);
         const diffId = `${id}-diff-${hunkIndex}`;
         const diff = header + patch;
-        const filetype = pathToFiletype(path ?? "");
         blocks.push({
           id: diffId,
           create: () => {

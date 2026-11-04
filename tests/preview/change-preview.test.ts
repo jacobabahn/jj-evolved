@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { CodeRenderable, DiffRenderable } from "@opentui/core";
+import { CodeRenderable, DiffRenderable, TextRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { ChangePreview } from "../../src/preview/change-preview";
+import { ChangePreview, highlightLimits } from "../../src/preview/change-preview";
 
 const patch = `diff --git a/hello.ts b/hello.ts
 --- a/hello.ts
@@ -117,4 +117,28 @@ test("repeated text keeps every child, and a changed hunk updates in place witho
     await screen.waitForVisualIdle();
     expect(screen.captureCharFrame()).toContain("+ const end = 1;");
   } finally { preview.destroyRecursively(); screen.renderer.destroy(); }
+}, 20_000);
+
+test("hunks past the highlight limits keep diff colours, lose syntax colours and say why", async () => {
+  const file = (name: string, count: number) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -0,0 +1,${count} @@\n`
+    + Array.from({ length: count }, (_, index) => `+export const value${index} = ${index};\n`).join("");
+  const screen = await createTestRenderer({ width: 100, height: 40 });
+  const saved = { ...highlightLimits };
+  // Hunk patches are 146 (5 lines), 277 (10) and 557 (20) characters. long.ts is over the budget on its own, small.ts and
+  // after.ts still fit after it, and late.ts would fit alone but not in what is left. notes.unknown has no grammar.
+  Object.assign(highlightLimits, { totalChars: 500 });
+  const preview = new ChangePreview(screen.renderer, "limits", `${file("small.ts", 5)}${file("long.ts", 20)}${file("after.ts", 5)}${file("late.ts", 10)}${file("notes.unknown", 50)}`);
+  screen.renderer.root.add(preview);
+  try {
+    await screen.renderOnce();
+    const diffs = preview.getChildren().filter(child => child instanceof DiffRenderable);
+    expect(diffs.map(diff => diff.filetype)).toEqual(["typescript", undefined, "typescript", undefined, undefined]);
+    const headers = preview.getChildren().filter(child => /-hunk-\d+$/.test(child.id)).map(child => child instanceof TextRenderable ? child.plainText : "");
+    expect(headers).toEqual(["@@ -0,0 +1,5 @@", "@@ -0,0 +1,20 @@  (diff too large to highlight)", "@@ -0,0 +1,5 @@", "@@ -0,0 +1,10 @@  (diff too large to highlight)", "@@ -0,0 +1,50 @@"]);
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).toContain("+ export const value10 = 10;");
+  } finally {
+    Object.assign(highlightLimits, saved);
+    preview.destroyRecursively(); screen.renderer.destroy();
+  }
 }, 20_000);
