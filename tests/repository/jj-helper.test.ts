@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FrameParser, helperSettings, read, resetHelpers, type HelperRequest } from "../../src/repository/jj-helper";
 import { Repository } from "../../src/repository/repository";
+import type { Revision } from "../../src/repository/model";
+import { PreviewSession, type PreviewContent } from "../../src/preview/preview-session";
 import { fixture } from "../fixture";
 
 const fakeHelper = resolve(import.meta.dir, "../fake-helper.ts");
@@ -388,4 +390,99 @@ test("routes the read paths with the CLI's exact text, and never anything that s
     expect(new Set((await requests()).map(request => request.kind)).has("diff")).toBe(false);
     expect((await repo.snapshot("@", false)).revisions[0]?.description).toBe("Changed\n");
   } finally { delete process.env.FAKE_HELPER_REFUSE; await f.cleanup(); }
+});
+
+// A diff's commit ID scripts the fake helper the way a log revset does. The CLI cannot read these commits, so any text
+// that comes back came from the helper.
+const scripted = (commitId: string) => ({ commitId }) as Revision;
+const diffs = async () => (await requests()).filter(request => request.kind === "diff").map(request => request.commitId);
+
+test("a preview that moves on kills its stale diff, so the helper's later reads are not held up", async () => {
+  const f = await fixture();
+  try {
+    const repo = await Repository.open(f.path);
+    await repo.operationId();
+    const frames: PreviewContent[] = [];
+    const session = new PreviewSession(frame => { frames.push(frame); });
+    const preview = (commitId: string) => session.load({ target: "main", title: commitId, loading: "Loading…", read: signal => repo.diff(scripted(commitId), [], { signal }) });
+    // More stale diffs than the crash limit: a kill for cancellation must not count as a crash.
+    for (let round = 0; round < 4; round++) {
+      const stale = preview("hang");
+      await until(async () => (await diffs()).filter(id => id === "hang").length === round + 1);
+      const started = performance.now();
+      await preview(`echo:fresh ${round}`);
+      expect(await repo.operationId()).toBe("opId");
+      expect(performance.now() - started).toBeLessThan(2_000);
+      expect(frames.at(-1)?.text).toBe(`fresh ${round}`);
+      await stale;
+    }
+    expect(frames.some(frame => frame.text.includes("Cancelled"))).toBe(false);
+    expect(await pids()).toHaveLength(5);
+  } finally { await f.cleanup(); }
+});
+
+test("a stale diff that finishes within the grace keeps its helper, and its result is cached", async () => {
+  const f = await fixture();
+  try {
+    const repo = await Repository.open(f.path);
+    const controller = new AbortController();
+    const stale = repo.diff(scripted("slow:30:quick"), [], { signal: controller.signal });
+    await until(async () => (await diffs()).length === 1);
+    controller.abort();
+    await expect(stale).rejects.toMatchObject({ name: "CancelledError" });
+    await until(() => repo.cachedDiff(scripted("slow:30:quick")) === "quick");
+    expect(await repo.diff(scripted("echo:next"))).toBe("next");
+    expect(await pids()).toHaveLength(1);
+  } finally { await f.cleanup(); }
+});
+
+test("a shared diff is stopped only once every caller has left", async () => {
+  const f = await fixture();
+  try {
+    const repo = await Repository.open(f.path);
+    repo.diffCancelGraceMs = 10;
+    const first = new AbortController(), second = new AbortController();
+    const leaving = repo.diff(scripted("slow:300:shared"), [], { signal: first.signal });
+    const staying = repo.diff(scripted("slow:300:shared"), [], { signal: second.signal });
+    const unsignalled = repo.diff(scripted("slow:300:other"));
+    const held = repo.diff(scripted("slow:300:other"), [], { signal: first.signal });
+    await until(async () => (await diffs()).length === 1);
+    const left = Promise.all([leaving, held].map(promise => promise.then(() => "answered", (error: Error) => error.name)));
+    first.abort();
+    expect(await left).toEqual(["CancelledError", "CancelledError"]);
+    expect(await staying).toBe("shared");
+    expect(await unsignalled).toBe("other");
+    expect(await diffs()).toEqual(["slow:300:shared", "slow:300:other"]);
+    expect(await pids()).toHaveLength(1);
+  } finally { await f.cleanup(); }
+});
+
+test("a caller arriving within the grace takes over the read, and one arriving after the kill starts another", async () => {
+  const f = await fixture();
+  try {
+    const repo = await Repository.open(f.path);
+    repo.diffCancelGraceMs = 100;
+    const away = new AbortController();
+    const left = repo.diff(scripted("slow:200:back"), [], { signal: away.signal });
+    await until(async () => (await diffs()).length === 1);
+    away.abort();
+    await expect(left).rejects.toMatchObject({ name: "CancelledError" });
+    await Bun.sleep(20);
+    expect(await repo.diff(scripted("slow:200:back"))).toBe("back");
+    expect(await pids()).toHaveLength(1);
+
+    repo.diffCancelGraceMs = 0;
+    const gone = new AbortController();
+    const killed = repo.diff(scripted("hang"), [], { signal: gone.signal });
+    await until(async () => (await diffs()).length === 2);
+    gone.abort();
+    await expect(killed).rejects.toMatchObject({ name: "CancelledError" });
+    await until(async () => !alive((await pids())[0]!));
+    const again = new AbortController();
+    const restarted = repo.diff(scripted("hang"), [], { signal: again.signal });
+    await until(async () => (await diffs()).length === 3);
+    expect(await pids()).toHaveLength(2);
+    again.abort();
+    await expect(restarted).rejects.toMatchObject({ name: "CancelledError" });
+  } finally { await f.cleanup(); }
 });

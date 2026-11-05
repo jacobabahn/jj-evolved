@@ -6,7 +6,8 @@ type PreviewRequest = {
   target: PreviewContent["target"];
   title: string;
   loading: string;
-  read: () => Promise<string>;
+  // Aborted as soon as the preview moves on, so a read that is no longer wanted can stop instead of holding up later ones.
+  read: (signal: AbortSignal) => Promise<string>;
   prefix?: string;
   empty?: string;
   errorTitle?: string;
@@ -21,6 +22,7 @@ export class PreviewSession {
   private disposed = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private wake = () => {};
+  private reading: AbortController | undefined;
   private shown: Partial<Record<PreviewContent["target"], string>> = {};
 
   constructor(private readonly render: (content: PreviewContent) => void) {}
@@ -37,12 +39,13 @@ export class PreviewSession {
     if (cached !== undefined) { this.show({ target, title, text: prefix + (cached.trim() ? cached : empty), ...reload }, key); return; }
     if (reload.keepScroll) this.cancel(); else this.show({ target, title, text: prefix + loading }, key);
     const request = this.request;
+    const reading = this.reading = new AbortController();
     if (delay > 0) {
       await new Promise<void>(resolve => { this.wake = resolve; this.timer = setTimeout(resolve, delay); });
       if (this.disposed || request !== this.request) return;
     }
     try {
-      const text = await read();
+      const text = await read(reading.signal);
       if (!this.disposed && request === this.request) {
         this.render({ target, title, text: terminalText(prefix + (text.trim() ? text : empty)), ...reload });
       }
@@ -53,6 +56,6 @@ export class PreviewSession {
     }
   }
 
-  cancel() { ++this.request; clearTimeout(this.timer); this.wake(); }
+  cancel() { ++this.request; clearTimeout(this.timer); this.wake(); this.reading?.abort(); }
   dispose() { this.disposed = true; this.cancel(); }
 }

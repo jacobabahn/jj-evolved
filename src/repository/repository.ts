@@ -1,7 +1,7 @@
 import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
 import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, type NetworkScope } from "./remotes";
 import { read } from "./jj-helper";
-import { run } from "./jj-process";
+import { CancelledError, run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
 import { projectedAbsorb } from "./projected-absorb";
@@ -37,11 +37,19 @@ function aliasName(path: string): string {
   return key;
 }
 const diffKey = (revision: Revision, files: string[]) => [revision.commitId, ...files].join("\0");
+/** One diff read and the callers waiting on it. It is stopped only once every caller has gone and the grace has passed. */
+type SharedDiff = { result: Promise<string>; abandon: () => void; waiting: number; settled: boolean; timer?: Timer };
 export class Repository {
   // A commit ID fixes the diff against its parents, but config such as conflict-marker style can change the text; refreshes clear it.
   diffCacheLimits = { entries: 64, chars: 16_000_000, entryChars: 2_000_000 };
   private readonly diffs = new Map<string, string>();
-  private readonly pendingDiffs = new Map<string, Promise<string>>();
+  /**
+   * How long a diff nobody waits for keeps running before it is killed. Killing a helper read costs a cold process, about
+   * 130 ms on a Linux-sized repository, and most diffs take a few milliseconds, so a stale read usually finishes first
+   * and its result is cached. A slow one is stopped, so it holds up the helper's later reads by this much, not seconds.
+   */
+  diffCancelGraceMs = 150;
+  private readonly pendingDiffs = new Map<string, SharedDiff>();
   private diffChars = 0;
   private diffGeneration = 0;
   private networkAbort: AbortController | null = null;
@@ -90,16 +98,24 @@ export class Repository {
     return { kind: "rebase", action: { kind: "rebase", revision: root, destination: trunk, descendants: true } };
   }
 
-  async diff(revision: Revision, files: string[] = []): Promise<string> {
+  /** Callers passing the same revision and files share one read. Aborting `signal` rejects this call with CancelledError. */
+  async diff(revision: Revision, files: string[] = [], { signal }: { signal?: AbortSignal } = {}): Promise<string> {
     const cached = this.cachedDiff(revision, files);
     if (cached !== undefined) return cached;
+    if (signal?.aborted) throw new CancelledError(false);
     const key = diffKey(revision, files);
-    const existing = this.pendingDiffs.get(key);
-    if (existing) return existing;
+    let shared = this.pendingDiffs.get(key);
+    if (!shared) this.pendingDiffs.set(key, shared = this.readDiff(key, revision, files));
+    return this.awaitDiff(shared, signal);
+  }
+
+  private readDiff(key: string, revision: Revision, files: string[]): SharedDiff {
     const generation = this.diffGeneration;
     const paths = files.map(literalPath);
-    const pending: Promise<string> = read(this.root, { kind: "diff", commitId: revision.commitId, paths },
-      () => run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...paths])).then(output => {
+    const stop = new AbortController();
+    const result = read(this.root, { kind: "diff", commitId: revision.commitId, paths },
+      () => run(this.root, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", revision.commitId, "--git", "--", ...paths], false, {}, { signal: stop.signal }),
+      { signal: stop.signal }).then(output => {
       const text = terminalText(output);
       const { entries, chars, entryChars } = this.diffCacheLimits;
       if (generation !== this.diffGeneration || text.length > entryChars) return text;
@@ -111,9 +127,34 @@ export class Repository {
         this.diffChars -= value.length;
       }
       return text;
-    }).finally(() => { if (this.pendingDiffs.get(key) === pending) this.pendingDiffs.delete(key); });
-    this.pendingDiffs.set(key, pending);
-    return pending;
+    }).finally(() => {
+      shared.settled = true;
+      clearTimeout(shared.timer);
+      if (this.pendingDiffs.get(key) === shared) this.pendingDiffs.delete(key);
+    });
+    // Once everyone has left, nobody handles the rejection a stopped read ends in.
+    result.catch(() => {});
+    const shared: SharedDiff = { result, waiting: 0, settled: false, abandon: () => {
+      // A caller arriving from now on starts a fresh read rather than join one that is being killed.
+      if (this.pendingDiffs.get(key) === shared) this.pendingDiffs.delete(key);
+      stop.abort();
+    } };
+    return shared;
+  }
+
+  private awaitDiff(shared: SharedDiff, signal: AbortSignal | undefined): Promise<string> {
+    ++shared.waiting;
+    clearTimeout(shared.timer);
+    if (!signal) return shared.result;
+    return new Promise<string>((resolve, reject) => {
+      const leave = () => {
+        reject(new CancelledError(true));
+        if (--shared.waiting > 0 || shared.settled) return;
+        shared.timer = setTimeout(shared.abandon, this.diffCancelGraceMs);
+      };
+      signal.addEventListener("abort", leave, { once: true });
+      shared.result.then(resolve, reject).finally(() => signal.removeEventListener("abort", leave));
+    });
   }
 
   clearDiffs() {
