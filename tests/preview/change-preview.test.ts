@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CodeRenderable, DiffRenderable, TextRenderable } from "@opentui/core";
+import { BoxRenderable, CodeRenderable, DiffRenderable, ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { ChangePreview, highlightLimits } from "../../src/preview/change-preview";
 
@@ -208,3 +208,137 @@ test("a refresh highlights a hunk that now fits the budget and skips one that no
     preview.destroyRecursively(); screen.renderer.destroy();
   }
 }, 20_000);
+
+// A preview inside a scroll box the way the app holds it, so only blocks near the viewport get renderables.
+const scrolled = async (text: string, { width = 80, height = 20 } = {}) => {
+  const screen = await createTestRenderer({ width, height });
+  const box = new ScrollBoxRenderable(screen.renderer, { id: "preview", width: "100%", height: "100%", scrollY: true, contentOptions: { width: "100%", minHeight: 0 } });
+  const preview = new ChangePreview(screen.renderer, "window", text);
+  box.add(preview);
+  screen.renderer.root.add(box);
+  await screen.renderOnce();
+  await screen.renderOnce();
+  return { screen, box, preview, close: () => { box.destroyRecursively(); screen.renderer.destroy(); } };
+};
+const plainFile = (index: number, count: number) => `diff --git a/file${index}.txt b/file${index}.txt\n--- a/file${index}.txt\n+++ b/file${index}.txt\n@@ -0,0 +1,${count} @@\n`
+  + Array.from({ length: count }, (_, line) => `+file ${index} line ${line}\n`).join("");
+// The last column holds the scroll bar, whose thumb moves as the view scrolls.
+const visible = (screen: Awaited<ReturnType<typeof createTestRenderer>>) => screen.captureCharFrame().split("\n").map(line => line.slice(0, -1));
+
+test("a long diff keeps renderables only near the viewport and the full scroll extent", async () => {
+  // 300 files of 3 header rows, a hunk header and 10 lines: 4,200 rows and 900 blocks, none of them wrapping.
+  const { screen, box, preview, close } = await scrolled(Array.from({ length: 300 }, (_, index) => plainFile(index, 10)).join(""));
+  try {
+    expect(box.scrollHeight).toBe(300 * 14);
+    expect(preview.getChildren().length).toBeLessThan(30);
+    expect(screen.captureCharFrame()).toContain("+++ b/file0.txt");
+
+    box.scrollTo(150 * 14);
+    await screen.renderOnce();
+    expect(visible(screen)[0]).toContain("diff --git a/file150.txt");
+    expect(preview.getChildren().length).toBeLessThan(30);
+    expect(preview.getRenderable("window-1-diff-0")).toBeUndefined();
+
+    box.scrollTo(box.scrollHeight);
+    await screen.renderOnce();
+    expect(screen.captureCharFrame()).toContain("+ file 299 line 9");
+    expect(box.scrollHeight).toBe(300 * 14);
+  } finally { close(); }
+}, 20_000);
+
+test("scrolling moves the text one row at a time while blocks above the viewport are created with their real heights", async () => {
+  // Word wrapping breaks these lines into more rows than an estimate by characters expects, so each block above the
+  // viewport is taller than assumed until it is created.
+  const words = Array.from({ length: 6 }, (_, word) => `${word}`.padEnd(30, "w")).join(" ");
+  const file = (index: number) => `diff --git a/f${index}.txt b/f${index}.txt\n--- a/f${index}.txt\n+++ b/f${index}.txt\n@@ -0,0 +1,4 @@\n`
+    + Array.from({ length: 4 }, (_, line) => `+${index}:${line} ${words}\n`).join("");
+  const { screen, box, close } = await scrolled(Array.from({ length: 120 }, (_, index) => file(index)).join(""), { width: 50, height: 16 });
+  try {
+    const estimated = box.scrollHeight;
+    box.scrollTo(box.scrollHeight);
+    await screen.renderOnce();
+    await screen.renderOnce();
+    let before = visible(screen);
+    for (let step = 0; step < 80; step++) {
+      box.scrollBy(-1);
+      await screen.renderOnce();
+      const after = visible(screen);
+      expect(after.slice(1, 15)).toEqual(before.slice(0, 14));
+      before = after;
+    }
+    // The blocks created on the way up were taller than estimated.
+    expect(box.scrollHeight).toBeGreaterThan(estimated);
+  } finally { close(); }
+}, 30_000);
+
+test("a reload keeps the scroll position and updates a hunk in view in place", async () => {
+  const files = Array.from({ length: 200 }, (_, index) => plainFile(index, 10));
+  const { screen, box, preview, close } = await scrolled(files.join(""));
+  try {
+    box.scrollTo(100 * 14 + 4);
+    await screen.renderOnce();
+    const frame = screen.captureCharFrame();
+    expect(frame).toContain("+ file 100 line 0");
+    const diff = preview.getRenderable("window-100-diff-0");
+    expect(diff).toBeInstanceOf(DiffRenderable);
+
+    // What followPreview does: set the text, wait a frame, then restore the old position.
+    const top = box.scrollTop;
+    preview.content = files.join("");
+    await screen.renderOnce();
+    box.scrollTo(top);
+    await screen.renderOnce();
+    expect(screen.captureCharFrame()).toBe(frame);
+    expect(preview.getRenderable("window-100-diff-0")).toBe(diff);
+
+    preview.content = files.join("").replace("+file 100 line 2\n", "+file 100 line two\n");
+    expect(preview.getRenderable("window-100-diff-0")).toBe(diff);
+    await screen.renderOnce();
+    box.scrollTo(top);
+    await screen.renderOnce();
+    expect(screen.captureCharFrame()).toContain("+ file 100 line two");
+    expect(box.scrollHeight).toBe(200 * 14);
+  } finally { close(); }
+}, 20_000);
+
+test("the window follows the preview when content above it in the scroll box changes height", async () => {
+  // The overlay puts a tree comparison above its preview; hiding it moves the preview up after the window was chosen.
+  const screen = await createTestRenderer({ width: 80, height: 20 });
+  const box = new ScrollBoxRenderable(screen.renderer, { id: "overlay", width: "100%", height: "100%", scrollY: true, contentOptions: { width: "100%", minHeight: 0 } });
+  const above = new BoxRenderable(screen.renderer, { id: "trees", height: 200, flexShrink: 0 });
+  const preview = new ChangePreview(screen.renderer, "moved", Array.from({ length: 30 }, (_, index) => plainFile(index, 10)).join(""));
+  box.add(above);
+  box.add(preview);
+  screen.renderer.root.add(box);
+  try {
+    await screen.renderOnce();
+    box.scrollTo(200);
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).toContain("+++ b/file0.txt");
+    above.height = 0;
+    box.scrollTo(0);
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).toContain("+++ b/file0.txt");
+  } finally { box.destroyRecursively(); screen.renderer.destroy(); }
+});
+
+test("hunks created while scrolling are as tall as the rows they draw, whatever the width", async () => {
+  // Wrapped lines of many lengths: opentui lays a diff's code out a column wider than it measures it at, unless the
+  // preview fixes its width, and the hunk then ends in blank rows.
+  const line = (index: number) => Array.from({ length: 3 + (index * 7) % 23 }, (_, word) => `w${(index * 31 + word) % 97}`).join(" ");
+  const file = (index: number) => `diff --git a/f${index}.rs b/f${index}.rs\n--- a/f${index}.rs\n+++ b/f${index}.rs\n@@ -${index * 300 + 1},80 +${index * 300 + 1},80 @@\n`
+    + Array.from({ length: 120 }, (_, row) => `${"+- "[row % 3]}${line(index * 120 + row)}\n`).join("");
+  const text = Array.from({ length: 12 }, (_, index) => file(index)).join("");
+  for (const width of [72, 81, 88, 97]) {
+    const { screen, box, close } = await scrolled(text, { width, height: 30 });
+    try {
+      for (let step = 0; step < 60; step++) {
+        box.scrollBy(step < 30 ? 27 : -27);
+        await screen.renderOnce();
+        // Every row of a diff starts with a line number or continues a wrapped line; none of them is empty.
+        const blank = visible(screen).slice(0, 30).findIndex(row => !row.trim());
+        if (blank >= 0 && box.scrollTop + 30 < box.scrollHeight) throw new Error(`blank row ${blank} at width ${width}, scroll ${box.scrollTop}\n${screen.captureCharFrame()}`);
+      }
+    } finally { close(); }
+  }
+}, 60_000);
