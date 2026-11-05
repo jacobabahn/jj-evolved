@@ -142,3 +142,69 @@ test("hunks past the highlight limits keep diff colours, lose syntax colours and
     preview.destroyRecursively(); screen.renderer.destroy();
   }
 }, 20_000);
+
+const addedFile = (name: string, count: number) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -0,0 +1,${count} @@\n`
+  + Array.from({ length: count }, (_, index) => `+export const value${index} = ${index};\n`).join("");
+const hunkHeaders = (preview: ChangePreview) =>
+  preview.getChildren().filter(child => /-hunk-\d+$/.test(child.id)).map(child => child instanceof TextRenderable ? child.plainText : "");
+const highlighted = async (diff: DiffRenderable) => {
+  const code = diff.findDescendantById(`${diff.id}-left-code`);
+  if (!(code instanceof CodeRenderable)) throw new Error("Missing highlighted code");
+  await code.highlightingDone;
+  return code.getLineHighlights(0).length > 0;
+};
+
+test("files whose language has no parser neither spend the highlight budget nor say they were skipped", async () => {
+  const screen = await createTestRenderer({ width: 100, height: 40 });
+  const saved = { ...highlightLimits };
+  // Patches are 277 (10 lines) and 557 (20) characters. lock.json is over the budget alone and vendor.py would leave too
+  // little for app.ts, but neither has a parser, so app.ts gets the whole budget.
+  Object.assign(highlightLimits, { totalChars: 500 });
+  const preview = new ChangePreview(screen.renderer, "no-parser", `${addedFile("lock.json", 20)}${addedFile("vendor.py", 10)}${addedFile("app.ts", 10)}`);
+  screen.renderer.root.add(preview);
+  try {
+    await screen.renderOnce();
+    const diffs = preview.getChildren().filter(child => child instanceof DiffRenderable);
+    expect(diffs.map(diff => diff.filetype)).toEqual([undefined, undefined, "typescript"]);
+    expect(hunkHeaders(preview)).toEqual(["@@ -0,0 +1,20 @@", "@@ -0,0 +1,10 @@", "@@ -0,0 +1,10 @@"]);
+    expect(await highlighted(diffs[2]!)).toBe(true);
+  } finally {
+    Object.assign(highlightLimits, saved);
+    preview.destroyRecursively(); screen.renderer.destroy();
+  }
+}, 20_000);
+
+test("a refresh highlights a hunk that now fits the budget and skips one that no longer does", async () => {
+  const screen = await createTestRenderer({ width: 100, height: 40 });
+  const saved = { ...highlightLimits };
+  // Two 277-character patches exceed 500 together, unless the first is a file with no parser.
+  Object.assign(highlightLimits, { totalChars: 500 });
+  const over = `${addedFile("first.ts", 10)}${addedFile("app.ts", 10)}`;
+  const fits = `${addedFile("first.json", 10)}${addedFile("app.ts", 10)}`;
+  const preview = new ChangePreview(screen.renderer, "refresh", over);
+  screen.renderer.root.add(preview);
+  const app = () => preview.getChildren().filter(child => child instanceof DiffRenderable)[1]!;
+  try {
+    await screen.renderOnce();
+    expect(app().filetype).toBeUndefined();
+    expect(hunkHeaders(preview)[1]).toBe("@@ -0,0 +1,10 @@  (diff too large to highlight)");
+
+    preview.content = fits;
+    await screen.renderOnce();
+    expect(app().filetype).toBe("typescript");
+    expect(hunkHeaders(preview)[1]).toBe("@@ -0,0 +1,10 @@");
+    expect(await highlighted(app())).toBe(true);
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).not.toContain("too large to highlight");
+
+    preview.content = over;
+    await screen.renderOnce();
+    expect(app().filetype).toBeUndefined();
+    expect(hunkHeaders(preview)[1]).toBe("@@ -0,0 +1,10 @@  (diff too large to highlight)");
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).toContain("too large to highlight");
+  } finally {
+    Object.assign(highlightLimits, saved);
+    preview.destroyRecursively(); screen.renderer.destroy();
+  }
+}, 20_000);

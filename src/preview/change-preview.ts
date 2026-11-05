@@ -10,6 +10,10 @@ const signatures = new WeakMap<Renderable, string>();
 // however the text is split into hunks: a 12 MB diff across 400 files froze the app for about 19 seconds. The budget caps that
 // stall near 300 ms. Past it a hunk keeps its diff colours but not syntax colours.
 export const highlightLimits = { totalChars: 128_000 };
+// opentui bundles tree-sitter parsers only for these filetypes (defaultParserDescriptors in @opentui/core, with the react
+// variants as aliases) and exports no way to ask. pathToFiletype names many more, but those are never highlighted, so they
+// get no filetype: they would spend the budget on colours that never come, and each would cost a worker round trip.
+export const parserFiletypes: ReadonlySet<string> = new Set(["javascript", "javascriptreact", "typescript", "typescriptreact", "markdown", "markdown_inline", "zig"]);
 const styledSignature = (text: StyledText) => JSON.stringify(text.chunks.map(chunk => [chunk.text, chunk.fg?.toInts(), chunk.bg?.toInts(), chunk.attributes]));
 
 export class ChangePreview extends BoxRenderable {
@@ -88,7 +92,8 @@ export class ChangePreview extends BoxRenderable {
         const trailing = end < 0 ? "" : lines.slice(end).join("\n").trim();
         // Hunks are budgeted in document order, so what the user reads first keeps its colours. A hunk that does not fit what is
         // left is skipped, and smaller hunks after it can still be highlighted.
-        const grammar = pathToFiletype(path ?? "");
+        const detected = pathToFiletype(path ?? "");
+        const grammar = detected && parserFiletypes.has(detected) ? detected : undefined;
         const skipped = !!grammar && highlightedChars + patch.length > highlightLimits.totalChars;
         const filetype = skipped ? undefined : grammar;
         if (filetype) highlightedChars += patch.length;
