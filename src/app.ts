@@ -22,7 +22,7 @@ import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { isRealRemote, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
 
-type Choice = { name: string; description: string; choose: () => void; preview?: () => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
+type Choice = { name: string; description: string; choose: () => void; preview?: (signal: AbortSignal) => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
 /** One extra key a review offers besides apply, such as also deleting a bookmark on its remote. */
 type ReviewOption = { key: string; hint: string; choose: () => void };
 /** What follows a review once it has been applied: it may open the next review, or return a note for the message line. */
@@ -413,7 +413,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (!revision) { show(`No revisions match this revset. Press ${bindingLabel("filter")} to change it.`, "No revisions"); return; }
     const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\n${bindingLabel("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
-      prefix: metadata, read: () => repository.diff(revision), empty: "Empty change. No file differences.",
+      prefix: metadata, read: signal => repository.diff(revision, [], { signal }), empty: "Empty change. No file differences.",
       cached: repository.cachedDiff(revision), delay: debounce, key: `change ${revision.changeId}` });
   }
   function errorText(error: unknown) { return terminalText(error instanceof Error ? error.message : String(error)); }
@@ -650,7 +650,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       pick(`Choose ${direction}`, targets.map(item => ({
         name: `${shortChangeId(item)} ${item.description.split("\n")[0] || "(no description)"}`,
         description: `${item.commitId.slice(0, 12)} ${ids.has(item.commitId) ? "" : "+ outside filter"}`,
-        preview: async () => `${item.description}\n\n${await repository.diff(item)}`,
+        preview: async signal => `${item.description}\n\n${await repository.diff(item, [], { signal })}`,
         choose: () => { closePrompt(); void run("Navigating…", () => navigate(item), true); },
       })));
     }, true);
@@ -1085,7 +1085,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         name: `${item.changeId.slice(0, 8)} ${item.description.split("\n")[0] || "(no description)"}`,
         description: `${item.commitId.slice(0, 12)} ${item.bookmarks}`,
         choose: () => { pickerSearch?.dispose(); pickerSearch = null; accept(item); },
-        preview: () => repository.diff(item),
+        preview: signal => repository.diff(item, [], { signal }),
       }));
       pick(title, choices(revisions), { attach: () => {
         pickerSearch = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, matches => {
@@ -1114,7 +1114,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           } },
           ...files.map(file => ({ name: `${chosen.has(file.path) ? "[x]" : "[ ]"} ${file.path}`, description: file.status,
             choose: () => { const index = chooser.getSelectedIndex(); chosen.has(file.path) ? chosen.delete(file.path) : chosen.add(file.path); renderFiles(true); chooser.setSelectedIndex(index); },
-            preview: () => repository.diff(revision, [file.path]),
+            preview: (signal: AbortSignal) => repository.diff(revision, [file.path], { signal }),
           })),
         ], { replace });
       }
@@ -1182,7 +1182,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const file = fileList.selectedFile;
     if (!file) return;
     ++previewNavigation;
-    await previews.load({ target: "main", title: fileTitle(file.path), loading: "Loading diff…", read: () => repository.diff(revision, [file.path]), empty: `No differences in ${file.path}.`, key: `file ${revision.changeId} ${file.path}` });
+    await previews.load({ target: "main", title: fileTitle(file.path), loading: "Loading diff…", read: signal => repository.diff(revision, [file.path], { signal }), empty: `No differences in ${file.path}.`, key: `file ${revision.changeId} ${file.path}` });
   }
   function closeFiles() {
     if (prompt.kind !== "files") return;

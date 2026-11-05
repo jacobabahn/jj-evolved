@@ -110,3 +110,20 @@ test("reloading the key on screen keeps its text and scroll until the new text a
   expect(frames.at(-2)?.text).toBe("Loading…");
   expect(frames.at(-1)?.keepScroll).toBeUndefined();
 });
+
+test("a read's signal aborts when the preview moves on, and not before", async () => {
+  const { session } = fixture();
+  const signals: AbortSignal[] = [];
+  const gate = Promise.withResolvers<string>();
+  const load = () => session.load({ target: "main", title: "Diff", loading: "Loading…", read: signal => { signals.push(signal); return gate.promise; } });
+  const first = load();
+  expect(signals[0]?.aborted).toBe(false);
+  const second = load();
+  expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+  session.show({ target: "overlay", title: "Help", text: "Help" });
+  expect(signals[1]?.aborted).toBe(true);
+  gate.resolve("done");
+  await Promise.all([first, second]);
+  await session.load({ target: "main", title: "Diff", loading: "Loading…", read: async signal => { signals.push(signal); return "current"; } });
+  expect(signals[2]?.aborted).toBe(false);
+});

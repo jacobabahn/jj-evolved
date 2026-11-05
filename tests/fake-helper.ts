@@ -1,6 +1,7 @@
 // Speaks native/PROTOCOL.md and misbehaves on request, so the client can be tested without native/ being built.
-// FAKE_HELPER_START picks how it starts. A `log` request's revset picks how it answers: see `answer`. Any other kind
-// answers with its own name, and FAKE_HELPER_REFUSE turns every request down. Everything it does is appended to FAKE_HELPER_LOG as JSON lines.
+// FAKE_HELPER_START picks how it starts. A `log` request's revset picks how it answers: see `answer`, and so does a
+// `diff` request's commit ID when it holds a colon or is `hang`. Any other request answers with its own kind, and
+// FAKE_HELPER_REFUSE turns every request down. Everything it does is appended to FAKE_HELPER_LOG as JSON lines.
 import { appendFileSync, existsSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 
 const logPath = process.env.FAKE_HELPER_LOG!;
@@ -34,11 +35,11 @@ function reply(id: number, payload: string | Uint8Array) {
   write(bytes);
 }
 
-async function answer(id: number, kind: string, revset: string) {
+async function answer(id: number, kind: string, script: string | undefined) {
   if (process.env.FAKE_HELPER_REFUSE) { write(`${JSON.stringify({ id, ok: false, error: "refused", len: 0 })}\n`); return; }
-  const [command = "", ...rest] = revset.split(":");
+  const [command = "", ...rest] = (script ?? "").split(":");
   const text = rest.join(":");
-  switch (kind === "log" ? command : "other") {
+  switch (script === undefined ? "other" : command) {
     case "other": reply(id, kind); return;
     case "echo": reply(id, text); return;
     case "slow": await Bun.sleep(Number(rest[0])); reply(id, rest.slice(1).join(":")); return;
@@ -63,7 +64,7 @@ async function answer(id: number, kind: string, revset: string) {
       for (const byte of bytes) { write(new Uint8Array([byte])); await Bun.sleep(1); }
       return;
     }
-    default: throw new Error(`Unknown fake request ${revset}`);
+    default: throw new Error(`Unknown fake request ${script}`);
   }
 }
 
@@ -88,7 +89,9 @@ for await (const chunk of Bun.stdin.stream()) {
     buffered = buffered.slice(newline + 1);
     const request = JSON.parse(line);
     appendFileSync(logPath, `${JSON.stringify({ pid: process.pid, request })}\n`);
-    await answer(request.id, request.kind, request.revset ?? "");
+    const scripted = request.kind === "log" ? request.revset
+      : request.kind === "diff" && (request.commitId.includes(":") || request.commitId === "hang") ? request.commitId : undefined;
+    await answer(request.id, request.kind, scripted);
     appendFileSync(logPath, `${JSON.stringify({ pid: process.pid, done: request.id })}\n`);
   }
 }
