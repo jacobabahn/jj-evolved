@@ -58,11 +58,13 @@ let spawnId = 0;
 
 const { CliRenderer, RootRenderable, CodeRenderable } = await import(`${APP}/node_modules/@opentui/core/index.bun.js`);
 // Tree-sitter runs in a worker and applies its result on the main thread later, often well after the last frame, so each
-// highlight is a span too and settle waits for it. A highlight with no filetype returns at once and is not counted.
+// highlight is a span too and settle waits for it. A filetype without a parser never gets highlights, so like no filetype
+// it is not counted; the preview's list of parsers decides.
+const { parserFiletypes } = await import(`${APP}/src/preview/change-preview.ts`);
 let highlightId = 0;
 const startHighlight = CodeRenderable.prototype.startHighlight;
 CodeRenderable.prototype.startHighlight = async function (...args: unknown[]) {
-  if (!this._filetype) return startHighlight.apply(this, args);
+  if (!this._filetype || !parserFiletypes.has(this._filetype)) return startHighlight.apply(this, args);
   const id = ++highlightId;
   emit({ k: "hlStart", id, t: Date.now(), chars: this._content.length });
   try { return await startHighlight.apply(this, args); }
