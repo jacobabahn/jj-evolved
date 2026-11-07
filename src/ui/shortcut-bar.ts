@@ -9,11 +9,16 @@ const gap = "  ";
 const width = ([keys, label]: Shortcut) => keys.length + 1 + label.length;
 const span = (items: Shortcut[]) => items.reduce((total, item, index) => total + width(item) + (index ? gap.length : 0), 0);
 
-// Pairs of punctuation keys read badly with a slash (`'/"`), so they are separated by a space instead;
-// every other pair, ctrl keys included, is joined with a slash (`^D/^U`, `Esc/?`).
-export function keyPair(first: string, second: string) {
+// Keys read badly with a slash between punctuation (`'/"`), so all-punctuation keys are separated by a space;
+// other keys, ctrl keys included, are joined with a slash (`^D/^U`, `Esc/?`). A label that already lists several
+// keys (`j/down`) is spaced apart from the next with ` / `. The footer and help both write keys this way.
+export function joinKeys(keys: string[]) {
   const punctuation = (key: string) => /^[^a-z0-9]$/i.test(key);
-  return punctuation(first) && punctuation(second) ? `${first} ${second}` : `${first}/${second}`;
+  if (keys.some(key => key.length > 1 && key.includes("/"))) return keys.join(" / ");
+  return keys.join(keys.every(punctuation) ? " " : "/");
+}
+export function keyPair(first: string, second: string) {
+  return joinKeys([first, second]);
 }
 
 export function shortcutBar(lines: ShortcutLine[], columns: number, colors: Theme): StyledText {

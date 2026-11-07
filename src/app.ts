@@ -14,7 +14,7 @@ import {
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
-import { keyPair, shortcutBar, type Shortcut, type ShortcutLine } from "./ui/shortcut-bar";
+import { joinKeys, keyPair, shortcutBar, type Shortcut, type ShortcutLine } from "./ui/shortcut-bar";
 import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
 import { FileList } from "./revisions/file-list";
@@ -48,11 +48,6 @@ type Prompt =
 
 
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
-// Help writes single keys as the footer does (`PgDn/PgUp`, `^D/^U`). Labels that already hold a slash (`j/down`)
-// or are punctuation (`@`, `[`) are spaced apart instead, so each action's keys stay readable.
-function joinKeys(labels: string[]) {
-  return labels.some(label => label.includes("/") || /^[^a-z0-9]$/i.test(label)) ? labels.join(" / ") : labels.join("/");
-}
 function helpSections(bindings: Keybindings): { title: string; rows: [string, string][] }[] {
   const keys = (actions: Action[]) => actions.some(action => bindings[action].length)
     ? joinKeys(actions.filter(action => bindings[action].length).map(action => keyLabel(bindings, action)))
