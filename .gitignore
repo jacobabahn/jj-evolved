@@ -39,3 +39,6 @@ artifacts/compare/
 
 # rust
 native/target/
+
+# python
+__pycache__/

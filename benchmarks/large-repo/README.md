@@ -3,10 +3,11 @@
 Measures jj-evolved on large repositories: the real app in tmux with real keystrokes, timed from outside the product
 code. Nothing here is imported by `src/`. Files carry `// @ts-nocheck` because `tsconfig.json` has no `include`.
 
-Setup: a work directory outside the repo, with its path in `/tmp/jj-bench-path`, holding `app-ab/` (a copy of the app with
-`node_modules`), `helper-bin/jj-evolved-helper` (stripped release build), `repos/`, `results/targets.json`, `results-ab/`,
-`scripts-ab/` (these files), `xdg/`, `tmp/` and `jj-config.toml`. `gen.py <work>` makes the synthetic repos; real repos
-come from `jj git clone`.
+Setup: a work directory outside the repo, with its path in `/tmp/jj-bench-path`, holding `app-ab/` (a copy of the app
+with `node_modules`), `helper-bin/jj-evolved-helper` (stripped release build), `repos/`, `results/targets.json`,
+`results-ab/`, `scripts-ab/` (these files), `xdg/`, `tmp/` and `jj-config.toml`. `gen.py <work>` makes the synthetic
+repos, with their Git refs packed as a real clone has them; real repos come from `jj git clone`. A work directory made
+before refs were packed needs `git pack-refs --all` in each colocated repo, or its snapshot times are not comparable.
 
 Run `queue-ab.ts` from `scripts-ab/`: every target runs with the helper off and on, alternating which goes first. Then
 `ab-report.py` tabulates `results-ab/flows.jsonl`.
