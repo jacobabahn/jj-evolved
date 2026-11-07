@@ -10,7 +10,7 @@ import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
 import { ChangePreview } from "./preview/change-preview";
 import {
   BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable, StyledText,
-  TextRenderable, TextareaRenderable, bg, fg, type CliRenderer, type KeyEvent, type TerminalColors,
+  TextRenderable, TextareaRenderable, bg, fg, type BorderSides, type CliRenderer, type KeyEvent, type TerminalColors,
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
 import { ActionOverlay } from "./ui/action-overlay";
@@ -169,7 +169,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const fileList = new FileList(renderer);
   // The revisions pane draws the shared divider. A focused preview draws its own left edge over it, one column to the
   // left so its content stays put, and so the divider follows focus.
-  const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: ["top", "right", "bottom"], customBorderChars: { ...BorderChars.single, topLeft: "┬", bottomLeft: "┴" }, borderColor: colors.border, focusedBorderColor: colors.accent, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
+  const previewSides: BorderSides[] = ["top", "right", "bottom"];
+  const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: previewSides, customBorderChars: { ...BorderChars.single, topLeft: "┬", bottomLeft: "┴" }, borderColor: colors.border, focusedBorderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
   const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", ...fieldColors(colors), placeholderColor: colors.muted });
@@ -307,9 +308,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function paintPanes() {
     listBox.borderColor = prompt.kind === "inline" || prompt.kind === "bookmark" ? colors.mode : focus === "list" ? colors.accent : colors.border;
-    preview.borderColor = focus === "preview" ? colors.accent : colors.border;
-    preview.focusedBorderColor = colors.accent;
-    preview.border = focus === "preview" ? true : ["top", "right", "bottom"];
+    // The app's focus decides the colour, not OpenTUI's: a click focuses the preview without moving keyboard focus.
+    preview.borderColor = preview.focusedBorderColor = focus === "preview" ? colors.accent : colors.border;
+    preview.border = focus === "preview" ? true : previewSides;
     preview.marginLeft = focus === "preview" ? -1 : 0;
     setPreviewTitle(previewTitle);
     paintShortcuts();
