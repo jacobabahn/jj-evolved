@@ -634,7 +634,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await t.until("Keep original description");
     t.choose("Edit second description");
     await t.until("Enter apply");
-    expect(t.screen.renderer.root.findDescendantById("prompt-label")?.visible).toBe(true);
+    expect(String((t.screen.renderer.root.findDescendantById("action-overlay") as import("@opentui/core").BoxRenderable).title).trim()).toBe("Second change description");
     expect(t.screen.captureCharFrame()).toContain("Second change description");
     await t.prompt("Second group", true);
     await t.until("Review before applying");

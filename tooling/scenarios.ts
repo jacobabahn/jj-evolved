@@ -33,7 +33,7 @@ export const scenarios: Scenario[] = [
       await ui.capture("Rebase mode labels and colors the destination pane");
       ui.key("j"); ui.key("j"); ui.key("RETURN");
       await ui.until("Rebase preview");
-      assert.equal(ui.screen.renderer.root.findDescendantById("prompt-label")?.visible, false);
+      assert.equal(ui.screen.renderer.root.findDescendantById("prompt-input")?.visible, false);
       await ui.capture("Operation review keeps source context with less chrome");
       ui.key("ESCAPE"); await ui.until("Rebase: choose destination");
       ui.key("ESCAPE"); await ui.until("Cancelled.");

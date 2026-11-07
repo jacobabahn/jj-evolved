@@ -11,7 +11,7 @@ test("inline mode restores its pane, confirmation removes duplicate chrome, and 
   expect(graph.borderColor).not.toEqual(border);
   ui.key("j"); ui.key("j"); ui.key("RETURN");
   await ui.until("Rebase preview");
-  expect(ui.screen.renderer.root.findDescendantById("prompt-label")?.visible).toBe(false);
+  expect(ui.screen.renderer.root.findDescendantById("prompt-input")?.visible).toBe(false);
   expect(ui.screen.renderer.root.findDescendantById("action-overlay-feedback")?.visible).toBe(false);
   expect(ui.screen.captureCharFrame()).not.toContain("Ready.");
   ui.key("ESCAPE");

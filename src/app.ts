@@ -167,8 +167,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const previewSides: BorderSides[] = ["top", "right", "bottom"];
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: previewSides, customBorderChars: { ...BorderChars.single, topLeft: "┬", bottomLeft: "┴" }, borderColor: colors.border, focusedBorderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
-  const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
-  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, ...fieldColors(colors), placeholderColor: colors.muted });
+  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, marginTop: 1, ...fieldColors(colors), placeholderColor: colors.muted });
   const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
@@ -188,7 +187,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlayPreview.add(comparison);
   overlayPreview.add(overlayText);
   overlayPreview.add(helpBox);
-  overlay.fields.add(promptLabel);
   overlay.fields.add(input);
   overlay.body.add(descriptionInput);
   const suggestions = new TextRenderable(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text, wrapMode: "none", truncate: true });
@@ -810,7 +808,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     list.collapse();
     listBox.title = " Revisions ";
     input.visible = false;
-    promptLabel.visible = false;
     setFocus(focus);
     scheduleFocusRefresh();
   }
@@ -830,8 +827,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
     if (next.kind === "text") overlay.keys = { left: [["Enter", "apply"]], right: [exit("cancel")] };
-    promptLabel.content = terminalText(label);
-    promptLabel.visible = next.kind !== "confirm";
     input.placeholder = "";
     input.value = terminalText(value);
     descriptionInput.visible = next.kind === "describe";
@@ -840,6 +835,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (next.kind === "describe") {
       overlay.place("65%");
       overlay.body.marginBottom = 0;
+      // The editor below holds the description, so the context names only the change.
+      overlay.context.content = highlightJjText(`Source ${shortChangeId(next.revision)} / ${next.revision.commitId.slice(0, 12)}`, revisionPrefixes([next.revision]), colors);
       descriptionInput.setText(terminalText(value));
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
@@ -977,7 +974,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const themed: [object[], (colors: Theme) => object][] = [
       [[app], c => ({ backgroundColor: c.bg })],
       [[suggestions], c => ({ fg: c.text })],
-      [[header, navigationStatus, searchStatus, promptLabel, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
+      [[header, navigationStatus, searchStatus, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
       [[filter, message], c => ({ fg: c.muted })],
       [[listBox], c => ({ backgroundColor: c.panel })],
       [[overlayPreview], c => ({ borderColor: c.border })],
@@ -1010,7 +1007,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     activateOverlay("Theme", false);
     prompt = { kind: "theme", original };
     input.blur();
-    input.visible = promptLabel.visible = false;
+    input.visible = false;
     chooser.visible = true;
     chooser.showDescription = false;
     chooser.options = themeNames.map(name => ({
@@ -1073,7 +1070,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     activateOverlay(title);
     input.blur();
     input.visible = false;
-    promptLabel.visible = false;
     prompt = { kind: "picker", title, all: choices, choices, attach: options.attach };
     chooser.visible = true;
     chooser.showDescription = true;
@@ -1571,7 +1567,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     activateOverlay(`Help · keys: ${presetLabel}`, false);
     prompt = { kind: "help" };
     input.blur();
-    input.visible = promptLabel.visible = chooser.visible = false;
+    input.visible = chooser.visible = false;
     comparison.setTrees(null);
     overlayText.visible = false;
     buildHelp();
