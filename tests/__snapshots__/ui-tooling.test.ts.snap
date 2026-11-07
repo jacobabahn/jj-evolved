@@ -210,7 +210,7 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 ││?                Show this help                               │
 ││^E               Show the last error in full; Esc or d        │
 ││                 returns to the diff                          │
-││q / ^C           Quit                                         │
+││q/^C             Quit                                         │
 ││                                                              │
 ││Preview pane                                                  │
 ││                                                              │
@@ -447,13 +447,13 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 ││^R               Refresh history now; external changes also refresh automatically              ││
 ││?                Show this help                                                                ││
 ││^E               Show the last error in full; Esc or d returns to the diff                     ││
-││q / ^C           Quit                                                                          ││
+││q/^C             Quit                                                                          ││
 ││                                                                                               ││
 ││Preview pane                                                                                   ││
 ││p                Hide or show the preview; the graph expands when hidden                       ││
-││PgDn / PgUp      Scroll the preview by page                                                    ││
-││^N / ^P          Scroll the preview by line, keeping graph focus                               ││
-││^D / ^U          Scroll the preview by half page                                               ││
+││PgDn/PgUp        Scroll the preview by page                                                    ││
+││^N/^P            Scroll the preview by line, keeping graph focus                               ││
+││^D/^U            Scroll the preview by half page                                               ││
 ││d                Show the selected revision's diff                                             ││
 ││l/Right          Expand changed files under the revision; j/k file, Enter focus diff, h/Left/  ││
 ││                                                                                               ││
