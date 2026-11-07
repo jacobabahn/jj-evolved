@@ -11,6 +11,8 @@ export class ActionOverlay extends BoxRenderable {
   readonly body: BoxRenderable;
   // The overlay's keys are shown in the app footer rather than inside the overlay.
   onKeys?: () => void;
+  /** Called when the overlay opens or closes, so the screen behind it can be dimmed. */
+  onVisibility?: (visible: boolean) => void;
   private shortcuts: ShortcutLine = { left: [] };
   private rows: number | `${number}%` = "84%";
 
@@ -27,6 +29,13 @@ export class ActionOverlay extends BoxRenderable {
     for (const child of [this.context, this.fields, this.feedback, this.body]) this.add(child);
     this.place(this.rows);
     ctx.on("resize", () => this.place(this.rows));
+  }
+
+  override get visible() { return super.visible; }
+  override set visible(value: boolean) {
+    const changed = value !== super.visible;
+    super.visible = value;
+    if (changed) this.onVisibility?.(value);
   }
 
   /**

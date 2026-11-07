@@ -204,6 +204,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   body.add(listBox);
   body.add(preview);
   for (const child of [header, filter, message, navigationStatus, searchInput, searchStatus, inlineHint, body, shortcuts, overlay]) app.add(child);
+  // Dim everything behind an open overlay except the footer, which shows the overlay's keys.
+  overlay.onVisibility = visible => {
+    for (const child of [header, filter, message, navigationStatus, searchInput, searchStatus, inlineHint, body]) child.opacity = visible ? 0.35 : 1;
+  };
   renderer.root.add(app);
 
   let resultTimer: ReturnType<typeof setTimeout> | undefined;
