@@ -172,7 +172,57 @@ Keys are case-sensitive printable ASCII characters (`"r"` and `"R"` differ),
 `pageup`, `pagedown`, `home`, `end`, `space`, `escape`, `return`, `f1`–`f12`.
 Use named keys for terminal aliases: `ctrl+i`, `ctrl+j`, `ctrl+m`, and `ctrl+h`
 are rejected. `ctrl+z` is reserved by the terminal and `ctrl+c` always quits.
-Alt/Meta combinations and key sequences are not supported.
+Alt/Meta combinations are not supported.
+
+### Key sequences
+
+A binding can be up to three keys separated by single spaces, pressed one after
+another: `"theme": ["z t"]` or `"saveDescription": ["ctrl+x ctrl+s"]`. After the
+first key nothing runs; the footer shows the keys typed so far and every key that
+can follow, with the action each one runs. A key that finishes no sequence is
+dropped together with the keys before it, and the message line says, for example,
+`z j is not bound`. Escape abandons a sequence. There is no timeout. A key cannot
+both run an action and start a sequence in the same scope: binding `"theme": ["g t"]`
+while `git` keeps `g` is an error, so move `git` to `"g g"` as well. `escape` cannot
+be part of a sequence.
+
+### Scopes
+
+Bindings in `bindings` apply wherever the action is used. Add a `scopes` object to
+change an action in one place only:
+
+```json
+{
+  "bindings": { "git": ["g g"], "theme": ["g t"] },
+  "scopes": {
+    "files": { "down": ["J"], "up": ["K"] },
+    "menu": { "back": ["ctrl+b"] },
+    "prompt": { "nextCompletion": ["tab", "ctrl+t"], "saveDescription": ["ctrl+x ctrl+s"] }
+  }
+}
+```
+
+| Scope | Where | Actions |
+| --- | --- | --- |
+| `revisions` | Browsing the revision list and the preview beside it | every browse action in the table below |
+| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `help`, `quit` |
+| `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `loadMore`, `togglePreview` |
+| `menu` | Action menus, pickers, the theme chooser, help, and the rebase and squash form | `down`, `up`, `back`, `help` |
+| `prompt` | The revset prompt, bookmark names, the description editor and quick inputs | `nextCompletion`, `previousCompletion`, `saveDescription` |
+
+Conflicts are checked within each scope, so one key can do different things in
+different scopes: by default `Ctrl+N` scrolls the preview while browsing and picks
+the next revset suggestion in a prompt. An action named in a scope where it does not
+apply, or an unknown scope, is an error. Some keys stay fixed in every scope: arrow
+keys always move, Enter chooses or submits, Escape goes back or cancels, PgDn/PgUp
+scroll an overlay's preview, and Shift-Tab picks the previous suggestion. Enter and
+Escape cannot be bound in menus. In `prompt`, only `tab`, `f1`–`f12` and control keys
+can be bound, so every printable key still types; the editing keys `ctrl+a`, `ctrl+b`,
+`ctrl+e`, `ctrl+f`, `ctrl+k`, `ctrl+u` and `ctrl+w` are refused too. `back`'s
+defaults, `h` and Left, give way to any other action of the same scope bound to them
+(a `"help": ["h"]` binding keeps working); bound explicitly, `back` is checked like any
+other action. Text typed into a search or filter field is never matched against
+bindings, and the rebase and squash form keeps its `p` preview key.
 
 Available actions and defaults:
 
@@ -194,6 +244,9 @@ Available actions and defaults:
 | `setBookmark` | `B` | `B` |
 | `publish` | unbound | unbound |
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
+| `back` (file browser and menus) | `h`/`left` | same |
+| `nextCompletion`, `previousCompletion` (prompts) | `tab`/`ctrl+n`, `ctrl+p` | same |
+| `saveDescription` (description editor) | `ctrl+s`/`ctrl+d` | same |
 
 Unbound actions stay reachable from the Space menu, which shows the effective
 key for every item and `—` for unbound ones. `rebaseScope` toggles
@@ -202,13 +255,8 @@ there, it may share a key with a browse action that is not: the default Tab is
 also `focus`. It cannot share a key with `loadMore` or `togglePreview`, which stay
 active during destination choice. Fixed inline controls (`j`/`k`, arrows up/down, Page Up/Down, `/`, Enter, and Escape) are reserved for destination navigation and cannot be assigned to these three actions.
 
-Overrides apply while browsing, including movement in the preview pane. Inline
-destination choice honours `rebaseScope`, `loadMore`, and `togglePreview`. Prompts,
-menus, destination selection, and history forms otherwise retain their displayed
-fixed controls: `j`/`k` or arrows to choose, Enter to submit (Ctrl-S or Ctrl-D in the
-description editor, where Enter adds a line), Escape to cancel, and their existing
-field/preview controls. Text inputs retain normal editing keys; typing a
-custom browse shortcut inserts text. Ctrl-C remains available everywhere.
+Text inputs retain normal editing keys; typing a custom browse shortcut inserts
+text. Ctrl-C remains available everywhere.
 
 ## Revset completion
 

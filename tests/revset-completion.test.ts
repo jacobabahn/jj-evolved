@@ -284,9 +284,8 @@ test("arrow keys choose aliases, tags and signatures as you type; reopening offe
 test("help lists the revset completion keys in prompt notation", async () => {
   await using ui = await createUiFixture({ width: 200, height: 120 });
   ui.key("?");
-  await ui.until("In prompts");
+  await ui.until("In menus and prompts");
   const frame = ui.screen.captureCharFrame();
-  expect(frame).toMatch(/Tab\/Shift-Tab +Next \/ previous revset suggestion/);
-  expect(frame).toContain("^N/^P and arrows also work");
-  expect(frame).not.toContain("Tab / Shift-Tab");
+  expect(frame).toMatch(/Tab\/\^N \/ \^P +Next \/ previous revset suggestion/);
+  expect(frame).toContain("Shift-Tab and arrows also work");
 });

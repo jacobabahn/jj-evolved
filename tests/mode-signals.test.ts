@@ -101,7 +101,7 @@ test("the files view footer pins help and opening help keeps the files expanded"
   ui.key("l");
   await ui.until("files of");
   expect(footer(ui)).toContain("Enter focus diff  Tab focus preview");
-  expect(footer(ui)).toContain("Esc/l collapse");
+  expect(footer(ui)).toContain("Esc/h/l collapse");
   expect(footer(ui)).toMatch(/\? help  q quit\s*$/);
   ui.key("?");
   await ui.until("Help · ");
@@ -177,7 +177,7 @@ test("footers follow the legacy preset, unbound keys and the terminal width", as
     ui.choose("Browse changed files");
     await ui.until("files of");
     // With files unbound, the collapse hint keeps the key that still works.
-    expect(footer(ui)).toMatch(/^Esc collapse /m);
+    expect(footer(ui)).toMatch(/^Esc\/h collapse /m);
     await ui.resize(60, 24);
     await ui.settled();
     for (const line of footer(ui).split("\n")) expect(line.trimEnd().length).toBeLessThanOrEqual(60);
