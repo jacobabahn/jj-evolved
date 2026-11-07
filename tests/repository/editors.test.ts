@@ -83,7 +83,7 @@ for (const kind of ["describe", "resolve"] as const) {
         }
         screen.mockInput.pressKey("?");
         await screen.renderOnce();
-        expect(screen.captureCharFrame()).toContain("Keyboard reference");
+        expect(screen.captureCharFrame()).toContain("Help · ");
       } finally {
         app?.stop();
         screen.renderer.destroy();

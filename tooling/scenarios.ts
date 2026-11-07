@@ -13,7 +13,7 @@ export const scenarios: Scenario[] = [
     async run(ui) {
       await ui.until("Empty change.");
       ui.key("?");
-      await ui.until("Help · keys: jjui");
+      await ui.until("Help · jjui keys");
       await ui.capture("Help sections and active preset");
       ui.key("\x1b[6~");
       await ui.capture("One page through keyboard help");
@@ -61,12 +61,12 @@ export const scenarios: Scenario[] = [
       ui.key("p");
       assert.equal(ui.screen.renderer.root.findDescendantById("preview")?.visible, false);
       ui.key("h");
-      await ui.until("Keyboard reference");
+      await ui.until("Help · ");
       assert.equal(ui.screen.renderer.root.findDescendantById("preview")?.visible, false);
       assert(ui.screen.captureCharFrame().includes("x/down / k/up"));
       await ui.capture("Custom movement and describe shortcuts in help");
       ui.key("j");
-      await ui.until("Keyboard reference");
+      await ui.until("Help · ");
       ui.key("h");
       ui.key("P");
       ui.key("x");
@@ -250,10 +250,10 @@ export const scenarios: Scenario[] = [
       await ui.until("+ hello from jj-evolved");
       await ui.capture("Selected change and diff");
       ui.key("?");
-      await ui.until("Keyboard reference");
+      await ui.until("Help · ");
       await ui.capture("Keyboard help");
       await ui.resize(80, 24);
-      await ui.until("Keyboard reference");
+      await ui.until("Help · ");
       await ui.capture("Help at 80x24");
       await ui.scroll("overlay-preview", "down");
       await ui.capture("Scroll the narrow help overlay");

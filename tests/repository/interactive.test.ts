@@ -87,7 +87,7 @@ for (const kind of ["squash", "split"] satisfies ("squash" | "split")[]) {
       expect(await f.jj("file", "show", "-r", first, "hello.txt")).toBe(selected);
       screen.mockInput.pressKey("?");
       await screen.renderOnce();
-      expect(screen.captureCharFrame()).toContain("Keyboard reference");
+      expect(screen.captureCharFrame()).toContain("Help · ");
     } finally { app.stop(); screen.renderer.destroy(); await f.cleanup(); }
   }, 15_000);
 }
@@ -134,7 +134,7 @@ for (const mode of ["none", "fail"]) {
       expect(await Bun.file(join(f.path, "hello.txt")).text()).toBe(complete);
       screen.mockInput.pressKey("?");
       await screen.renderOnce();
-      expect(screen.captureCharFrame()).toContain("Keyboard reference");
+      expect(screen.captureCharFrame()).toContain("Help · ");
     } finally { app.stop(); screen.renderer.destroy(); await f.cleanup(); }
   }, 15_000);
 }

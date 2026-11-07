@@ -397,6 +397,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision]), colors) : "Repository actions";
     }
     overlay.title = ` ${title} `;
+    overlay.context.visible = true;
     overlay.place("84%");
     overlay.body.marginBottom = 1;
     overlayPreview.visible = true;
@@ -1560,11 +1561,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         helpBox.add(row);
       }
     });
-    helpBox.add(new TextRenderable(renderer, { id: "help-footer", content: "Commands use your installed jj and its repository rules.", fg: colors.muted, flexShrink: 0, marginTop: 1 }));
+    const source = presetLabel === "custom" ? "Keys: custom bindings from keybindings.json." : `Keys: ${presetLabel} preset.`;
+    helpBox.add(new TextRenderable(renderer, { id: "help-footer", content: terminalText(`${source} Switch: --keys ${presetNames.join("|")}, JJ_EVOLVED_KEYS, keybindings.json\nCommands use your installed jj and its repository rules.`), fg: colors.muted, flexShrink: 0, marginTop: 1 }));
   }
   function showHelp() {
     helpReturn = prompt.kind === "files" ? prompt : null;
-    activateOverlay(`Help · keys: ${presetLabel}`, false);
+    activateOverlay(`Help · ${presetLabel} keys`, false);
     prompt = { kind: "help" };
     input.blur();
     input.visible = chooser.visible = false;
@@ -1572,9 +1574,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     overlayText.visible = false;
     buildHelp();
     helpBox.visible = true;
-    overlayPreview.title = " Keyboard reference ";
+    // The border title is the only heading; the preset and how to switch it end the reference.
+    overlayPreview.title = "";
     overlayPreview.scrollTo(0);
-    overlay.context.content = terminalText(`Keyboard reference · ${presetLabel === "custom" ? "custom bindings from keybindings.json" : `${presetLabel} preset`}\nSwitch: --keys ${presetNames.join("|")}, JJ_EVOLVED_KEYS, keybindings.json`);
+    overlay.context.visible = false;
   }
   // Help over the files view returns to it; from anywhere else it closes like any prompt.
   function closeHelp() {
