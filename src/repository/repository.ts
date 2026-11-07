@@ -1,4 +1,4 @@
-import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
+import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type Resolution, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
 import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, prepareFetchAll, applyFetchAll, type NetworkScope } from "./remotes";
 import { read } from "./jj-helper";
 import { CancelledError, run } from "./jj-process";
@@ -69,6 +69,23 @@ export class Repository {
   async logRevset(): Promise<string> {
     const configured = await run(this.root, ["--ignore-working-copy", "config", "get", "revsets.log"]).catch(() => "");
     return configured.trim() || "all()";
+  }
+
+  /**
+   * Resolves a typed revision or revset through jj, as `jj log -r` would: a bookmark, tag, change or commit ID, or any
+   * expression. jj's own error, such as an unknown name, an ambiguous ID prefix or a syntax error, becomes the message.
+   */
+  async resolve(revset: string, limit = 100): Promise<Resolution> {
+    let revisions: Revision[];
+    try { revisions = await logRevisions(this.root, revset, "@", limit + 1); }
+    catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      // A syntax error is followed by a caret diagram of the expression, which does not fit the one-line message.
+      return { kind: "none", message: (text.split("\n").find(line => line.trim()) ?? "jj could not resolve this revset.").replace(/^Error: /, "") };
+    }
+    if (revisions.length === 1) return { kind: "one", revision: revisions[0]! };
+    if (!revisions.length) return { kind: "none", message: `\`${revset}\` resolves to no revisions.` };
+    return { kind: "several", count: Math.min(revisions.length, limit), more: revisions.length > limit };
   }
 
   async navigationRevisions(revset: string): Promise<Revision[]> {

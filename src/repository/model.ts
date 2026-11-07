@@ -5,6 +5,7 @@ export interface Revision {
   description: string;
   author: string;
   bookmarks: string;
+  tags: string;
   parents: string[];
   workingCopy: boolean;
   conflict: boolean;
@@ -20,6 +21,13 @@ export interface Snapshot {
   graph: GraphRow[];
   hasMore?: boolean;
 }
+
+/** What a typed revision or revset names, for a picker that needs exactly one revision. */
+export type Resolution =
+  | { kind: "one"; revision: Revision }
+  // count is a lower bound when more is true.
+  | { kind: "several"; count: number; more: boolean }
+  | { kind: "none"; message: string };
 
 export interface Remote { name: string; url: string }
 /** Local bookmarks a publish can use without asking: those on the revision, or (advance) on its nearest bookmarked ancestors. */

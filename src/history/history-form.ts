@@ -144,14 +144,16 @@ export class HistoryForm extends ActionOverlay {
       if (this.disposed || request !== this.fieldRequest) return;
       const revisions = candidates.filter(item => item.commitId !== this.source.commitId);
       this.mode = { kind: "destination", revisions };
-      const render = (matches: Revision[]) => {
+      const render = (matches: Revision[], status = `${matches.length} destinations`) => {
         this.mode = { kind: "destination", revisions: matches };
         this.choices.options = matches.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
         this.choices.setSelectedIndex(0);
-        this.report(matches.length ? `${matches.length} destinations` : "No matching destinations. Edit the search or Escape to clear it.");
+        this.report(status, !matches.length);
       };
       render(revisions);
-      this.destinationSearch = new RevisionSearch(this.ctx, "history-destination-search", this.choices, revisions, bookmarks, render);
+      this.destinationSearch = new RevisionSearch(this.ctx, "history-destination-search", this.choices, revisions, bookmarks, render,
+        query => this.repository.resolve(query), this.source);
+      this.destinationSearch.onAccept = () => this.choose();
       this.destinationSearch.onActiveChange = () => this.showChoiceKeys();
       this.fields.add(this.destinationSearch.input);
     } else if (this.draft.kind === "rebase") {

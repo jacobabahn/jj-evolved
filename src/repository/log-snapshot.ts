@@ -10,6 +10,7 @@ const REVISION_TEMPLATE = `'{'
   ++ ',"description":' ++ json(description)
   ++ ',"author":' ++ json(author.name())
   ++ ',"bookmarks":' ++ json(stringify(bookmarks))
+  ++ ',"tags":' ++ json(stringify(tags))
   ++ ',"parents":' ++ json(parents.map(|p| p.commit_id()))
   ++ ',"workingCopy":' ++ json(current_working_copy)
   ++ ',"conflict":' ++ json(conflict)
@@ -25,6 +26,7 @@ function parseRevision(value: unknown): Revision {
     !("description" in value) || typeof value.description !== "string" ||
     !("author" in value) || typeof value.author !== "string" ||
     !("bookmarks" in value) || typeof value.bookmarks !== "string" ||
+    !("tags" in value) || typeof value.tags !== "string" ||
     !("parents" in value) || !Array.isArray(value.parents) ||
     !("workingCopy" in value) || typeof value.workingCopy !== "boolean" ||
     !("conflict" in value) || typeof value.conflict !== "boolean"
@@ -39,7 +41,7 @@ function parseRevision(value: unknown): Revision {
   return {
     commitId: value.commitId, changeId: value.changeId, changePrefix: value.changePrefix,
     description: value.description, author: value.author,
-    bookmarks: value.bookmarks, parents,
+    bookmarks: value.bookmarks, tags: value.tags, parents,
     workingCopy: value.workingCopy, conflict: value.conflict,
   };
 }
