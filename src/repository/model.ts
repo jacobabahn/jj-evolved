@@ -32,6 +32,8 @@ export type RemoteMutation =
 
 export type Mutation =
   | RemoteMutation
+  // Fetches each listed remote in turn; the names and URLs are the ones the user chose from, checked again before fetching.
+  | { kind: "git-fetch-all"; remotes: Remote[] }
   | { kind: "describe"; revision: Revision; description: string }
   | { kind: "new"; parent: Revision }
   | { kind: "edit" | "abandon" | "absorb"; revision: Revision }

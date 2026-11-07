@@ -2117,3 +2117,39 @@ test("a running fetch shows Esc cancel in the footer, and Escape or quitting sto
     await t.cleanup();
   }
 }, 15_000);
+
+test("g then F fetches from every remote at once and reports each remote's bookmarks; with one remote it is not offered", async () => {
+  const t = await setup();
+  const publisher = await fixture();
+  const origin = `${t.f.path}-origin.git`, upstream = `${t.f.path}-upstream.git`;
+  try {
+    for (const path of [origin, upstream]) expect(await Bun.spawn(["git", "init", "--bare", path], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", origin);
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Fetch origin");
+    expect(t.screen.captureCharFrame()).not.toContain("Fetch all remotes");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    await t.f.jj("git", "remote", "add", "upstream", upstream);
+    await publisher.jj("git", "remote", "add", "origin", origin);
+    await publisher.jj("git", "remote", "add", "upstream", upstream);
+    await publisher.jj("bookmark", "create", "left", "-r", "@-");
+    await publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:left");
+    await publisher.jj("bookmark", "create", "right", "-r", "@-");
+    await publisher.jj("git", "push", "--remote", "upstream", "--bookmark", "exact:right");
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Fetch all remotes");
+    expect(t.screen.captureCharFrame()).toContain("Fetch from origin, upstream, one at a time");
+    t.screen.mockInput.pressKey("F");
+    await t.until("Fetched 2 remotes · 2 bookmarks changed");
+    await t.until("left@origin new, right@upstream new");
+    expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
+    const bookmarks = await t.repo.bookmarks();
+    expect(bookmarks.some(item => item.name === "left" && item.remote === "origin")).toBe(true);
+    expect(bookmarks.some(item => item.name === "right" && item.remote === "upstream")).toBe(true);
+  } finally {
+    await t.cleanup();
+    await publisher.cleanup();
+    await Bun.$`rm -rf ${origin} ${upstream}`.quiet();
+  }
+}, 15_000);

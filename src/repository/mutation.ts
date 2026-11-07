@@ -6,6 +6,8 @@ export function mutationArgs(action: Mutation): string[] {
   let args: string[];
   switch (action.kind) {
     case "git-fetch": args = ["git", "fetch", "--remote", action.remote]; break;
+    // One `jj git fetch` per remote, so a failure or cancel can say which remotes were fetched; see applyFetchAll.
+    case "git-fetch-all": throw new Error("A fetch from every remote is not a single jj command.");
     case "git-publish":
     case "git-push": args = ["git", "push", "--remote", action.remote, "--bookmark", `exact:${action.name}`]; break;
     case "bookmark-track":

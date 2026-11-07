@@ -193,6 +193,35 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "fetch-all", title: "Fetch from every configured remote",
+    async run(ui) {
+      // Each bare remote gets a bookmark of its own, pushed from the fixture before its local copy is deleted.
+      for (const [name, bookmark] of [["origin", "release"], ["upstream", "main"]] as const) {
+        const remote = `${ui.f.path}/.jj/demo-${name}.git`;
+        const git = Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "pipe" });
+        assert.equal(await git.exited, 0);
+        await ui.f.jj("git", "remote", "add", name, remote);
+        await ui.f.jj("bookmark", "create", bookmark, "-r", "feature");
+        await ui.f.jj("git", "push", "--remote", name, "--bookmark", `exact:${bookmark}`);
+        await ui.f.jj("bookmark", "forget", "--include-remotes", bookmark);
+      }
+      ui.key("g");
+      await ui.until("Fetch all remotes");
+      await ui.capture("With two or more remotes, the Git menu offers F to fetch from all of them");
+      ui.key("F");
+      await ui.until("release@origin new, main@upstream new");
+      await ui.capture("The fetch reports each changed bookmark with its remote");
+      const bookmarks = await ui.repo.bookmarks();
+      assert(bookmarks.some(item => item.name === "release" && item.remote === "origin"));
+      assert(bookmarks.some(item => item.name === "main" && item.remote === "upstream"));
+      ui.key("b");
+      await ui.until("Git remotes");
+      ui.choose("Git remotes");
+      await ui.until("Fetch all remotes");
+      await ui.capture("The remote browser lists Fetch all remotes first");
+    },
+  },
+  {
     name: "completion", title: "Revset completion, signatures and recent revsets",
     async run(ui) {
       await ui.resize(80, 24);

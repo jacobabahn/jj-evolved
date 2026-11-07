@@ -103,7 +103,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
     { title: "Bookmarks & remotes", rows: [
       [keys(["setBookmark"]), "Set a bookmark on the selected change: type a new name to create one, or Tab to an existing one to move it here"],
       [keys(["bookmarks"]), "Bookmarks with their sync state: move, rename, push, track or untrack; delete locally or also on the remote"],
-      [keys(["git"]), "Git menu: p pushes the selected change under its bookmark, advancing the nearest ancestor bookmark or asking for a name; n pushes it under another name; f fetches; s fetches, then previews rebasing the selected stack onto trunk(); r browses remotes"],
+      [keys(["git"]), "Git menu: p pushes the selected change under its bookmark, advancing the nearest ancestor bookmark or asking for a name; n pushes it under another name; f fetches; F fetches from every remote; s fetches, then previews rebasing the selected stack onto trunk(); r browses remotes"],
       ["Drag [bookmark]", "Drop a local bookmark onto another change to preview a move; Esc or dropping outside the graph cancels"],
     ] },
     { title: "Symbols", rows: [
@@ -941,6 +941,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   /** The status shown while a fetch or push runs; the footer shows the key that cancels it. */
   function networkLabel(action: Mutation): string | null {
     if (action.kind === "git-fetch") return `Fetching from ${action.remote}…`;
+    if (action.kind === "git-fetch-all") return `Fetching from ${action.remotes.map(item => item.name).join(", ")}…`;
     if (action.kind === "git-push" || action.kind === "git-publish") return `Pushing ${action.name} to ${action.remote}…`;
     if (action.kind === "bookmark-delete" && action.push && action.remote) return `Deleting ${action.name} here and on ${action.remote}…`;
     return null;
@@ -1201,7 +1202,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const remotes = await repository.remotes();
       if (stopped) return;
       if (!remotes.length) { showOverlay("No Git remotes configured. Add one with jj git remote add in your terminal.", "Remotes"); return; }
-      pick("Git remotes", remotes.map(remote => ({
+      pick("Git remotes", [...fetchAllChoice(remotes), ...remotes.map(remote => ({
         name: remote.name, description: remote.url,
         choose: () => pick(`Remote ${remote.name}`, [
           { name: "Fetch", description: "Fetch bookmarks and commits from this remote", choose: () => applyNow({ kind: "git-fetch", remote: remote.name }) },
@@ -1218,8 +1219,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             }, true);
           } },
         ]),
-      })));
+      }))]);
     }, true);
+  }
+  // With more than one remote, an entry fetches from every one of them, listed by name so the scope is explicit.
+  function fetchAllChoice(remotes: Remote[], key?: string): Choice[] {
+    if (remotes.length < 2) return [];
+    return [{ ...(key ? { key, hotkey: true } : {}), name: "Fetch all remotes", description: `Fetch from ${remotes.map(item => item.name).join(", ")}, one at a time`,
+      choose: () => applyNow({ kind: "git-fetch-all", remotes }) }];
   }
   // Acts on the default push remote, or asks which remote when there is no default.
   function eachRemote(remotes: Remote[], preferred: Remote | undefined, title: string, choose: (remote: Remote) => void) {
@@ -1294,6 +1301,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         ...(revision ? [{ key: "p", hotkey: true, ...entry, choose: () => publish(revision) }] : []),
         ...otherName,
         { key: "f", hotkey: true, name: `Fetch${to}`, description: "Fetch bookmarks and commits", choose: () => each("Fetch from remote", remote => applyNow({ kind: "git-fetch", remote: remote.name })) },
+        ...fetchAllChoice(remotes, "F"),
         ...(revision ? [{ key: "s", hotkey: true, name: "Sync with trunk", description: `Fetch${to || " from a remote"}, then preview rebasing this change's stack onto trunk()`, choose: () => sync(revision) }] : []),
         { key: "r", hotkey: true, name: "Remotes", description: "Push another bookmark or a deletion, or fetch from a chosen remote", choose: showRemotes },
       ]);
