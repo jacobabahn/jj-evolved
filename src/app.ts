@@ -168,8 +168,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: previewSides, customBorderChars: { ...BorderChars.single, topLeft: "┬", bottomLeft: "┴" }, borderColor: colors.border, focusedBorderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const promptLabel = new TextRenderable(renderer, { id: "prompt-label", height: 1, visible: false, fg: colors.accent });
-  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, width: "100%", ...fieldColors(colors), placeholderColor: colors.muted });
-  const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, width: "100%", height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
+  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, ...fieldColors(colors), placeholderColor: colors.muted });
+  const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) · + outside filter" });
@@ -395,9 +395,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision]), colors) : "Repository actions";
     }
     overlay.title = ` ${title} `;
-    overlay.height = "84%";
+    overlay.place("84%");
     overlay.body.marginBottom = 1;
-    overlay.top = "8%";
     overlayPreview.visible = true;
     overlay.visible = true;
     setMessage("");
@@ -822,8 +821,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     suggestions.visible = false;
     completed = null;
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") {
-      overlay.height = 12;
-      overlay.top = "20%";
+      overlay.place(12);
       overlayPreview.visible = false;
     }
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
@@ -836,9 +834,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     input.visible = next.kind !== "confirm" && next.kind !== "describe";
     if (!input.visible) { list.blur(); preview.blur(); } else input.focus();
     if (next.kind === "describe") {
-      overlay.height = "65%";
+      overlay.place("65%");
       overlay.body.marginBottom = 0;
-      overlay.top = "12%";
       descriptionInput.setText(terminalText(value));
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
@@ -846,7 +843,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.keys = { left: [["^S", "save"], ["Enter", "newline"]], right: [exit("cancel")] };
     }
     if (next.kind === "revset") {
-      overlay.height = 15;
+      overlay.place(15);
       overlay.keys = { left: [["Enter", "apply"], ["Tab/Shift-Tab", "complete"]], right: [exit("cancel")] };
       revsetOpened = input.value;
       updateCompletions();
