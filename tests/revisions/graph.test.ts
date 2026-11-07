@@ -91,7 +91,7 @@ test("JJ markings retain distinct colors when selected and marked as an action s
   screen.renderer.root.add(log);
   const revision = {
     changeId: "qwertyui", changePrefix: "qw", commitId: "a".repeat(40), description: "A conflicted change",
-    author: "Test User", bookmarks: "feature", parents: [], workingCopy: true, conflict: true,
+    author: "Test User", bookmarks: "feature", tags: "", parents: [], workingCopy: true, conflict: true,
   };
   try {
     log.setSnapshot({ root: "/test", revisions: [revision], graph: [
@@ -130,7 +130,7 @@ test("rebase drag highlights the source change ID until cancelled", async () => 
   screen.renderer.root.add(log);
   const source = {
     changeId: "qwertyui", changePrefix: "qw", commitId: "a".repeat(40), description: "Source",
-    author: "Test User", bookmarks: "feature", parents: [], workingCopy: false, conflict: false,
+    author: "Test User", bookmarks: "feature", tags: "", parents: [], workingCopy: false, conflict: false,
   };
   const destination = { ...source, changeId: "rtyuiopq", changePrefix: "rt", commitId: "b".repeat(40), bookmarks: "" };
   try {
@@ -175,7 +175,7 @@ test("partial repaints restore conflicted bookmark badges, drop targets and sour
   screen.renderer.root.add(log);
   const revisions = ["a", "b", "c"].map(id => ({
     changeId: `${id}qwertyu`, changePrefix: id, commitId: id.repeat(40), description: id,
-    author: "Test User", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+    author: "Test User", bookmarks: "", tags: "", parents: [], workingCopy: false, conflict: false,
   }));
   const [panel, drop, selected] = [darkTheme.panel, darkTheme.drop, darkTheme.graphSelected].map(color => RGBA.fromHex(color));
   try {
@@ -232,7 +232,7 @@ test("bookmark badges fold a synced remote into the local badge and show ahead, 
   screen.renderer.root.add(log);
   const revisions = ["a", "b"].map(id => ({
     changeId: `${id}qwertyu`, changePrefix: id, commitId: id.repeat(40), description: id,
-    author: "Test User", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+    author: "Test User", bookmarks: "", tags: "", parents: [], workingCopy: false, conflict: false,
   }));
   const [a, b] = revisions.map(revision => [revision.commitId]) as [string[], string[]];
   const local = (name: string, targets: string[], extra = {}) => ({ name, remote: "", targets, conflict: false, tracked: false, ...extra });
@@ -263,7 +263,7 @@ test("rows outside the viewport are painted when they scroll into view and after
   const snapshot = (label: string): Snapshot => {
     const revisions = Array.from({ length: 300 }, (_, i): Revision => ({
       commitId: i.toString(16).padStart(40, "0"), changeId: `z${"k".repeat(i % 20)}l`, changePrefix: "z",
-      description: `${label} ${i}`, author: "a", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+      description: `${label} ${i}`, author: "a", bookmarks: "", tags: "", parents: [], workingCopy: false, conflict: false,
     }));
     return { root: "/", revisions, hasMore: false,
       graph: revisions.flatMap((revision): GraphRow[] => [{ kind: "revision", revision, prefix: "○  " }, { kind: "description", revision, prefix: "│  " }]) };
@@ -290,7 +290,7 @@ const blankRows = (frame: string, height: number) => frame.split("\n").slice(0, 
 function longSnapshot(label: string, count: number): Snapshot {
   const revisions = Array.from({ length: count }, (_, i): Revision => ({
     commitId: i.toString(16).padStart(40, "0"), changeId: `z${"k".repeat(i % 20)}l`, changePrefix: "z",
-    description: `${label} ${i}`, author: "a", bookmarks: "", parents: [], workingCopy: false, conflict: false,
+    description: `${label} ${i}`, author: "a", bookmarks: "", tags: "", parents: [], workingCopy: false, conflict: false,
   }));
   return { root: "/", revisions, hasMore: false,
     graph: revisions.flatMap((revision): GraphRow[] => [{ kind: "revision", revision, prefix: "○  " }, { kind: "description", revision, prefix: "│  " }]) };

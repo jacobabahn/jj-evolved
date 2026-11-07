@@ -128,7 +128,7 @@ export const scenarios: Scenario[] = [
       ui.key("RETURN");
       await ui.until("/ search all destinations");
       ui.key("/"); await ui.type("Initial feature");
-      await ui.until("1 destinations");
+      await ui.until("1 destination");
       await ui.capture("Destination search reaches beyond the graph page");
       ui.key("RETURN");
       await ui.until("Preview ready");
@@ -150,6 +150,30 @@ export const scenarios: Scenario[] = [
       await ui.app.checkForUpdates();
       await ui.until("205 revisions");
       assert(expanded.revisions.some(revision => revision.description.includes("Initial feature")));
+    },
+  },
+  {
+    name: "destination-revsets", title: "Name a destination with a tag or revset",
+    async run(ui) {
+      await ui.f.jj("tag", "set", "v1.0", "-r", "feature");
+      ui.key(" "); ui.choose("Rebase");
+      await ui.until("Destination: Choose a revision");
+      ui.key("RETURN");
+      await ui.until("/ search all destinations");
+      ui.key("/"); await ui.type("all()");
+      await ui.until("but a destination must be one");
+      await ui.capture("A revset naming several revisions is not offered, and the message says how to narrow it");
+      ui.key("ESCAPE"); await ui.until("/ search all destinations");
+      ui.key("/"); await ui.type("nosuch");
+      await ui.until("doesn't exist");
+      await ui.capture("An unknown name shows jj's own error");
+      ui.key("ESCAPE"); await ui.until("/ search all destinations");
+      ui.key("/"); await ui.type("heads(::v1.0)");
+      await ui.until("listed first");
+      await ui.capture("A revset naming one revision lists it first with its change ID and description");
+      ui.key("RETURN");
+      await ui.until("Preview ready");
+      await ui.capture("The resolved destination is previewed like any other");
     },
   },
   {

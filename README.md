@@ -98,7 +98,7 @@ jj-evolved is under active development and focuses on local repository work. It 
 - **Remote operations:** `g` opens the Git menu, as in jjui: `p` publishes the selected change, `f` fetches, `F` fetches from every remote, `s` fetches and then previews a rebase of the selected stack onto `trunk()`, and `r` browses remotes to push another bookmark. The bookmark browser (`b`) lists each bookmark once with its sync state and offers push, track, untrack, and deletion on the remote. Configure remotes and authentication through the CLI.
 - **Hunks and conflicts:** interactive hunk selection and conflict resolution use JJ’s configured external tools. There is no built-in hunk or merge editor.
 - **Customization:** browse keybindings are configurable, with `jjui` and `legacy` presets; prompts retain their displayed controls. Revset completion covers functions, aliases, bookmarks, and tags; scripted workflows and custom themes are not implemented.
-- **Large histories:** the graph starts with 200 revisions; `Ctrl+L` loads more. Search and destination pickers cover the full history; diffs and search metadata are buffered in memory.
+- **Large histories:** the graph starts with 200 revisions; `Ctrl+L` loads more. Search and destination pickers cover the full history, and destination pickers also accept a revset; diffs and search metadata are buffered in memory.
 - **Compatibility:** broader platform, terminal, and JJ-version coverage is still being established.
 
 While browsing, automatic refresh runs `jj status`, which can snapshot pending working-copy edits. Reviewed actions reject stale repository state if another command or file edit changes it before confirmation. JJ remains responsible for validating operations.
