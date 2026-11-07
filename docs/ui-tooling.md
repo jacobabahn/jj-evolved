@@ -93,7 +93,7 @@ import { withUiFixture } from "../tooling/ui";
 
 test("opens help", () => withUiFixture("opens-help", async ui => {
 	ui.key("?");
-	expect(await ui.until("Keyboard reference")).toContain("Keyboard reference");
+	expect(await ui.until("Help · jjui keys")).toContain("Help · jjui keys");
 }));
 ```
 

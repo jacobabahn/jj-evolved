@@ -27,7 +27,7 @@ for (const mode of ["save", "unchanged", "fail"] as const) {
       ui.key("ESCAPE");
       await Bun.sleep(60);
       ui.key("?");
-      await ui.until("Keyboard reference");
+      await ui.until("Help · ");
     } finally { await editor.cleanup(); }
   }), 15_000);
 }

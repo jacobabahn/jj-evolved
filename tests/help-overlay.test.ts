@@ -6,7 +6,7 @@ test("help preserves hidden preview and selection, remapped help closes it, and 
   await ui.until("Empty change.");
   ui.key("p");
   ui.key("h");
-  await ui.until("Help · keys: custom");
+  await ui.until("Help · custom keys");
   expect(ui.screen.renderer.root.findDescendantById("preview")?.visible).toBe(false);
   ui.key("j");
   ui.key("h");

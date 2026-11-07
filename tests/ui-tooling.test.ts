@@ -31,7 +31,7 @@ for (const width of [80, 120]) {
       .map(line => line.spans.map(span => ({ text: span.text, fg: rgbToHex(span.fg), bg: rgbToHex(span.bg), attributes: span.attributes })));
     expect(footerStyles).toMatchSnapshot(`footer styles ${width}`);
     ui.key("?");
-    await ui.until("Keyboard reference");
+    await ui.until("Help · ");
     const preview = ui.node("action-overlay");
     const text = ui.screen.captureCharFrame().split("\n")
       .slice(preview.screenY, preview.screenY + preview.height)
@@ -83,7 +83,7 @@ test("failed scenarios save a replay, preserve the error, and remove their tempo
     await expect(withUiFixture("failure-check", async ui => {
       repository = ui.f.path;
       ui.key("?");
-      await ui.until("Keyboard reference");
+      await ui.until("Help · ");
       throw failure;
     }, { artifactRoot: root })).rejects.toBe(failure);
     const entries = await readdir(root);
@@ -92,7 +92,7 @@ test("failed scenarios save a replay, preserve the error, and remove their tempo
     if (!entry) throw new Error("Missing failure artifact");
     const json = await Bun.file(join(root, entry, "recording.json")).text();
     expect(json).toContain("deliberate artifact verification");
-    expect(json).toContain("Keyboard reference");
+    expect(json).toContain("Help · ");
     const html = await Bun.file(join(root, entry, "index.html")).text();
     expect(html).toContain('id="recordings"');
     expect(html).toContain('id="play"');
@@ -116,7 +116,7 @@ test("the fixture also accepts Kitty input and releases resources after explicit
   const path = ui.f.path;
   try {
     ui.key("?");
-    await ui.until("Keyboard reference");
+    await ui.until("Help · ");
   } finally { await ui.cleanup(); }
   await ui.cleanup();
   await expect(readdir(path)).rejects.toThrow();
