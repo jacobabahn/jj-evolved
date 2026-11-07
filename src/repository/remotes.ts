@@ -1,10 +1,11 @@
 import { label, type Bookmark, type Mutation, type PreparedMutation, type PublishBookmarks, type Remote, type RemoteMutation, type Revision } from "./model";
 import { CancelledError, NETWORK_TIMEOUT_MS, run } from "./jj-process";
+import { read } from "./jj-helper";
 import { logRevisions } from "./log-snapshot";
 import { mutationArgs } from "./mutation";
 
 export async function remoteList(root: string): Promise<Remote[]> {
-  const output = await run(root, ["--ignore-working-copy", "git", "remote", "list"]);
+  const output = await read(root, { kind: "remotes" }, () => run(root, ["--ignore-working-copy", "git", "remote", "list"]));
   return output.trim().split("\n").filter(Boolean).map(line => {
     const match = /^(\S+)\s+(.+)$/.exec(line);
     if (!match?.[1] || !match[2]) throw new Error("Unexpected jj remote list output.");

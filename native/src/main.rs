@@ -209,6 +209,8 @@ impl<'a> Server<'a> {
                 requests::files(ui, workspace_command, output, commit_id, text_field(request, "template")?).await
             }
             "bookmarks" => requests::bookmarks(ui, workspace_command, output, text_field(request, "template")?).await,
+            "tags" => requests::tags(ui, workspace_command, output, text_field(request, "template")?).await,
+            "remotes" => requests::remotes(workspace_command, output).await,
             _ => Err(user_error(format!("unknown request kind: {kind}"))),
         }
     }
@@ -253,7 +255,7 @@ fn check_launch_flags(command: &CommandHelper) -> Result<(), CommandError> {
         Ok(layers_text(&config_env.resolve_config(command.raw_config())?))
     };
     let served = resolved_for(None)?;
-    for name in ["log", "diff", "bookmark list", "op log"] {
+    for name in ["log", "diff", "bookmark list", "op log", "tag list", "git remote list"] {
         if resolved_for(Some(name))? != served {
             return Err(user_error(format!("config scoped to `{name}` with --when.commands can't be served")));
         }

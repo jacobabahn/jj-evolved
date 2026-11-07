@@ -43,10 +43,13 @@ operation ID is served only if it equals the current head, otherwise `ok: false`
 | `diff` | `commitId`, `paths` (fileset strings) | `jj --ignore-working-copy --at-op=@ diff --revision <commitId> --git -- <paths>` |
 | `files` | `commitId`, `template` | `jj --ignore-working-copy diff -r <commitId> -T <template>` |
 | `bookmarks` | `template` | `jj --ignore-working-copy --at-op=@ bookmark list --all-remotes -T <template>` |
+| `tags` | `template` | `jj --ignore-working-copy --at-op=@ tag list -T <template>` |
+| `remotes` | | `jj --ignore-working-copy git remote list` |
 
 ## Freshness
 
 Before each request, read the op heads directly. Exactly one head equal to the cached one: reuse the cached workspace
-state, including the short-prefix index. One different head: reload. More than one head: `ok: false`, so the CLI
-handles it. Config is captured at launch, so a change to any config file the helper read, or could read, must make it
-exit; the client restarts it on the next read.
+state, including the short-prefix index. One different head: reload. More than one head: `ok: false`, so the CLI handles
+it. Config is captured at launch, so a change to any config file the helper read, or could read, must make it exit; the
+client restarts it on the next read. Remotes are the exception: they live in Git config, which changes without a new
+operation, so `remotes` reopens the Git repository on every request.

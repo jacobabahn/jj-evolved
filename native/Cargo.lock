@@ -2274,6 +2274,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "futures",
+ "gix",
  "indexmap",
  "itertools 0.15.0",
  "jj-cli",

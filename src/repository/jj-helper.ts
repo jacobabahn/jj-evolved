@@ -8,7 +8,9 @@ export type HelperRequest =
   | { kind: "log"; revset: string; template: string; limit?: number; graph: boolean; op?: string }
   | { kind: "diff"; commitId: string; paths: string[] }
   | { kind: "files"; commitId: string; template: string }
-  | { kind: "bookmarks"; template: string };
+  | { kind: "bookmarks"; template: string }
+  | { kind: "tags"; template: string }
+  | { kind: "remotes" };
 
 const PROTOCOL = 1;
 /** The helper exits with this when config it read has changed, so the next process picks up the new config. */

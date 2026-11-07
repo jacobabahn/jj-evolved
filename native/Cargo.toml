@@ -13,6 +13,8 @@ jj-cli = { version = "=0.45.1", default-features = false, features = ["git"] }
 jj-lib = { version = "=0.45.1" }
 clap = { version = "4.6.1", features = ["derive"] }
 futures = "0.3.32"
+# Must follow the version jj-lib uses, so both share one build. Only for reopening the Git repo.
+gix = { version = "=0.87.1", default-features = false }
 indexmap = "2.14.0"
 itertools = "0.15.0"
 pollster = "1.0.1"

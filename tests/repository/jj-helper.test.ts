@@ -364,6 +364,7 @@ test("routes the read paths with the CLI's exact text, and never anything that s
     expect(operation).toMatch(/^[0-9a-f]+$/);
     expect((await repo.bookmarks()).map(bookmark => bookmark.name)).toContain("feature");
     await repo.rebaseScope(initial, operation);
+    expect(await repo.revsetSymbols()).toMatchObject({ tags: [] });
 
     const routed = (await requests()).map(({ id: _, ...request }) => request);
     const template = (await requests())[0]!.template!;
@@ -377,7 +378,9 @@ test("routes the read paths with the CLI's exact text, and never anything that s
       { kind: "files", commitId: initial.commitId, template: "'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'" },
       { kind: "opId" },
       { kind: "bookmarks", template: routed[6]!.template },
+      { kind: "remotes" },
       { kind: "log", revset: `${initial.commitId}::`, template: revisionTemplate, graph: false, op: operation },
+      { kind: "tags", template: 'if(!remote, json(name) ++ "\\n")' },
     ]);
     expect(routed[6]!.template).toContain("tracking_ahead_count");
 
