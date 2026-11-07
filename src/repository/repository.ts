@@ -1,5 +1,5 @@
 import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, type NetworkScope } from "./remotes";
+import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, prepareFetchAll, applyFetchAll, type NetworkScope } from "./remotes";
 import { read } from "./jj-helper";
 import { CancelledError, run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
@@ -303,6 +303,7 @@ export class Repository {
         summary = preview.summary; remoteUrl = preview.remoteUrl; caution = preview.caution;
         break;
       }
+      case "git-fetch-all": summary = (await prepareFetchAll(this.root, action)).summary; break;
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
       case "new": summary = `Create an empty child of ${label(action.parent)}`; break;
       case "edit": summary = `Make this change the working copy:\n${label(action.revision)}`; break;
@@ -363,6 +364,7 @@ export class Repository {
   async apply(prepared: PreparedMutation): Promise<string | null> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
+    if (prepared.action.kind === "git-fetch-all") return await applyFetchAll(this.root, prepared.action, prepared.operationId, this.withNetwork);
     if (prepared.remoteUrl !== undefined) return await applyRemote(this.root, prepared, await this.bookmarks(), this.withNetwork);
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));

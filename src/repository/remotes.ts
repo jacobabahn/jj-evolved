@@ -206,12 +206,73 @@ function pushReport(verb: string, action: { remote: string; name: string }, outp
   return unchanged(output) ? `${action.name} is already up to date on ${action.remote}` : `${verb} ${action.name} to ${action.remote}`;
 }
 
-/** Summarizes the bookmark lines `jj git fetch` prints, such as `bookmark: main@origin [updated] tracked`. */
-export function fetchReport(remote: string, output: string): string {
-  const changes = [...output.matchAll(new RegExp(String.raw`^bookmark: ${bookmarkName}@\S+ \[(\w+)\]`, "gm"))].map(match => `${unquote(match[1] ?? "")} ${match[2]}`);
-  if (!changes.length) return `Fetched ${remote}\nalready up to date`;
+/** Reads the bookmark lines `jj git fetch` prints, such as `bookmark: main@origin [updated] tracked`. */
+function fetchedBookmarks(output: string): { name: string; state: string }[] {
+  return [...output.matchAll(new RegExp(String.raw`^bookmark: ${bookmarkName}@\S+ \[(\w+)\]`, "gm"))].map(match => ({ name: unquote(match[1] ?? ""), state: match[2] ?? "" }));
+}
+
+function changedReport(fetched: string, changes: string[]): string {
+  if (!changes.length) return `Fetched ${fetched}\nalready up to date`;
   const shown = changes.slice(0, 3).join(", ");
-  return `Fetched ${remote} · ${changes.length} bookmark${changes.length === 1 ? "" : "s"} changed\n${shown}${changes.length > 3 ? `, +${changes.length - 3} more` : ""}`;
+  return `Fetched ${fetched} · ${changes.length} bookmark${changes.length === 1 ? "" : "s"} changed\n${shown}${changes.length > 3 ? `, +${changes.length - 3} more` : ""}`;
+}
+
+/** Summarizes what one fetch changed. */
+export function fetchReport(remote: string, output: string): string {
+  return changedReport(remote, fetchedBookmarks(output).map(item => `${item.name} ${item.state}`));
+}
+
+/**
+ * Summarizes a fetch from several remotes, naming each bookmark with its remote since the same name can come from more
+ * than one. The first line counts the remotes rather than naming them, so it fits on one row of the revision panel and
+ * leaves the next row for the bookmarks; the menu entry and the running status already named them.
+ */
+export function fetchAllReport(results: { remote: string; output: string }[]): string {
+  return changedReport(`${results.length} remote${results.length === 1 ? "" : "s"}`, results.flatMap(({ remote, output }) => fetchedBookmarks(output).map(item => `${item.name}@${remote} ${item.state}`)));
+}
+
+type FetchAllAction = Extract<Mutation, { kind: "git-fetch-all" }>;
+const remoteKey = (remotes: Remote[]) => remotes.map(item => `${item.name} ${item.url}`).sort().join("\n");
+
+// The remotes as configured now must be the ones the user chose to fetch from, so a remote added, removed or
+// repointed in another terminal is never fetched without being seen.
+async function assertSameRemotes(root: string, action: FetchAllAction): Promise<void> {
+  if (!action.remotes.length) throw new Error("No Git remotes configured. Add one with jj git remote add in your terminal.");
+  if (remoteKey(await remoteList(root)) !== remoteKey(action.remotes)) throw new Error("Remote configuration changed since these remotes were listed. Open the Git menu again.");
+}
+
+export async function prepareFetchAll(root: string, action: FetchAllAction): Promise<{ summary: string }> {
+  await assertSameRemotes(root, action);
+  const list = action.remotes.map(item => `  ${item.name}  ${item.url}`).join("\n");
+  return { summary: `Fetch from all ${action.remotes.length} remotes, one at a time:\n${list}\n\nFetch bookmarks and commits from each remote. Tracked bookmarks may update local bookmarks and the working copy. No local commits are pushed.` };
+}
+
+/**
+ * Fetches each remote in turn, under one cancellable scope. A single `jj git fetch` with several --remote flags stops
+ * at the first remote that fails and leaves what the others fetched to be imported by whichever jj command runs next,
+ * so fetching one remote at a time is what lets a failure or a cancel say exactly which remotes were fetched.
+ */
+export async function applyFetchAll(root: string, action: FetchAllAction, operationId: string, scope = uncancellable): Promise<string> {
+  await assertSameRemotes(root, action);
+  const results: { remote: string; output: string }[] = [];
+  const progress = (failed: string) => {
+    const rest = action.remotes.slice(results.length + 1).map(item => item.name);
+    return [results.length ? `Fetched ${results.map(item => item.remote).join(", ")}.` : "Nothing was fetched.",
+      `${failed}${rest.length ? `; not fetched: ${rest.join(", ")}` : ""}.`].join(" ");
+  };
+  return await scope(async signal => {
+    for (const remote of action.remotes) {
+      // Only the first fetch is pinned to the reviewed operation; each later one builds on the operation the previous
+      // fetch created, since pinning them all to the same operation would fork the operation log.
+      const pin = results.length ? [] : ["--at-op", operationId];
+      try { results.push({ remote: remote.name, output: await network(root, [...pin, ...mutationArgs({ kind: "git-fetch", remote: remote.name })], signal) }); }
+      catch (error) {
+        if (error instanceof CancelledError) throw new Error(`Fetch cancelled. ${progress(`Cancelled during ${remote.name}`)}`);
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\n${progress(`Failed on ${remote.name}`)}`);
+      }
+    }
+    return fetchAllReport(results);
+  });
 }
 
 export async function prepareRemote(root: string, action: RemoteMutation, bookmarks: Bookmark[], operationId: string, scope = uncancellable) {
