@@ -9,7 +9,7 @@ import { Repository } from "./repository/repository";
 
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
-  process.stdout.write(`Usage: bun start [--theme NAME] [--keys PRESET] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nKey presets: ${presetNames.join(", ")}. Preset defaults to JJ_EVOLVED_KEYS, the keybindings file, or jjui.\nDefault keys follow jjui; t changes themes and ? opens keyboard help showing the active preset.\nKeybindings: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config) with preset "jjui" or "legacy" and per-action overrides.\n`);
+  process.stdout.write(`Usage: bun start [--theme NAME] [--keys PRESET] [repository-path]\n\nA keyboard-driven Jujutsu workspace. Requires jj on PATH.\nThemes: ${themeNames.join(", ")}.\nTheme defaults to JJ_EVOLVED_THEME, saved preference, or terminal.\nKey presets: ${presetNames.join(", ")}. Preset defaults to JJ_EVOLVED_KEYS, the keybindings file, or jjui.\nDefault keys follow jjui; t changes themes and ? opens keyboard help showing the active preset.\nKeybindings: $XDG_CONFIG_HOME/jj-evolved/keybindings.json (default ~/.config) with preset "jjui" or "legacy" and per-action overrides, scoped overrides and key sequences such as \"g f\".\n`);
 } else {
   try {
     const { values, positionals } = parseArgs({
@@ -22,7 +22,7 @@ if (args.includes("--help") || args.includes("-h")) {
     const repository = await Repository.open(positionals[0] ?? process.cwd());
     const renderer = await createCliRenderer({ exitOnCtrlC: false });
     try {
-      const app = createApp(renderer, repository, theme, saveThemePreference, keys.bindings, {
+      const app = createApp(renderer, repository, theme, saveThemePreference, keys, {
         preset: keys.custom ? "custom" : keys.preset, revsetHistory: fileRevsetHistory(repository.root),
       });
       // Closing the terminal hangs up the app but not jj, which runs detached; stopping the app cancels a running fetch or push.

@@ -56,7 +56,7 @@ With no path, the app opens the current directory. It does not initialize a JJ r
 
 ## Getting around
 
-The default keys follow [jjui](https://github.com/idursun/jjui), so existing jjui users can keep their habits. Press `?` for scrollable help showing the active preset; Escape closes it. Use `--keys legacy` or `JJ_EVOLVED_KEYS=legacy` to switch presets. See [custom keybindings](docs/usage.md#custom-keybindings) to change browse shortcuts or switch to the `legacy` preset with jj-evolved's earlier keys.
+The default keys follow [jjui](https://github.com/idursun/jjui), so existing jjui users can keep their habits. Press `?` for scrollable help showing the active preset; Escape closes it. Use `--keys legacy` or `JJ_EVOLVED_KEYS=legacy` to switch presets. See [custom keybindings](docs/usage.md#custom-keybindings) to change shortcuts, bind multi-key sequences such as `g f`, override keys for one view or prompt, or switch to the `legacy` preset with jj-evolved's earlier keys.
 
 | Key | Action |
 | --- | --- |
@@ -97,7 +97,7 @@ jj-evolved is under active development and focuses on local repository work. It 
 
 - **Remote operations:** `g` opens the Git menu, as in jjui: `p` publishes the selected change, `f` fetches, `F` fetches from every remote, `s` fetches and then previews a rebase of the selected stack onto `trunk()`, and `r` browses remotes to push another bookmark. The bookmark browser (`b`) lists each bookmark once with its sync state and offers push, track, untrack, and deletion on the remote. Configure remotes and authentication through the CLI.
 - **Hunks and conflicts:** interactive hunk selection and conflict resolution use JJ’s configured external tools. There is no built-in hunk or merge editor.
-- **Customization:** browse keybindings are configurable, with `jjui` and `legacy` presets; prompts retain their displayed controls. Revset completion covers functions, aliases, bookmarks, and tags; scripted workflows and custom themes are not implemented.
+- **Customization:** keybindings are configurable, with `jjui` and `legacy` presets, multi-key sequences, and per-scope overrides for the file browser, menus, and prompts; Enter, Escape, arrows and text editing stay fixed. Revset completion covers functions, aliases, bookmarks, and tags; scripted workflows and custom themes are not implemented.
 - **Large histories:** the graph starts with 200 revisions; `Ctrl+L` loads more. Search and destination pickers cover the full history, and destination pickers also accept a revset; diffs and search metadata are buffered in memory.
 - **Compatibility:** broader platform, terminal, and JJ-version coverage is still being established.
 

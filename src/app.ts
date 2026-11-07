@@ -1,6 +1,6 @@
 import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
 import { contextView, loadHistory, searchScope, type LoadedHistory, type NavigationView, type Search } from "./revisions/history-view";
-import { actionForKey, defaultBindings, inlineActions, keyLabel, presetNames, type Keybindings, type Action } from "./ui/keybindings";
+import { bindingLabel, defaultBindings, KeySequence, keyLabel, keymap, presetNames, scopeActions, type Action, type Keybindings, type Keymap, type Scope } from "./ui/keybindings";
 import { applyCompletion, bookmarkNameCompletions, historyCompletions, revsetCompletions, type Completion } from "./revisions/revset-completion";
 import { memoryRevsetHistory, recordRevset, type RevsetHistoryStore } from "./revisions/revset-history";
 import { MutationReview } from "./history/mutation-review";
@@ -48,10 +48,12 @@ type Prompt =
 
 
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
-function helpSections(bindings: Keybindings): { title: string; rows: [string, string][] }[] {
-  const keys = (actions: Action[]) => actions.some(action => bindings[action].length)
-    ? joinKeys(actions.filter(action => bindings[action].length).map(action => keyLabel(bindings, action)))
+function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows: [string, string][] }[] {
+  const bindings = scopes.revisions, files = scopes.files, menu = scopes.menu, prompt = scopes.prompt;
+  const keys = (actions: Action[], table = bindings) => actions.some(action => table[action].length)
+    ? joinKeys(actions.filter(action => table[action].length).map(action => keyLabel(table, action)))
     : actions.some(action => menuActions.has(action)) ? "(Space menu)" : "(unbound)";
+  const slash = (...labels: string[]) => labels.filter(label => label !== "unbound").join("/");
   return [
     { title: "Navigate", rows: [
       [keys(["down", "up"]), "Move through revisions"],
@@ -70,7 +72,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["previewDown", "previewUp"]), "Scroll the preview by line, keeping graph focus"],
       [keys(["previewHalfDown", "previewHalfUp"]), "Scroll the preview by half page"],
       [keys(["diff"]), "Show the selected revision's diff"],
-      [keys(["files"]), "Expand changed files under the revision; j/k file, Enter focus diff, h/Left/Esc collapse"],
+      [keys(["files"]), `Expand changed files under the revision; ${slash(keyLabel(files, "down", true), keyLabel(files, "up", true))} file, Enter focus diff, ${slash(keyLabel(files, "back"), "Esc")} collapse`],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -118,13 +120,14 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       ["[name*]", "Local bookmark that is on no remote yet"],
       ["[name@remote]", "Remote bookmark that is untracked or at a different change than the local one"],
     ] },
-    { title: "In prompts (fixed keys; browse overrides do not apply)", rows: [
-      ["j/k or arrows", "Choose an item"],
+    { title: "In menus and prompts", rows: [
+      [keys(["down", "up"], menu), "Choose an item; arrows always work"],
       ["Enter", "Apply / confirm; newline in the description editor"],
-      ["^S/^D", "Save the description"],
-      ["Tab/Shift-Tab", "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); ^N/^P and arrows also work"],
+      [keys(["saveDescription"], prompt), "Save the description"],
+      [keys(["nextCompletion", "previousCompletion"], prompt), "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); Shift-Tab and arrows also work"],
       ["PgDn/PgUp", "Scroll the overlay preview"],
-      ["Esc", "Go back one level, or cancel at the top; press twice to discard description edits"],
+      [slash(keyLabel(menu, "back"), "Esc"), "Go back one level in a menu, or cancel at the top"],
+      ["Esc", "Cancel a prompt; press twice to discard description edits; cancels a half-typed key sequence anywhere"],
     ] },
   ];
 }
@@ -147,9 +150,14 @@ function bookmarkFieldColors(colors: Theme) {
 function chooserColors(colors: Theme) {
   return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
 }
-export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, bindings: Keybindings = defaultBindings, options: { refreshIntervalMs?: number; preset?: string; revsetHistory?: RevsetHistoryStore } = {}) {
-  const bindingLabel = (action: Action) => keyLabel(bindings, action);
-  const presetLabel = options.preset ?? (bindings === defaultBindings ? "jjui" : "custom");
+export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, keys: Keybindings | Keymap = defaultBindings, options: { refreshIntervalMs?: number; preset?: string; revsetHistory?: RevsetHistoryStore } = {}) {
+  const tables = ("scopes" in keys ? keys : keymap(keys)).scopes;
+  const bindings = tables.revisions;
+  const actionKeys = (action: Action) => keyLabel(bindings, action);
+  const presetLabel = options.preset ?? (keys === defaultBindings ? "jjui" : "custom");
+  // Keys typed toward a multi-key binding, and the action the current key press resolved to in its scope.
+  const sequence = new KeySequence();
+  let keyAction: Action | undefined;
   setTheme(renderer, theme);
   let colors = theme;
   const applyTerminalColors = (detected: TerminalColors) => { setTerminalColors(renderer, detected); applyTheme(colors); };
@@ -288,7 +296,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     message.content = terminalText(text);
   }
   function errorSummary(text: string) {
-    const suffix = `  ${bindingLabel("lastError")} full error`;
+    const suffix = `  ${actionKeys("lastError")} full error`;
     const line = text.split("\n")[0] ?? "";
     const room = Math.max(8, renderer.width - suffix.length);
     return `${line.length > room ? `${line.slice(0, room - 1)}…` : line}${suffix}`;
@@ -332,10 +340,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // While a fetch or push runs, Escape cancels it and the mode's other keys wait, so that is the only key shown.
     // The footer keeps its height so the layout does not shift.
     if (repository.networkActive) return modeShortcutLines().map((_, index, lines) => index === lines.length - 1 ? { left: [], right: [["Esc", "cancel"]] } : { left: [] });
+    // Halfway through a key sequence, the footer lists the keys that can finish it.
+    const scope = keyScope(), typed = sequence.pendingIn(prompt);
+    if (scope && typed.length) {
+      const next = sequence.continuations(tables[scope], scopeActions[scope]).map(([key, action]): Shortcut => [bindingLabel(key), action]);
+      return modeShortcutLines().map((_, index) => index ? { left: [] } : { left: [[`${bindingLabel(typed.join(" "))} …`, "then"], ...next], right: [["Esc", "cancel"]] });
+    }
     return modeShortcutLines();
   }
   function modeShortcutLines(): ShortcutLine[] {
-    const key = (action: Action) => keyLabel(bindings, action, true);
+    const table = tables[keyScope() ?? "revisions"];
+    const key = (action: Action) => keyLabel(table, action, true);
     const pair = (first: Action, second: Action) => bothKeys(key(first), key(second));
     const move = pair("down", "up"), page = pair("pageDown", "pageUp");
     const togglePreview: Shortcut = [key("togglePreview"), preview.visible ? "hide preview" : "show preview"];
@@ -346,7 +361,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         { left: focus === "preview"
           ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
           : [[move, "file"], ["Enter", "focus diff"], ...(preview.visible ? [[key("focus"), "focus preview"] as Shortcut] : []), [page, "scroll diff"], togglePreview] },
-        { left: [[bothKeys("Esc", key("files")), "collapse"]], right: quit },
+        { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), "collapse"]], right: quit },
       ];
       case "inline": return [{
         left: [[move, "destination"], ...(prompt.action.kind === "rebase" ? [[key("rebaseScope"), "descendants"] as Shortcut] : []), ["Enter", "preview"],
@@ -354,7 +369,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         right: [["Esc", "cancel"]],
       }];
       case "search": return [{ left: [["Enter", "keep"]], right: [["Esc", "cancel"]] }];
-      case "bookmark": return [{ left: [["Enter", "set"], ["Tab/Shift-Tab", "complete"]], right: [["Esc", "cancel"]] }];
+      case "bookmark": return [{ left: [["Enter", "set"], [bothKeys(key("nextCompletion"), "Shift-Tab"), "complete"]], right: [["Esc", "cancel"]] }];
       case "help": return [{ left: [[move, "scroll"], ["PgDn/PgUp", "page"]], right: [[bothKeys("Esc", key("help")), "close"]] }];
       case "form": return [prompt.form.keys];
       default: return [pickerSearch?.active ? { left: [["^N/^P", "choose"], ["Enter", "select"]], right: [["Esc", "clear"]] } : overlay.keys];
@@ -418,8 +433,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (restorePreviewScroll) renderer.off("frame", restorePreviewScroll);
     restorePreviewScroll = undefined;
     const revision = selected();
-    if (!revision) { show(`No revisions match this revset. Press ${bindingLabel("filter")} to change it.`, "No revisions"); return; }
-    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\n${bindingLabel("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
+    if (!revision) { show(`No revisions match this revset. Press ${actionKeys("filter")} to change it.`, "No revisions"); return; }
+    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\n${actionKeys("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
       prefix: metadata, read: signal => repository.diff(revision, [], { signal }), empty: "Empty change. No file differences.",
       cached: repository.cachedDiff(revision), delay: debounce, key: `change ${revision.changeId}` });
@@ -460,17 +475,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     queueMicrotask(() => {
       if (stopped || !focusRefreshPending || isBusy() || !idle()) return;
       if (returnPoint) {
-        report(`Focus refresh pending: ${bindingLabel("return")} returns to the active revset and refreshes.`);
+        report(`Focus refresh pending: ${actionKeys("return")} returns to the active revset and refreshes.`);
         return;
       }
       void run(null, () => refresh(revset, false, true));
     });
   }
   function updateFilter() {
-    filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? ` · ${bindingLabel("loadMore")} load 200 more` : ""}`);
+    filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? ` · ${actionKeys("loadMore")} load 200 more` : ""}`);
   }
   async function loadMoreHistory() {
-    if (returnPoint) { report(`Press ${bindingLabel("return")} to return to history before loading more.`); return; }
+    if (returnPoint) { report(`Press ${actionKeys("return")} to return to history before loading more.`); return; }
     if (!currentSnapshot.hasMore) { report("All revisions in this revset are loaded."); return; }
     const before = currentSnapshot;
     const request = ++refreshRequest;
@@ -751,8 +766,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     completing = false;
     renderCompletions();
   }
-  // Overlay keys are fixed (see "In prompts" in help); only the list movement follows the bindings.
-  const choose = bothKeys(keyLabel(bindings, "down", true), keyLabel(bindings, "up", true));
+  // Enter and Escape are fixed in overlays; movement, going back and completion follow the menu and prompt bindings.
+  const choose = bothKeys(keyLabel(tables.menu, "down", true), keyLabel(tables.menu, "up", true));
+  const promptKey = (action: Action) => keyLabel(tables.prompt, action, true);
   const previewScroll: Shortcut = ["PgDn/PgUp", "scroll preview"];
   function exit(top: string): Shortcut { return ["Esc", levels.length ? "back" : top]; }
   function pushLevel() {
@@ -842,11 +858,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
       next.original = descriptionInput.plainText;
-      overlay.keys = { left: [["^S", "save"], ["Enter", "newline"]], right: [exit("cancel")] };
+      overlay.keys = { left: [[promptKey("saveDescription"), "save"], ["Enter", "newline"]], right: [exit("cancel")] };
     }
     if (next.kind === "revset") {
       overlay.place(15);
-      overlay.keys = { left: [["Enter", "apply"], ["Tab/Shift-Tab", "complete"]], right: [exit("cancel")] };
+      overlay.keys = { left: [["Enter", "apply"], [bothKeys(promptKey("nextCompletion"), "Shift-Tab"), "complete"]], right: [exit("cancel")] };
       revsetOpened = input.value;
       updateCompletions();
       // Tags and aliases arrive after the prompt opens; bookmarks come from the last refresh.
@@ -1444,7 +1460,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       } finally {
         renderer.resume();
         await refresh(preserveSelection ? revset : defaultRevset, !preserveSelection).catch(error => {
-          throw new Error(`Refreshing after ${name} failed. Press ${bindingLabel("refresh")} to reload before repeating the action. ${errorText(error)}`);
+          throw new Error(`Refreshing after ${name} failed. Press ${actionKeys("refresh")} to reload before repeating the action. ${errorText(error)}`);
         });
       }
     });
@@ -1560,7 +1576,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function buildHelp() {
     for (const child of helpBox.getChildren()) child.destroyRecursively();
-    const sections = helpSections(bindings);
+    const sections = helpSections(tables);
     const column = Math.max(...sections.flatMap(section => section.rows.map(([key]) => key.length))) + 2;
     sections.forEach((section, index) => {
       helpBox.add(new TextRenderable(renderer, { id: `help-${index}`, content: section.title, fg: colors.accent, flexShrink: 0, marginTop: index ? 1 : 0 }));
@@ -1658,8 +1674,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   // Arrow keys always move; the bound up/down keys move too.
   function moveKey(key: KeyEvent): -1 | 0 | 1 {
-    const action = actionForKey(bindings, key, ["down", "up"]);
-    return key.name === "down" || action === "down" ? 1 : key.name === "up" || action === "up" ? -1 : 0;
+    return key.name === "down" || keyAction === "down" ? 1 : key.name === "up" || keyAction === "up" ? -1 : 0;
   }
   function scrollPage(key: KeyEvent, pane: ScrollBoxRenderable) {
     pane.scrollBy((key.name === "pageup" ? -1 : 1) * Math.max(1, pane.height - 3));
@@ -1667,7 +1682,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   type KeyHandlers = { [K in Prompt["kind"]]: (key: KeyEvent, state: Extract<Prompt, { kind: K }>) => void };
   const keyHandlers: KeyHandlers = {
     browse: browseKey, files: filesKey, inline: inlineKey, search: searchKey, theme: themeKey, help: helpKey,
-    form: (key, state) => { if (state.form.handleKey(key) === "close") { closePrompt(); void loadPreview(); } },
+    form: (key, state) => { if (state.form.handleKey(key, keyAction) === "close") { closePrompt(); void loadPreview(); } },
     picker: pickerKey, describe: describeKey, confirm: confirmKey, revset: completionKey, bookmark: completionKey, text: dialogKey,
   };
   function onKey(key: KeyEvent) {
@@ -1676,8 +1691,36 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (key.name === "escape" && repository.networkActive) { key.preventDefault(); repository.cancelNetwork(); report("Cancelling…"); return; }
+    keyAction = undefined;
+    const scope = keyScope();
+    if (scope) {
+      const result = sequence.feed(tables[scope], scopeActions[scope], key, prompt);
+      // A key that starts or breaks a sequence goes nowhere else, so a prefix never runs an action of its own.
+      if (result.kind !== "action" && result.kind !== "none") {
+        key.preventDefault();
+        const typed = bindingLabel(result.keys.join(" "));
+        if (result.kind === "cancelled") report(`Cancelled ${typed}.`);
+        else if (result.kind === "unbound") report(`${typed} is not bound.`, true);
+        paintShortcuts();
+        return;
+      }
+      if (result.kind === "action") keyAction = result.action;
+    } else sequence.cancel();
     (keyHandlers[prompt.kind] as (key: KeyEvent, state: Prompt) => void)(key, prompt);
     if (!stopped) paintShortcuts();
+  }
+  /** Where the current prompt's keys are looked up, or null while text is typed into a search field or keys are fixed. */
+  function keyScope(): Scope | null {
+    switch (prompt.kind) {
+      case "browse": return "revisions";
+      case "files": return "files";
+      case "inline": return "destination";
+      case "picker": return pickerSearch?.active ? null : "menu";
+      case "theme": case "help": return "menu";
+      case "form": return prompt.form.typing ? null : "menu";
+      case "revset": case "bookmark": case "describe": case "text": case "search": return "prompt";
+      case "confirm": return null;
+    }
   }
   function searchKey(key: KeyEvent) {
     if (key.name === "escape") { key.preventDefault(); void finishSearch(true); }
@@ -1697,14 +1740,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function helpKey(key: KeyEvent) {
     key.preventDefault();
     const move = moveKey(key);
-    if (key.name === "escape" || actionForKey(bindings, key) === "help") closeHelp();
+    if (key.name === "escape" || keyAction === "help") closeHelp();
     else if (move) overlayPreview.scrollBy(move);
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
   }
   function filesKey(key: KeyEvent) {
-    const action = actionForKey(bindings, key);
+    const action = keyAction;
     if (action === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
-    if (key.name === "escape" || key.name === "left" || (key.name === "h" && !key.ctrl && !key.meta && !key.shift) || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
+    if (key.name === "escape" || action === "back" || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
     if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (action === "help") { key.preventDefault(); showHelp(); return; }
     if (action === "focus" || key.name === "return") {
@@ -1729,7 +1772,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function inlineKey(key: KeyEvent, state: Extract<Prompt, { kind: "inline" }>) {
     key.preventDefault();
-    const action = actionForKey(bindings, key, inlineActions);
+    const action = keyAction;
     if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
     if (isBusy()) return;
     if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
@@ -1763,8 +1806,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (key.name === "return") { key.preventDefault(); void submit(); }
   }
   function completionKey(key: KeyEvent) {
-    const backwards = key.name === "up" || (key.ctrl && key.name === "p") || (key.name === "tab" && key.shift);
-    const forwards = key.name === "down" || (key.ctrl && key.name === "n") || (key.name === "tab" && !key.shift);
+    const backwards = key.name === "up" || keyAction === "previousCompletion" || (key.name === "tab" && key.shift);
+    const forwards = key.name === "down" || keyAction === "nextCompletion";
     if (!isBusy() && (backwards || forwards)) { key.preventDefault(); completeRevset(backwards); }
     else dialogKey(key);
   }
@@ -1784,7 +1827,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     key.preventDefault();
     if (isBusy()) return;
     const move = moveKey(key);
-    if (key.name === "escape" || key.name === "left" || key.name === "h") goBack();
+    if (key.name === "escape" || keyAction === "back") goBack();
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
     else if (move) moveChoice(move);
     else if (key.name === "return") chooseSelected();
@@ -1796,12 +1839,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (key.name === "escape" && !state.discard && descriptionInput.plainText !== state.original) { key.preventDefault(); state.discard = true; report("Unsaved changes. Esc again discards, ^S saves.", true); }
     else if (key.name === "escape") { key.preventDefault(); goBack(); }
     else if (key.name === "return") { key.preventDefault(); descriptionInput.newLine(); }
-    else if (key.ctrl && !key.meta && (key.name === "s" || (key.name === "d" && !key.shift))) { key.preventDefault(); void submit(); }
+    else if (keyAction === "saveDescription" && !key.shift) { key.preventDefault(); void submit(); }
   }
   function browseKey(key: KeyEvent) {
-    if (actionForKey(bindings, key) === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
+    const action = keyAction;
+    if (action === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
     if (key.name === "escape" && previewTitle === "Last error") { key.preventDefault(); void loadPreview(); return; }
-    const action = actionForKey(bindings, key);
     if (!action) return;
     if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (action === "focus") { key.preventDefault(); setFocus(focus === "list" ? "preview" : "list"); return; }
@@ -1825,7 +1868,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       key.preventDefault();
       if (!lastError) { report("No error has been reported."); return; }
       setPreviewVisible(true);
-      show(`${lastError}\n\nEsc or ${bindingLabel("diff")} returns to the diff.`, "Last error");
+      show(`${lastError}\n\nEsc or ${actionKeys("diff")} returns to the diff.`, "Last error");
       return;
     }
     if (action === "status") { key.preventDefault(); showStatus(); return; }

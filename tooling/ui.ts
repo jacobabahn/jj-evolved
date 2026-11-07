@@ -1,4 +1,4 @@
-import type { Keybindings } from "../src/ui/keybindings";
+import type { Keybindings, Keymap } from "../src/ui/keybindings";
 import type { RevsetHistoryStore } from "../src/revisions/revset-history";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
@@ -12,7 +12,7 @@ import { recordScreen, styledFrame, writeRecording } from "./recording";
 
 type Target = { id: string; instance: number };
 type FixtureOptions = {
-  bindings?: Keybindings;
+  bindings?: Keybindings | Keymap;
   revsetHistory?: RevsetHistoryStore;
   width?: number;
   height?: number;

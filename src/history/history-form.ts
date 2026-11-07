@@ -1,3 +1,4 @@
+import type { Action } from "../ui/keybindings";
 import { RevisionSearch } from "../ui/revision-search";
 import { MutationReview } from "./mutation-review";
 import { getTheme } from "../ui/theme";
@@ -233,7 +234,11 @@ export class HistoryForm extends ActionOverlay {
     }
   }
 
-  handleKey(key: KeyEvent): "close" | "handled" {
+  /** True while keys go to text: the destination search or the squash description. */
+  get typing() { return !!this.destinationSearch?.active || this.mode.kind === "description"; }
+
+  /** `action` is what the key runs in the menu bindings, when it runs one. */
+  handleKey(key: KeyEvent, action?: Action): "close" | "handled" {
     if (this.review.applying) { key.preventDefault(); return "handled"; }
     if (!this.loadingField && this.destinationSearch?.handleKey(key)) return "handled";
     if (key.name === "escape") {
@@ -259,8 +264,8 @@ export class HistoryForm extends ActionOverlay {
     }
     key.preventDefault();
     const list = this.mode.kind === "fields" ? this.controls : this.choices;
-    if (key.name === "j" || key.name === "down" || key.name === "tab") list.moveDown();
-    else if (key.name === "k" || key.name === "up") list.moveUp();
+    if (action === "down" || key.name === "down" || key.name === "tab") list.moveDown();
+    else if (action === "up" || key.name === "up") list.moveUp();
     else if (key.name === "p" && this.mode.kind === "fields") void this.updatePreview();
     else if (key.name === "return") {
       if (this.mode.kind === "fields") {

@@ -121,15 +121,25 @@ Verified on macOS with Bun 1.4.2 and jj 0.45.1:
 
 Tests create disposable repositories and never initialize the source checkout as a jj workspace.
 
-### Configurable browse keys
+### Configurable keys
 
-`ui/keybindings.ts` defines the browse action map, strict JSON configuration loader,
-key-event matching, and display labels. Startup loads the optional XDG
-`jj-evolved/keybindings.json` before creating the renderer. Configuration errors
-identify the file and conflicting actions. Browse routing resolves one action
-only after modal and text-input handling; Ctrl-C remains an emergency exit.
-Tests cover parsing, collisions, terminal aliases, missing and invalid files,
-and renderer behavior through the injected `keybindings` UI scenario.
+`ui/keybindings.ts` defines the action map, the scopes (`revisions`, `files`,
+`destination`, `menu`, `prompt`) and the actions each listens to, the strict JSON
+configuration loader, key-event matching, and display labels. Startup loads the
+optional XDG `jj-evolved/keybindings.json` before creating the renderer and passes
+the resolved keymap, one table per scope, to the app. Configuration errors identify
+the file, the scope, and the conflicting actions or the binding that a shorter one
+would shadow.
+
+`onKey` maps the current prompt to a scope (none while keys go to a picker's filter,
+the rebase and squash form's search or description, or a review) and feeds the key to
+a `KeySequence`. A key that starts a sequence, breaks one, or is Escape during one
+stops there, so a prefix never reaches a handler; otherwise the handler receives the
+resolved action. The pending keys belong to the prompt they were typed in and reset
+when it changes. Ctrl-C remains an emergency exit. Tests cover parsing, scopes,
+collisions, prefixes, terminal aliases, missing and invalid files, and renderer
+behavior through `tests/key-sequences.test.ts` and the `keybindings` and
+`key-sequences` UI scenarios.
 
 ## Terminal focus refresh
 

@@ -1,11 +1,11 @@
-import { parseKeybindings, type Keybindings } from "../src/ui/keybindings";
+import { loadKeybindings, parseKeybindings, type Keybindings, type Keymap } from "../src/ui/keybindings";
 import { SelectRenderable, type TextareaRenderable } from "@opentui/core";
 import { strict as assert } from "node:assert";
 import { TextRenderable } from "@opentui/core";
 import { descriptionEditor } from "../tests/description-editor";
 import type { UiFixture } from "./ui";
 
-type Scenario = { bindings?: Keybindings; name: string; title: string; run: (ui: UiFixture) => Promise<void> };
+type Scenario = { bindings?: Keybindings | Keymap; name: string; title: string; run: (ui: UiFixture) => Promise<void> };
 
 export const scenarios: Scenario[] = [
   {
@@ -50,6 +50,29 @@ export const scenarios: Scenario[] = [
       ui.key("e", { ctrl: true }); await ui.until("Last error");
       await ui.capture("Full error stays available after closing the prompt");
       ui.key("d"); await ui.until("Change preview");
+    },
+  },
+  {
+    name: "key-sequences", title: "Key sequences wait for the rest, and scopes rebind one place",
+    bindings: loadKeybindings({ bindings: { git: ["g g"], theme: ["g t"] }, scopes: { files: { down: ["J"], up: ["K"] } } }),
+    async run(ui) {
+      await ui.f.jj("git", "remote", "add", "origin", "https://example.com/repo.git");
+      await ui.until("Ready.");
+      ui.key("g");
+      await ui.until("g … then");
+      await ui.capture("g waits and lists what can follow");
+      ui.key("j");
+      await ui.until("g j is not bound.");
+      await ui.capture("A key that finishes no sequence runs nothing");
+      ui.key("g"); ui.key("g");
+      await ui.until("Fetch");
+      await ui.capture("g g opens the Git menu");
+      ui.key("ESCAPE");
+      for (let i = 0; i < 100 && ui.screen.renderer.root.findDescendantById("action-overlay")?.visible; i++) { await Bun.sleep(10); await ui.screen.renderOnce(); }
+      ui.key("?");
+      await ui.until("Help · custom keys");
+      await ui.capture("Help shows the custom bindings");
+      ui.key("ESCAPE");
     },
   },
   {
