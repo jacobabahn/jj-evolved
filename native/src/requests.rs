@@ -4,10 +4,13 @@
 //! - [`log`] follows `commands/log.rs` (`cmd_log`)
 //! - [`diff`] and [`files`] follow `commands/diff.rs` (`cmd_diff`)
 //! - [`bookmarks`] follows `commands/bookmark/list.rs` (`cmd_bookmark_list`)
+//! - [`tags`] follows `commands/tag/list.rs` (`cmd_tag_list`)
+//! - [`remotes`] follows `commands/git/remote/list.rs` (`cmd_git_remote_list`)
 //!
-//! What was dropped, because it only ever reaches stderr, is the warnings about unmatched paths and the hints.
+//! What was dropped, because it only ever reaches stderr, is the warnings about unmatched paths and tag names, and the hints.
 
 use std::collections::HashSet;
+use std::io::Write as _;
 use std::rc::Rc;
 
 use clap::Parser as _;
@@ -39,12 +42,14 @@ use jj_cli::ui::Ui;
 use jj_lib::backend::CommitId;
 use jj_lib::commit::Commit;
 use jj_lib::copies::CopyRecords;
+use jj_lib::git;
 use jj_lib::graph::GraphEdge;
 use jj_lib::graph::GraphEdgeType;
 use jj_lib::graph::TopoGroupedGraph;
 use jj_lib::matchers::Matcher;
 use jj_lib::merge::Diff;
 use jj_lib::merged_tree::MergedTree;
+use jj_lib::ref_name::RemoteName;
 use jj_lib::repo::Repo as _;
 use jj_lib::revset::RevsetEvaluationError;
 use jj_lib::revset::RevsetStreamExt as _;
@@ -307,4 +312,72 @@ pub async fn bookmarks(
         .flat_map(|item| itertools::chain([&item.primary], &item.tracked))
         .try_for_each(|commit_ref| template.format(commit_ref, formatter.as_mut()))?;
     Ok(())
+}
+
+/// `tag list -T <template>`: local tags, and tracked remote tags only where they differ from the local one.
+pub async fn tags(
+    ui: &Ui,
+    workspace_command: &WorkspaceCommandHelper,
+    output: &mut Vec<u8>,
+    template_text: &str,
+) -> Result<(), CommandError> {
+    let repo = workspace_command.repo();
+    let view = repo.view();
+
+    let template: TemplateRenderer<Rc<CommitRef>> = {
+        let language = workspace_command.commit_template_language();
+        workspace_command.parse_template(ui, &language, template_text)?.labeled(["tag_list"])
+    };
+    let sort_keys =
+        workspace_command.settings().get_value_with("ui.tag-list-sort-keys", commit_ref_list::parse_sort_keys)?;
+
+    let predicates = RefFilterPredicates {
+        name_matcher: StringExpression::all().to_matcher(),
+        remote_matcher: StringExpression::all().to_matcher(),
+        matched_local_targets: HashSet::new(),
+        conflicted: false,
+        include_local_only: true,
+        include_synced_remotes: false,
+        include_untracked_remotes: false,
+    };
+    let mut list_items = commit_ref_list::collect_items(view.tags(), &predicates);
+    commit_ref_list::sort(repo.store(), &mut list_items, &sort_keys)?;
+
+    let mut formatter = ui.new_formatter(output);
+    list_items
+        .iter()
+        .flat_map(|item| itertools::chain([&item.primary], &item.tracked))
+        .try_for_each(|commit_ref| template.format(commit_ref, formatter.as_mut()))?;
+    Ok(())
+}
+
+/// `git remote list`. Remotes live in Git config, which changes without a new operation (`git remote add`, or an edit
+/// to `.git/config` or `~/.gitconfig`), and the backend's repository keeps the config it read at load. So the
+/// repository is reopened, with the backend's own options, for every request.
+pub async fn remotes(workspace_command: &WorkspaceCommandHelper, output: &mut Vec<u8>) -> Result<(), CommandError> {
+    let loaded = git::get_git_repo(workspace_command.repo().store())?;
+    let git_repo = gix::ThreadSafeRepository::open_opts(loaded.path(), loaded.open_options().clone())
+        .map_err(|error| user_error(error.to_string()))?
+        .to_thread_local();
+    for remote_name in git_repo.remote_names() {
+        let Ok(remote_name) = str::from_utf8(&remote_name).map(RemoteName::new) else {
+            continue; // ignore non-UTF-8 remote names which we don't support
+        };
+        let Some(remote) = git::try_find_active_remote(&git_repo, remote_name)? else {
+            continue; // ignore empty [remote "<name>"] section
+        };
+        let fetch_url = remote_url(&remote, gix::remote::Direction::Fetch);
+        let push_url = remote_url(&remote, gix::remote::Direction::Push);
+        let name = remote_name.as_symbol();
+        if fetch_url == push_url {
+            writeln!(output, "{name} {fetch_url}")?;
+        } else {
+            writeln!(output, "{name} {fetch_url} (push: {push_url})")?;
+        }
+    }
+    Ok(())
+}
+
+fn remote_url(remote: &gix::Remote, direction: gix::remote::Direction) -> gix::bstr::BString {
+    remote.url(direction).map(|url| url.to_bstring()).unwrap_or_else(|| "<no URL>".into())
 }

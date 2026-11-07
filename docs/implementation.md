@@ -66,7 +66,7 @@ Each `jj` spawn loads the repository from scratch, which dominates the cost of h
 
 Build it with `cargo build --release --manifest-path native/Cargo.toml`. `JJ_EVOLVED_HELPER` overrides the binary at `native/target/release/jj-evolved-helper` with another path, or disables it with `off`. With no binary the app runs on the CLI alone, silently.
 
-`repository/jj-helper.ts` is internal to the repository module. `read(root, request, fallback)` wraps a CLI invocation at its call site. Routed reads are read-only `logSnapshot` with its `hasMore` probe, `logRevisions`, `Repository.diff`, `files`, `operationId`, and the `jj bookmark list` part of `bookmarks`.
+`repository/jj-helper.ts` is internal to the repository module. `read(root, request, fallback)` wraps a CLI invocation at its call site. Routed reads are read-only `logSnapshot` with its `hasMore` probe, `logRevisions`, `Repository.diff`, `files`, `operationId`, the `jj bookmark list` part of `bookmarks`, the remote list behind `remotes` (which `bookmarks` also reads), and the tag list behind `revsetSymbols`.
 
 Each root has two lanes, each its own process and FIFO with one request in flight: `fast` by default, and `bulk`, spawned on first use, for reads that can walk a whole history (`navigationRevisions`, `rebaseScope`), so a search cannot hold up selection reads. Processes are unreferenced, so they never keep the event loop open, and exit on stdin EOF. A lane idle for 60 seconds is killed; the next read starts another. Stdout is read through a stream reader and each payload decoded once, because `Response.text()` costs seconds of main-thread CPU on very large payloads.
 

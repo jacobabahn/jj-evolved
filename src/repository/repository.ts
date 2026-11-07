@@ -233,8 +233,9 @@ export class Repository {
 
   /** Local tags and configured revset aliases, for revset completion. jj's internal `builtin_` aliases are omitted. */
   async revsetSymbols(): Promise<{ tags: string[]; aliases: RevsetAlias[] }> {
+    const tagTemplate = 'if(!remote, json(name) ++ "\\n")';
     const [tags, aliases] = await Promise.all([
-      run(this.root, ["--ignore-working-copy", "--at-op=@", "tag", "list", "-T", 'if(!remote, json(name) ++ "\\n")']),
+      read(this.root, { kind: "tags", template: tagTemplate }, () => run(this.root, ["--ignore-working-copy", "--at-op=@", "tag", "list", "-T", tagTemplate])),
       run(this.root, ["--ignore-working-copy", "config", "list", "--include-defaults", "revset-aliases", "-T", '"[" ++ json(name) ++ "," ++ json(value) ++ "]\\n"']),
     ]);
     return {

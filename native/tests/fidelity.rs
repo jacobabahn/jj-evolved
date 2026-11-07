@@ -49,6 +49,9 @@ fn log_template() -> String {
     format!("{REVISION_TEMPLATE} ++ '::jj-evolved-description::\n'")
 }
 
+/// `revsetSymbols()` in `src/repository/repository.ts`.
+const TAG_TEMPLATE: &str = r#"if(!remote, json(name) ++ "\n")"#;
+
 /// The base environment of a fixture or bench run. Never inherits the user's jj config.
 #[derive(Clone)]
 struct JjEnv {
@@ -224,6 +227,12 @@ fn cli_args(request: &Value) -> Vec<String> {
             args.push(string("template"));
             args
         }
+        "tags" => {
+            let mut args = strings(&["--ignore-working-copy", "--at-op=@", "tag", "list", "-T"]);
+            args.push(string("template"));
+            args
+        }
+        "remotes" => strings(&["--ignore-working-copy", "git", "remote", "list"]),
         kind => panic!("unknown kind {kind}"),
     }
 }
@@ -639,6 +648,109 @@ fn bookmark_order_follows_config() {
     assert_matches_cli(&env, &mut helper, json!({"kind": "bookmarks", "template": BOOKMARK_TEMPLATE}));
 }
 
+/// A local tag, one that moved away from its remote, one only on the remote, and a conflicted one.
+fn tagged() -> (Fixture, PathBuf) {
+    let (f, ids) = Fixture::rich();
+    let remote = f.dir.join("origin.git");
+    let git = |args: &[&str]| assert!(Command::new("git").args(args).stderr(Stdio::null()).status().unwrap().success());
+    for (tag, commit) in [("v1.0", &ids.base), ("moved", &ids.base), ("remote-only", &ids.feature)] {
+        git(&["--git-dir", remote.to_str().unwrap(), "tag", tag, commit]);
+    }
+    f.env.jj(&["git", "fetch", "--tag", "glob:*"]);
+    f.env.jj(&["tag", "set", "moved", "-r", &ids.mixed, "--allow-move"]);
+    f.env.jj(&["tag", "set", "local-ünï", "-r", &ids.side]);
+    f.env.jj(&["tag", "set", "conflicted", "-r", &ids.side]);
+    let before = f.op_id();
+    f.env.jj(&["tag", "set", "conflicted", "-r", &ids.clean, "--allow-move"]);
+    f.env.jj(&[
+        "--ignore-working-copy",
+        &format!("--at-op={before}"),
+        "tag",
+        "set",
+        "conflicted",
+        "-r",
+        &ids.mixed,
+        "--allow-move",
+    ]);
+    f.env.jj(&["log", "-r", "root()"]);
+    (f, remote)
+}
+
+#[test]
+fn tags_cover_every_state_and_follow_config() {
+    let (f, _) = tagged();
+    let mut helper = f.env.spawn();
+    let all = "name ++ '@' ++ remote ++ ' ' ++ tracked ++ ' ' ++ conflict ++ ' ' ++ added_targets.map(|c| c.commit_id().short()) ++ \"\\n\"";
+    // The last is jj's default `templates.tag_list`.
+    for template in [TAG_TEMPLATE, all, r#"format_commit_ref(self, "tag") ++ "\n""#] {
+        assert_matches_cli(&f.env, &mut helper, json!({"kind": "tags", "template": template}));
+    }
+    let listed = String::from_utf8(helper.request(json!({"kind": "tags", "template": all})).payload).unwrap();
+    for expected in ["v1.0@ ", "moved@ ", "moved@origin ", "local-ünï@ ", "conflicted@ false true"] {
+        assert!(listed.contains(expected), "{expected} missing from {listed}");
+    }
+    // Synced and untracked remote tags are left out, as `tag list` does without --all-remotes.
+    assert!(!listed.contains("v1.0@origin"), "{listed}");
+
+    let mut env = f.env.clone();
+    env.config.push(r#"ui.tag-list-sort-keys=["name-"]"#.to_owned());
+    let mut helper = env.spawn();
+    assert_matches_cli(&env, &mut helper, json!({"kind": "tags", "template": TAG_TEMPLATE}));
+}
+
+/// The Git config that holds the remotes, wherever `jj git init` put the repository.
+fn git_config(f: &Fixture) -> PathBuf {
+    let colocated = f.env.root.join(".git");
+    if colocated.exists() { colocated.join("config") } else { f.env.root.join(".jj/repo/store/git/config") }
+}
+
+#[test]
+fn remotes_follow_git_config_that_changes_with_no_new_operation() {
+    let (f, _) = Fixture::rich();
+    let config = git_config(&f);
+    let git_config = |args: &[&str]| {
+        let status = Command::new("git").arg("config").arg("--file").arg(&config).args(args).status().unwrap();
+        assert!(status.success(), "git config {args:?}");
+    };
+    let mut helper = f.env.spawn();
+    let remotes = json!({"kind": "remotes"});
+    assert_matches_cli(&f.env, &mut helper, remotes.clone());
+
+    // `jj git remote add` records an operation, so the helper reloads for it anyway.
+    f.env.jj(&["git", "remote", "add", "upstream", "https://example.com/upstream.git"]);
+    assert_matches_cli(&f.env, &mut helper, remotes.clone());
+
+    // The cases left in the CLI's output, as Git config edits under a running helper, which record no operation.
+    let before = f.op_id();
+    git_config(&["remote.split.url", "https://example.com/fetch.git"]);
+    git_config(&["remote.split.pushurl", "ssh://example.com/push.git"]);
+    git_config(&["remote.pushonly.pushurl", "ssh://example.com/only-push.git"]);
+    git_config(&["remote.empty.tagopt", "--no-tags"]);
+    git_config(&["remote.ünï.url", "https://example.com/ünï.git"]);
+    assert_eq!(f.op_id(), before, "the test needs an edit that leaves the operation alone");
+    assert_matches_cli(&f.env, &mut helper, remotes.clone());
+    let listed = String::from_utf8(helper.request(remotes.clone()).payload).unwrap();
+    for expected in [
+        "upstream https://example.com/upstream.git\n",
+        "split https://example.com/fetch.git (push: ssh://example.com/push.git)\n",
+        "pushonly <no URL> (push: ssh://example.com/only-push.git)\n",
+    ] {
+        assert!(listed.contains(expected), "{expected} missing from {listed}");
+    }
+    assert!(!listed.contains("empty"), "{listed}");
+
+    // Global Git config applies too, and is read again on each request.
+    let home = PathBuf::from(&f.env.vars[0].1);
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join(".gitconfig"), "[url \"https://mirror.example.com/\"]\n\tinsteadOf = https://example.com/\n")
+        .unwrap();
+    assert_matches_cli(&f.env, &mut helper, remotes.clone());
+    assert!(String::from_utf8(helper.request(remotes.clone()).payload).unwrap().contains("mirror.example.com"));
+
+    git_config(&["--remove-section", "remote.split"]);
+    assert_matches_cli(&f.env, &mut helper, remotes);
+}
+
 #[test]
 fn invalid_requests_are_declined_and_the_process_keeps_going() {
     let (f, ids) = Fixture::rich();
@@ -929,7 +1041,12 @@ fn bench_repos() {
         let state = RepoState::read(&env.root);
         let mut helper = env.spawn();
         let log_template = log_template();
-        let mut requests = vec![json!({"kind": "opId"}), json!({"kind": "bookmarks", "template": BOOKMARK_TEMPLATE})];
+        let mut requests = vec![
+            json!({"kind": "opId"}),
+            json!({"kind": "bookmarks", "template": BOOKMARK_TEMPLATE}),
+            json!({"kind": "tags", "template": TAG_TEMPLATE}),
+            json!({"kind": "remotes"}),
+        ];
         for (revset, limit) in [
             ("all()", 300),
             ("::trunk()", 2000),

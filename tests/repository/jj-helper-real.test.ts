@@ -31,6 +31,9 @@ async function history() {
   await writeFile(join(f.path, "hello.txt"), "right\n");
   await f.jj("new", "-m", "Conflicted merge", "description(substring:Left)", "description(substring:Right)");
   await f.jj("new", "-m", "Tip");
+  await f.jj("tag", "set", "v1", "-r", "feature");
+  await f.jj("tag", "set", "ünï-tag", "-r", "@-");
+  await f.jj("git", "remote", "add", "origin", "https://example.com/origin.git");
   return f;
 }
 
@@ -58,6 +61,9 @@ test.skipIf(!existsSync(binary))("every request kind is byte-identical to the CL
     }
     const bookmarksTemplate = 'name ++ " " ++ if(remote, stringify(remote), "") ++ " " ++ tracked ++ "\\n"';
     pairs.push([{ kind: "bookmarks", template: bookmarksTemplate }, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T", bookmarksTemplate]]);
+    const tagsTemplate = 'name ++ " " ++ if(remote, stringify(remote), "") ++ "\\n"';
+    pairs.push([{ kind: "tags", template: tagsTemplate }, ["--ignore-working-copy", "--at-op=@", "tag", "list", "-T", tagsTemplate]]);
+    pairs.push([{ kind: "remotes" }, ["--ignore-working-copy", "git", "remote", "list"]]);
     for (const [request, args] of pairs) expect({ request, text: await read(f.path, request, noCli) }).toEqual({ request, text: await cli(...args) });
   } finally { await f.cleanup(); }
 });
@@ -69,6 +75,7 @@ test.skipIf(!existsSync(binary))("Repository reads agree with and without the he
     const revisions = await repo.navigationRevisions("all()");
     return {
       snapshot, revisions, operation: await repo.operationId(), bookmarks: await repo.bookmarks(),
+      remotes: await repo.remotes(), symbols: await repo.revsetSymbols(),
       diffs: await Promise.all(revisions.slice(0, -1).map(revision => repo.diff(revision))),
       files: await Promise.all(revisions.slice(0, -1).map(revision => repo.files(revision))),
     };
@@ -90,6 +97,11 @@ test.skipIf(!existsSync(binary))("Repository reads agree with and without the he
     const after = await compare();
     expect(after.operation).not.toBe(before.operation);
     expect(after.snapshot.revisions[0]?.description).toBe("Changed from another process\n");
+    // A remote added straight to Git config records no operation, and still shows on the next read.
+    const gitDir = (await run(f.path, ["--ignore-working-copy", "git", "root"])).trim();
+    await Bun.$`git --git-dir ${gitDir} remote add upstream https://example.com/upstream.git`.quiet();
+    expect(await repo.operationId()).toBe(after.operation);
+    expect((await compare()).remotes.map(remote => remote.name)).toContain("upstream");
     // The helper never snapshots, so an edit stays invisible until the CLI records it.
     await writeFile(join(f.path, "unsnapshotted.txt"), "new\n");
     expect(await repo.operationId()).toBe(after.operation);
