@@ -1469,7 +1469,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     bookmarkInput.value = terminalText(value);
     completing = false;
     completed = null;
+    // Keys go to the revisions pane while the name is typed, so it holds focus and the divider takes its mode colour.
+    focus = "list";
     list.blur();
+    preview.blur();
     bookmarkInput.focus();
     paintPanes();
     updateCompletions();
