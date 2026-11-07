@@ -79,7 +79,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["search"]), "Search descriptions, bookmarks and ID prefixes in the active revset"],
       [keys(["nextMatch", "previousMatch"]), "Next / previous search match, wrapping"],
       [keys(["clearSearch"]), "Clear the accepted search"],
-      ["/ in pickers", "Search all revisions in destination lists, including older history"],
+      ["/ in pickers", "Search all revisions in destination lists by text, tag or ID, or type a revset that names one revision"],
     ] },
     { title: "Edit changes", rows: [
       [keys(["describe"]), "Describe the selected change in the app, including multiline text"],
@@ -1083,19 +1083,21 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlayText.prefixes = revisionPrefixes(revisions);
       const choices = (items: Revision[]): Choice[] => items.map(item => ({
         name: `${item.changeId.slice(0, 8)} ${item.description.split("\n")[0] || "(no description)"}`,
-        description: `${item.commitId.slice(0, 12)} ${item.bookmarks}`,
+        description: [item.commitId.slice(0, 12), item.bookmarks, item.tags && `tags ${item.tags}`].filter(Boolean).join(" "),
         choose: () => { pickerSearch?.dispose(); pickerSearch = null; accept(item); },
         preview: signal => repository.diff(item, [], { signal }),
       }));
       pick(title, choices(revisions), { attach: () => {
-        pickerSearch = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, matches => {
+        const search = new RevisionSearch(renderer, "destination-search", chooser, revisions, bookmarks, (matches, status) => {
           if (prompt.kind !== "picker") return;
           showChoices(choices(matches));
-          if (!matches.length) showOverlay("No matching destinations. Edit the search or press Escape to clear it.", "Destinations");
-          overlay.report(`${matches.length} destinations`);
-        });
-        pickerSearch.onActiveChange = paintShortcuts;
-        overlay.fields.add(pickerSearch.input);
+          if (!matches.length) showOverlay(status, "Destinations");
+          overlay.report(status, !matches.length);
+        }, query => repository.resolve(query), source ?? undefined);
+        search.onAccept = chooseSelected;
+        search.onActiveChange = paintShortcuts;
+        pickerSearch = search;
+        overlay.fields.add(search.input);
         overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "search all destinations"], previewScroll] };
       } });
       if (searchImmediately) pickerSearch?.start();
@@ -1755,6 +1757,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (!isBusy() && state.extras.option && !key.ctrl && !key.meta && key.sequence === state.extras.option.key) { key.preventDefault(); state.extras.option.choose(); }
     else dialogKey(key);
   }
+  function chooseSelected() {
+    if (prompt.kind !== "picker") return;
+    const choice = prompt.choices[chooser.getSelectedIndex()];
+    if (choice && !choice.header) choice.choose();
+  }
   function pickerKey(key: KeyEvent, state: Extract<Prompt, { kind: "picker" }>) {
     if (!isBusy() && pickerSearch?.handleKey(key)) return;
     key.preventDefault();
@@ -1763,7 +1770,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (key.name === "escape" || key.name === "left" || key.name === "h") goBack();
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
     else if (move) moveChoice(move);
-    else if (key.name === "return") { const choice = state.choices[chooser.getSelectedIndex()]; if (choice && !choice.header) choice.choose(); }
+    else if (key.name === "return") chooseSelected();
     else if (!key.ctrl && !key.meta) state.choices.find(choice => choice.hotkey && choice.key === key.sequence)?.choose();
   }
   function describeKey(key: KeyEvent, state: Extract<Prompt, { kind: "describe" }>) {
