@@ -199,10 +199,10 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 ││                 preview                                        ││
 ││@ [ ]            Jump to the working copy / parent / child;     ││
 ││                 choose when there are several                  ││
-││^O               Return from a temporary reveal to the previous ││
-││                 view                                           ││
-││^L               Load 200 more revisions, keeping the selection ││
-││                                                                ││
+││^O               Return from a temporary reveal to the          ││
+││                 previous view                                  ││
+││^L               Load 200 more revisions, keeping the           ││
+││                 selection                                      ││
 ││^R               Refresh history now; external changes also     ││
 ││                 refresh automatically                          ││
 ││?                Show this help                                 ││
