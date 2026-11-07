@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
-import { fetchReport, pushCaution, pushChanges } from "../../src/repository/remotes";
+import { fetchAllReport, fetchReport, pushCaution, pushChanges } from "../../src/repository/remotes";
 import { fixture } from "../fixture";
 
 async function remoteFixture() {
@@ -567,3 +567,106 @@ test("cancelNetwork stops a fetch that is waiting on the remote", async () => {
     await f.cleanup();
   }
 }, 40_000);
+
+// A second bare remote, with a publisher that pushes a bookmark to each remote.
+async function twoRemoteFixture() {
+  const f = await remoteFixture();
+  const upstream = await mkdtemp(join(tmpdir(), "jj-remote-test-"));
+  const proc = Bun.spawn(["git", "init", "--bare", upstream], { stdout: "ignore", stderr: "pipe" });
+  if (await proc.exited !== 0) throw new Error(await new Response(proc.stderr).text());
+  await f.jj("git", "remote", "add", "upstream", upstream);
+  const publisher = await fixture();
+  await publisher.jj("git", "remote", "add", "origin", f.remote);
+  await publisher.jj("git", "remote", "add", "upstream", upstream);
+  return { ...f, upstream, publisher, cleanup: async () => { await f.cleanup(); await publisher.cleanup(); await rm(upstream, { recursive: true, force: true }); } };
+}
+
+test("fetching all remotes imports new revisions and bookmarks from each one, after a read-only preview", async () => {
+  const f = await twoRemoteFixture();
+  try {
+    await f.publisher.jj("new", "-m", "From origin");
+    await f.publisher.jj("bookmark", "create", "from-origin", "-r", "@");
+    await f.publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:from-origin");
+    await f.publisher.jj("new", "-m", "From upstream");
+    await f.publisher.jj("bookmark", "create", "from-upstream", "-r", "@");
+    await f.publisher.jj("git", "push", "--remote", "upstream", "--bookmark", "exact:from-upstream");
+    const remotes = await f.repo.remotes();
+    expect(remotes.map(item => item.name)).toEqual(["origin", "upstream"]);
+    const before = await f.repo.operationId();
+    const prepared = await f.repo.prepare({ kind: "git-fetch-all", remotes });
+    expect(prepared.summary).toContain("Fetch from all 2 remotes, one at a time:");
+    expect(prepared.summary).toContain(`upstream  ${f.upstream}`);
+    expect(await f.repo.operationId()).toBe(before);
+    expect(await f.repo.apply(prepared)).toBe("Fetched 2 remotes · 2 bookmarks changed\nfrom-origin@origin new, from-upstream@upstream new");
+    const fetched = await f.repo.bookmarks();
+    expect(fetched.find(item => item.name === "from-origin" && item.remote === "origin")).toBeDefined();
+    expect(fetched.find(item => item.name === "from-upstream" && item.remote === "upstream")).toBeDefined();
+    expect((await f.repo.snapshot("from-upstream@upstream")).revisions[0]?.description.trim()).toBe("From upstream");
+    // The two fetches are consecutive operations, not siblings of the reviewed one.
+    expect((await f.jj("op", "log", "--no-graph", "-T", 'parents.len() ++ "\\n"')).trim().split("\n").every(count => count === "1" || count === "0")).toBe(true);
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch-all", remotes }))).toBe("Fetched 2 remotes\nalready up to date");
+  } finally { await f.cleanup(); }
+});
+
+test("fetching all remotes refuses when the remotes changed after they were listed", async () => {
+  const f = await twoRemoteFixture();
+  try {
+    const remotes = await f.repo.remotes();
+    await f.jj("git", "remote", "add", "third", f.remote);
+    await expect(f.repo.prepare({ kind: "git-fetch-all", remotes })).rejects.toThrow("Remote configuration changed");
+    await f.jj("git", "remote", "remove", "third");
+    const prepared = await f.repo.prepare({ kind: "git-fetch-all", remotes });
+    await f.jj("git", "remote", "set-url", "upstream", f.remote);
+    await expect(f.repo.apply(prepared)).rejects.toThrow("Remote configuration changed");
+    await expect(f.repo.prepare({ kind: "git-fetch-all", remotes: [] })).rejects.toThrow("No Git remotes configured");
+  } finally { await f.cleanup(); }
+});
+
+test("a failing remote stops a fetch from all remotes and says which remotes were fetched", async () => {
+  const f = await twoRemoteFixture();
+  try {
+    await f.publisher.jj("bookmark", "create", "shared", "-r", "@-");
+    await f.publisher.jj("git", "push", "--remote", "origin", "--bookmark", "exact:shared");
+    await f.jj("git", "remote", "add", "broken", f.remote + "-missing");
+    const remotes = await f.repo.remotes();
+    expect(remotes.map(item => item.name)).toEqual(["broken", "origin", "upstream"]);
+    // Order the broken remote second, so one remote is fetched before it and one after.
+    const ordered = [remotes[1]!, remotes[0]!, remotes[2]!];
+    const error = await f.repo.apply(await f.repo.prepare({ kind: "git-fetch-all", remotes: ordered })).then(() => null, (caught: Error) => caught);
+    expect(error?.message).toContain("configure Git credentials or SSH");
+    expect(error?.message).toContain("Fetched origin. Failed on broken; not fetched: upstream.");
+    expect((await f.repo.bookmarks()).find(item => item.name === "shared" && item.remote === "origin")).toBeDefined();
+    const first = await f.repo.apply(await f.repo.prepare({ kind: "git-fetch-all", remotes })).then(() => null, (caught: Error) => caught);
+    expect(first?.message).toContain("Nothing was fetched. Failed on broken; not fetched: origin, upstream.");
+  } finally { await f.cleanup(); }
+});
+
+test("cancelling a fetch from all remotes says which remotes were fetched", async () => {
+  const f = await twoRemoteFixture();
+  const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };
+  Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.ext.allow", GIT_CONFIG_VALUE_0: "always" });
+  try {
+    await f.jj("git", "remote", "remove", "upstream");
+    await f.jj("git", "remote", "add", "slow", "ext::sleep 30");
+    const remotes = await f.repo.remotes();
+    const applying = f.repo.apply(await f.repo.prepare({ kind: "git-fetch-all", remotes }));
+    for (let attempt = 0; attempt < 300 && !f.repo.networkActive; attempt++) await Bun.sleep(10);
+    await Bun.sleep(500);
+    f.repo.cancelNetwork();
+    await expect(applying).rejects.toThrow("Fetch cancelled. Fetched origin. Cancelled during slow.");
+    expect(f.repo.networkActive).toBe(false);
+  } finally {
+    for (const [key, value] of [["GIT_CONFIG_COUNT", saved.count], ["GIT_CONFIG_KEY_0", saved.key], ["GIT_CONFIG_VALUE_0", saved.value]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await f.cleanup();
+  }
+}, 40_000);
+
+test("a fetch from all remotes names each changed bookmark with its remote", () => {
+  expect(fetchAllReport([
+    { remote: "origin", output: "bookmark: main@origin [updated] tracked\n" },
+    { remote: "upstream", output: "Nothing changed.\n" },
+    { remote: "fork", output: 'bookmark: main@fork [new] untracked\nbookmark: "ü"@fork [new] untracked\nbookmark: x@fork [deleted] untracked\n' },
+  ])).toBe("Fetched 3 remotes · 4 bookmarks changed\nmain@origin updated, main@fork new, ü@fork new, +1 more");
+});
