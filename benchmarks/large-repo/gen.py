@@ -34,9 +34,14 @@ class Stream:
 def bare(name):
     repo = f"{SRC}/{name}.git"
     subprocess.check_call(["git", "init", "-q", "--bare", "-b", "main", repo]); return repo
+def pack_refs(repo):
+    """jj writes every ref it exports as a loose file, and a colocated repo reads them all on each snapshot. `git
+    clone` and `git gc` pack them; left loose, the 100,000 refs of br-50k add about 0.3 s to every snapshot."""
+    if os.path.isdir(f"{repo}/.git"): subprocess.check_call(["git", "pack-refs", "--all"], cwd=repo)
 def clone(name):
     t = time.time()
     subprocess.check_call(["jj", "git", "clone", "--quiet", f"file://{SRC}/{name}.git", f"{REPOS}/{name}"], env=ENV)
+    pack_refs(f"{REPOS}/{name}")
     print(f"{name}: jj clone {time.time()-t:.1f}s", flush=True)
 
 def linear(name, commits, files, branches=0):
@@ -96,6 +101,7 @@ def stack(name, base_commits, depth):
     s.done()
     subprocess.check_call(["jj", "git", "import", "--quiet"], cwd=repo, env=ENV)
     subprocess.check_call(["jj", "new", "--quiet", "stack"], cwd=repo, env=ENV)
+    pack_refs(repo)
     print(f"{name}: stack ready", flush=True)
 
 for n, c in [("lin-1k", 1_000), ("lin-10k", 10_000), ("lin-100k", 100_000), ("lin-1m", 1_000_000)]: linear(n, c, 1000)
