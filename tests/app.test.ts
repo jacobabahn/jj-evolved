@@ -227,7 +227,7 @@ test("keyboard browsing, status, help, revsets and empty state at 80x24", async 
     await t.until("Working-copy status");
     await t.until("Working copy");
     t.screen.mockInput.pressKey("?");
-    await t.until("Keyboard reference");
+    await t.until("Help · ");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
     t.screen.mockInput.pressKey("L");
@@ -634,7 +634,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await t.until("Keep original description");
     t.choose("Edit second description");
     await t.until("Enter apply");
-    expect(t.screen.renderer.root.findDescendantById("prompt-label")?.visible).toBe(true);
+    expect(String((t.screen.renderer.root.findDescendantById("action-overlay") as import("@opentui/core").BoxRenderable).title).trim()).toBe("Second change description");
     expect(t.screen.captureCharFrame()).toContain("Second change description");
     await t.prompt("Second group", true);
     await t.until("Review before applying");
@@ -1409,7 +1409,7 @@ test("preview toggle expands the graph, keeps focus visible, and preserves selec
     await t.screen.renderOnce();
     expect(graph.width).toBe(80);
     t.screen.mockInput.pressKey("?");
-    await t.until("Keyboard reference");
+    await t.until("Help · ");
     expect(pane.visible).toBe(false);
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
@@ -1506,7 +1506,7 @@ for (const view of ["selection", "help", "status"] as const) {
       t.screen.renderer.emit("focus");
       await started.promise;
       t.screen.mockInput.pressKey(view === "selection" ? "j" : view === "help" ? "?" : "w");
-      const text = view === "selection" ? "+ hello from jj-evolved" : view === "help" ? "Keyboard reference" : "Working-copy status";
+      const text = view === "selection" ? "+ hello from jj-evolved" : view === "help" ? "Help · " : "Working-copy status";
       await t.until(text);
       gate.resolve();
       // An open overlay suppresses "Ready.", so wait for the refresh read instead.
@@ -1549,14 +1549,14 @@ test("focus preserves help and defers refresh while a filtered target is tempora
   const snapshot = spyOn(t.repo, "snapshot");
   try {
     t.screen.mockInput.pressKey("?");
-    await t.until("Keyboard reference");
+    await t.until("Help · ");
     const reads = snapshot.mock.calls.length;
     t.screen.renderer.emit("focus");
     for (let attempt = 0; attempt < 150 && snapshot.mock.calls.length === reads; attempt++) await Bun.sleep(10);
     await snapshot.mock.results.at(-1)?.value;
     await Bun.sleep(50);
     await t.screen.renderOnce();
-    expect(t.screen.captureCharFrame()).toContain("Keyboard reference");
+    expect(t.screen.captureCharFrame()).toContain("Help · ");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(50);
     t.screen.mockInput.pressKey("L");
@@ -1649,7 +1649,7 @@ test("focus refresh does not restore scroll over help opened during a pending di
     t.screen.renderer.emit("focus");
     await started.promise;
     t.screen.mockInput.pressKey("?");
-    await t.until("Keyboard reference");
+    await t.until("Help · ");
     await t.screen.waitForVisualIdle();
     t.screen.mockInput.pressKey("\x1b[6~");
     await t.screen.renderOnce();
@@ -1660,7 +1660,7 @@ test("focus refresh does not restore scroll over help opened during a pending di
     await finished.promise;
     await Bun.sleep(50);
     await t.screen.renderOnce();
-    expect(String(preview.title).trim()).toBe("Keyboard reference");
+    expect(String(preview.title).trim()).toBe("");
     expect(preview.scrollTop).toBe(top);
   } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);

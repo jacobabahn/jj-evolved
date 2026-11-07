@@ -43,7 +43,7 @@ for (const code of [0, 1]) {
       expect(await Bun.file(calls).json()).toEqual({ args: ["show", revision.commitId], cwd: await f.jj("root").then(root => root.trim()) });
       screen.mockInput.pressKey("?");
       await screen.renderOnce();
-      expect(screen.captureCharFrame()).toContain("Keyboard reference");
+      expect(screen.captureCharFrame()).toContain("Help · ");
     } finally {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;

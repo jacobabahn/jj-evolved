@@ -11,7 +11,7 @@ test("inline mode restores its pane, confirmation removes duplicate chrome, and 
   expect(graph.borderColor).not.toEqual(border);
   ui.key("j"); ui.key("j"); ui.key("RETURN");
   await ui.until("Rebase preview");
-  expect(ui.screen.renderer.root.findDescendantById("prompt-label")?.visible).toBe(false);
+  expect(ui.screen.renderer.root.findDescendantById("prompt-input")?.visible).toBe(false);
   expect(ui.screen.renderer.root.findDescendantById("action-overlay-feedback")?.visible).toBe(false);
   expect(ui.screen.captureCharFrame()).not.toContain("Ready.");
   ui.key("ESCAPE");
@@ -66,7 +66,7 @@ test("prompts and overlays put their own keys in the footer instead of the brows
   expect(footer(ui)).toContain("Tab focus preview");
   expect(footer(ui)).not.toContain("match");
   ui.key("?");
-  await ui.until("Keyboard reference");
+  await ui.until("Help · ");
   expect(footer(ui)).toContain("j/k scroll  PgDn/PgUp page");
   expect(footer(ui)).toContain("Esc/? close");
   expect(footer(ui)).not.toContain("describe");
@@ -104,7 +104,7 @@ test("the files view footer pins help and opening help keeps the files expanded"
   expect(footer(ui)).toContain("Esc/l collapse");
   expect(footer(ui)).toMatch(/\? help  q quit\s*$/);
   ui.key("?");
-  await ui.until("Keyboard reference");
+  await ui.until("Help · ");
   ui.key("ESCAPE");
   await ui.until("Enter focus diff");
   expect(ui.screen.captureCharFrame()).toContain("files of");
@@ -124,7 +124,7 @@ test("help opened from the files view during a refresh returns to up-to-date fil
   ui.screen.renderer.emit("focus");
   await Promise.resolve();
   ui.key("?");
-  await ui.until("Keyboard reference");
+  await ui.until("Help · ");
   // Help hides the graph, so give the refresh time to land underneath it.
   await Bun.sleep(1500);
   await ui.settled();
