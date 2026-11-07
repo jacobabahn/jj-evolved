@@ -48,9 +48,14 @@ type Prompt =
 
 
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
+// Help writes single keys as the footer does (`PgDn/PgUp`, `^D/^U`). Labels that already hold a slash (`j/down`)
+// or are punctuation (`@`, `[`) are spaced apart instead, so each action's keys stay readable.
+function joinKeys(labels: string[]) {
+  return labels.some(label => label.includes("/") || /^[^a-z0-9]$/i.test(label)) ? labels.join(" / ") : labels.join("/");
+}
 function helpSections(bindings: Keybindings): { title: string; rows: [string, string][] }[] {
   const keys = (actions: Action[]) => actions.some(action => bindings[action].length)
-    ? actions.filter(action => bindings[action].length).map(action => keyLabel(bindings, action)).join(" / ")
+    ? joinKeys(actions.filter(action => bindings[action].length).map(action => keyLabel(bindings, action)))
     : actions.some(action => menuActions.has(action)) ? "(Space menu)" : "(unbound)";
   return [
     { title: "Navigate", rows: [
@@ -62,7 +67,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       [keys(["refresh"]), "Refresh history now; external changes also refresh automatically"],
       [keys(["help"]), "Show this help"],
       [keys(["lastError"]), `Show the last error in full; Esc or ${keyLabel(bindings, "diff")} returns to the diff`],
-      [`${keys(["quit"])} / ^C`, "Quit"],
+      [joinKeys([...bindings.quit.length ? [keyLabel(bindings, "quit")] : [], "^C"]), "Quit"],
     ] },
     { title: "Preview pane", rows: [
       [keys(["togglePreview"]), "Hide or show the preview; the graph expands when hidden"],
@@ -123,7 +128,7 @@ function helpSections(bindings: Keybindings): { title: string; rows: [string, st
       ["Enter", "Apply / confirm; newline in the description editor"],
       ["^S/^D", "Save the description"],
       ["Tab/Shift-Tab", "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); ^N/^P and arrows also work"],
-      ["PgDn / PgUp", "Scroll the overlay preview"],
+      ["PgDn/PgUp", "Scroll the overlay preview"],
       ["Esc", "Go back one level, or cancel at the top; press twice to discard description edits"],
     ] },
   ];
@@ -1741,7 +1746,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       confirm(action);
     }
   }
-  /** Keys shared by the overlay dialogs: Esc goes back, PgUp/PgDn scroll the preview, Enter submits. */
+  /** Keys shared by the overlay dialogs: Esc goes back, PgDn/PgUp scroll the preview, Enter submits. */
   function dialogKey(key: KeyEvent) {
     if (isBusy()) { key.preventDefault(); return; }
     if (key.name === "escape") { key.preventDefault(); goBack(); }
