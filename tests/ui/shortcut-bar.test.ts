@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { keyPair, shortcutBar } from "../../src/ui/shortcut-bar";
+import { joinKeys, keyPair, shortcutBar } from "../../src/ui/shortcut-bar";
 import { themes } from "../../src/ui/theme";
 
 const text = (bar: ReturnType<typeof shortcutBar>) => bar.chunks.map(chunk => chunk.text).join("");
@@ -11,6 +11,15 @@ test("key pairs use a slash except between two punctuation keys", () => {
   expect(keyPair("Esc", "?")).toBe("Esc/?");
   expect(keyPair("'", '"')).toBe("' \"");
   expect(keyPair("[", "]")).toBe("[ ]");
+});
+
+test("key lists follow the pair rule and space apart labels that already list several keys", () => {
+  expect(joinKeys(["@", "[", "]"])).toBe("@ [ ]");
+  expect(joinKeys(["x", "'"])).toBe("x/'");
+  expect(joinKeys(["^K", "]"])).toBe("^K/]");
+  expect(joinKeys(["/", "?"])).toBe("/ ?");
+  expect(joinKeys(["j/down", "k/up"])).toBe("j/down / k/up");
+  expect(joinKeys(["q", "^C"])).toBe("q/^C");
 });
 
 test("shortcuts drop from the end of the left group while the right group stays pinned", () => {
