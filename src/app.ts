@@ -150,7 +150,7 @@ function bookmarkFieldColors(colors: Theme) {
 function chooserColors(colors: Theme) {
   return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
 }
-export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, keys: Keybindings | Keymap = defaultBindings, options: { refreshIntervalMs?: number; preset?: string; revsetHistory?: RevsetHistoryStore } = {}) {
+export function createApp(renderer: CliRenderer, repository: Repository, theme: Theme = themes.terminal, saveTheme: (name: ThemeName) => Promise<void> = async () => {}, keys: Keybindings | Keymap = defaultBindings, options: { refreshIntervalMs?: number; snapshotIntervalMs?: number; preset?: string; revsetHistory?: RevsetHistoryStore } = {}) {
   const tables = ("scopes" in keys ? keys : keymap(keys)).scopes;
   const bindings = tables.revisions;
   const actionKeys = (action: Action) => keyLabel(bindings, action);
@@ -259,6 +259,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
   let checkingUpdates = false;
   let observedOperation: string | null = null;
+  // When the working copy was last snapshotted, so idle polls know when one is due.
+  let lastSnapshot = 0;
   let refreshError = "";
   let replacing = false;
   let focusRefreshPending = false;
@@ -451,6 +453,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const limit = nextRevset === revset ? historyLimit : 200;
     list.cancelDrag();
     // Read the ID before the view so a concurrent change costs one extra reload, never a missed one.
+    lastSnapshot = Date.now();
     const operation = await repository.snapshotOperationId();
     const loaded = await loadHistory(repository, { revset: nextRevset, limit, previous: captureView, selectWorkingCopy: workingCopy, query: preserveView ? search.query : "" });
     if (stopped || request !== refreshRequest) return;
@@ -500,18 +503,29 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     displayView(view);
     updateInlineHint();
   }
-  async function checkForUpdates() {
+  /**
+   * Reloads when the repository changed since the last view. A snapshot scans the working copy and, when colocated, imports
+   * every Git ref, which on a large repository costs hundreds of milliseconds even when nothing changed. With
+   * `snapshot: false` it first reads the operation ID without one, which only catches other jj commands, and snapshots
+   * only when that ID moved. The timer snapshots every `snapshotIntervalMs`, and focus, reloads and the app's own
+   * actions snapshot too, so a file edit seen by none of them waits at most that long.
+   */
+  async function checkForUpdates({ snapshot = true }: { snapshot?: boolean } = {}) {
     if (stopped || checkingUpdates || isBusy() || !idle() || list.dragActive) return;
     checkingUpdates = true;
     const generation = activity;
     const valid = () => !stopped && activity === generation && !isBusy() && idle() && !list.dragActive;
+    const unchanged = () => { if (refreshError) { report("Ready."); refreshError = ""; } };
     try {
+      if (!snapshot) {
+        const latest = await repository.operationId();
+        if (!valid()) return;
+        if (latest === observedOperation) return unchanged();
+      }
+      lastSnapshot = Date.now();
       let operation = await repository.snapshotOperationId();
       if (!valid()) return;
-      if (operation === observedOperation) {
-        if (refreshError) { report("Ready."); refreshError = ""; }
-        return;
-      }
+      if (operation === observedOperation) return unchanged();
       // status snapshots too, so it must precede the ID that the re-check compares against.
       const status = statusShown() ? await repository.status() : undefined;
       if (status !== undefined) operation = await repository.operationId();
@@ -1981,7 +1995,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     historySaved = historyStore.load().then(entries => { revsetHistory = entries; }).catch(error => report(`Couldn't read revset history: ${errorText(error)}`, true));
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
     const interval = options.refreshIntervalMs ?? 2000;
-    if (!stopped && interval > 0) { refreshTimer = setInterval(() => { void checkForUpdates(); }, interval); refreshTimer.unref(); }
+    const snapshotInterval = options.snapshotIntervalMs ?? 30_000;
+    const poll = () => { void checkForUpdates({ snapshot: Date.now() - lastSnapshot >= snapshotInterval }); };
+    if (!stopped && interval > 0) { refreshTimer = setInterval(poll, interval); refreshTimer.unref(); }
   }, stop, checkForUpdates,
   // Silent refreshes leave no message to wait for, so tests wait here instead, including for a focus refresh queued as a microtask.
   async settled() { do { await Promise.resolve(); await running; } while (running); } };

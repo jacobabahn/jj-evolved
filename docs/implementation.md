@@ -72,7 +72,7 @@ Each root has two lanes, each its own process and FIFO with one request in fligh
 
 Invariants:
 
-- The helper never snapshots or writes. Anything that may snapshot, `--no-integrate-operation`, and any call with a custom `env` stay on the CLI. Working-copy edits reach it only after a CLI command snapshots them, which `snapshotOperationId` does before every reload.
+- The helper never snapshots or writes. Anything that may snapshot, `--no-integrate-operation`, and any call with a custom `env` stay on the CLI. Working-copy edits reach it only after a CLI command snapshots them, which `snapshotOperationId` does before every reload. Idle polls read `opId` through the helper and call `snapshotOperationId` only every 30 seconds or when that ID moved, since a snapshot of a large colocated repository costs hundreds of milliseconds even when nothing changed.
 - A request's template may use the helper-only methods in `PROTOCOL.md`, with the plain jj spelling in its CLI fallback. `bookmarks` does, so 50,000 bookmarks cost 37 ms instead of 285 ms of loading each target commit.
 - The CLI is the only source of user-visible errors. `ok:false`, a crash, an unexpected exit, a malformed frame and `ready:false` all re-run the read through its fallback, and the caller cannot tell. That covers invalid revsets, old operations and divergent operation heads.
 - A helper's `jjVersion` and protocol must match `jj --version`, read once per process. The app follows whatever `jj` the user has, so a mismatch disables the helper for the session instead of reading a repository with another jj-lib.

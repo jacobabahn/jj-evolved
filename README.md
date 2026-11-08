@@ -101,7 +101,7 @@ jj-evolved is under active development and focuses on local repository work. It 
 - **Large histories:** the graph starts with 200 revisions; `Ctrl+L` loads more. Search and destination pickers cover the full history, and destination pickers also accept a revset; diffs and search metadata are buffered in memory.
 - **Compatibility:** broader platform, terminal, and JJ-version coverage is still being established.
 
-While browsing, automatic refresh runs `jj status`, which can snapshot pending working-copy edits. Reviewed actions reject stale repository state if another command or file edit changes it before confirmation. JJ remains responsible for validating operations.
+While browsing, automatic refresh snapshots pending working-copy edits every 30 seconds and whenever focus returns to the app; jj commands run elsewhere show up within two seconds. Reviewed actions reject stale repository state if another command or file edit changes it before confirmation. JJ remains responsible for validating operations.
 
 ## Development
 
