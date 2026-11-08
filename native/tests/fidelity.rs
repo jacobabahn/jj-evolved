@@ -39,6 +39,10 @@ const REVISION_TEMPLATE: &str = r#"'{'
 /// `bookmarks()` in `src/repository/repository.ts`.
 const BOOKMARK_TEMPLATE: &str = r#"'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']
 '"#;
+/// What `bookmarks()` sends the helper: [`BOOKMARK_TEMPLATE`] with the helper-only spelling of the targets.
+fn helper_bookmark_template() -> String {
+    BOOKMARK_TEMPLATE.replace("added_targets.map(|c| c.commit_id())", "jj_evolved_added_target_ids")
+}
 /// `files()` in `src/repository/repository.ts`.
 const FILES_TEMPLATE: &str = r#"'[' ++ json(path) ++ ',' ++ json(status) ++ ']
 '"#;
@@ -240,6 +244,19 @@ fn cli_args(request: &Value) -> Vec<String> {
 /// Sends `request` to the helper, twice so the cached path is covered, and compares with the CLI.
 fn assert_matches_cli(env: &JjEnv, helper: &mut Helper, request: Value) {
     let args = cli_args(&request);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let cli = env.command(&args).output().unwrap();
+    assert!(cli.status.success(), "jj {args:?}: {}", String::from_utf8_lossy(&cli.stderr));
+    for pass in ["first", "second"] {
+        let response = helper.request(request.clone());
+        assert!(response.ok, "{pass} {request}: {:?}", response.error);
+        assert_same_bytes(&format!("{pass} {request}"), &response.payload, &cli.stdout);
+    }
+}
+
+/// For a request whose template uses a helper-only method: the helper answers `request`, the CLI runs `cli_request`.
+fn assert_pair_matches_cli(env: &JjEnv, helper: &mut Helper, request: Value, cli_request: Value) {
+    let args = cli_args(&cli_request);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let cli = env.command(&args).output().unwrap();
     assert!(cli.status.success(), "jj {args:?}: {}", String::from_utf8_lossy(&cli.stderr));
@@ -637,6 +654,51 @@ fn bookmarks_cover_every_state() {
     assert!(listed.contains(",true,false]\n"), "no conflicted bookmark in {listed}");
     assert!(listed.contains(",true,1,0]\n"), "no bookmark ahead of its remote in {listed}");
     assert!(listed.contains(r#"["untracked","origin",["#) && listed.contains(",false,false]\n"), "{listed}");
+}
+
+/// Every bookmark state from `Fixture::rich`: local, deleted with a remote, tracked ahead, untracked, Git-tracking, and
+/// conflicted, whose added targets are more than one.
+#[test]
+fn helper_target_ids_print_what_added_targets_prints() {
+    let (f, _) = Fixture::rich();
+    let mut helper = f.env.spawn();
+    for (fast, slow) in [
+        (helper_bookmark_template(), BOOKMARK_TEMPLATE.to_owned()),
+        (
+            "name ++ '@' ++ remote ++ ' ' ++ json(jj_evolved_added_target_ids) ++ \"\\n\"".to_owned(),
+            "name ++ '@' ++ remote ++ ' ' ++ json(added_targets.map(|c| c.commit_id())) ++ \"\\n\"".to_owned(),
+        ),
+        (
+            "jj_evolved_added_target_ids.join(',') ++ ' ' ++ jj_evolved_added_target_ids.len() ++ \"\\n\"".to_owned(),
+            "added_targets.map(|c| c.commit_id()).join(',') ++ ' ' ++ added_targets.len() ++ \"\\n\"".to_owned(),
+        ),
+    ] {
+        assert_pair_matches_cli(
+            &f.env,
+            &mut helper,
+            json!({"kind": "bookmarks", "template": fast}),
+            json!({"kind": "bookmarks", "template": slow}),
+        );
+    }
+    let listed = String::from_utf8(
+        helper
+            .request(json!({"kind": "bookmarks", "template": "json(jj_evolved_added_target_ids) ++ \"\\n\""}))
+            .payload,
+    )
+    .unwrap();
+    assert!(
+        listed.lines().any(|line| line.matches(',').count() >= 1),
+        "no conflicted bookmark with two targets: {listed}"
+    );
+    assert!(listed.lines().any(|line| line == "[]"), "no bookmark without targets: {listed}");
+
+    // Plain jj doesn't have it, so the client must never send it to the CLI.
+    let output = f
+        .env
+        .command(&["--ignore-working-copy", "bookmark", "list", "-T", "jj_evolved_added_target_ids"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
 }
 
 #[test]
@@ -1090,6 +1152,14 @@ fn bench_repos() {
             }
         }
         assert!(files_checked > 0);
+        let started = std::time::Instant::now();
+        assert_pair_matches_cli(
+            &env,
+            &mut helper,
+            json!({"kind": "bookmarks", "template": helper_bookmark_template()}),
+            json!({"kind": "bookmarks", "template": BOOKMARK_TEMPLATE}),
+        );
+        eprintln!("{name}: bookmarks with jj_evolved_added_target_ids: {:?}", started.elapsed());
 
         let total = requests.len();
         let started = std::time::Instant::now();

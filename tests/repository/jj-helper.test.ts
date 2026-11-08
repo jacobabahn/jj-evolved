@@ -383,6 +383,9 @@ test("routes the read paths with the CLI's exact text, and never anything that s
       { kind: "tags", template: 'if(!remote, json(name) ++ "\\n")' },
     ]);
     expect(routed[6]!.template).toContain("tracking_ahead_count");
+    // The helper gets its own spelling of the targets; the CLI fallback, which answered here, needs jj's.
+    expect(routed[6]!.template).toContain("json(jj_evolved_added_target_ids)");
+    expect(routed[6]!.template).not.toContain("added_targets");
 
     await writeFile(logPath, "");
     await repo.snapshot("all()");
