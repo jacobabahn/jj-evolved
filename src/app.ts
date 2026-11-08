@@ -157,7 +157,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const header = new TextRenderable(renderer, { id: "header", height: 1, fg: colors.accent, content: terminalText(`jj-evolved  /  ${repository.root}`) });
   const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset:" });
   const body = new BoxRenderable(renderer, { id: "body", flexDirection: "row", flexGrow: 1, minHeight: 1 });
-  const listBox = new BoxRenderable(renderer, { id: "revision-pane", width: "42%", minWidth: 26, flexShrink: 0, border: true, customBorderChars: { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }, borderColor: colors.accent, title: " Revisions ", backgroundColor: colors.panel });
+  // The revisions pane takes 42% of the terminal in whole cells. A percentage width is fractional at most sizes
+  // (33.6 cells at 80 columns), which leaves the preview beside it fractional too, and its text then lays out a column
+  // wider than the space it has.
+  const revisionPaneWidth = () => Math.round(renderer.width * 0.42);
+  const listBox = new BoxRenderable(renderer, { id: "revision-pane", width: revisionPaneWidth(), minWidth: 26, flexShrink: 0, border: true, customBorderChars: { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }, borderColor: colors.accent, title: " Revisions ", backgroundColor: colors.panel });
   const list = new RevisionLog(renderer);
   list.height = 0;
   list.flexGrow = 1;
@@ -380,7 +384,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function setPreviewVisible(visible: boolean) {
     preview.visible = visible;
-    listBox.width = visible ? "42%" : "100%";
+    listBox.width = visible ? revisionPaneWidth() : "100%";
     listBox.customBorderChars = visible
       ? { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }
       : BorderChars.single;
@@ -1651,6 +1655,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void loadFilePreview();
   }
   function onResize(width: number) {
+    if (preview.visible) listBox.width = revisionPaneWidth();
     updateFilesTitle(width);
     paintPanes();
     // The graph's new height is known once layout runs, so the cap follows on the next frame.
