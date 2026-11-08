@@ -1,0 +1,19 @@
+name: Set up jj
+description: >-
+  Installs the official prebuilt jj release that the helper links against. The version is read from the jj-cli pin
+  in native/Cargo.toml, so bumping that pin is the only change needed.
+runs:
+  using: composite
+  steps:
+    - name: Install jj
+      shell: bash
+      run: |
+        version=$(sed -nE 's/^jj-cli = .*version = "=([0-9.]+)".*/\1/p' native/Cargo.toml)
+        if [ -z "$version" ]; then echo "::error::No exact jj-cli pin in native/Cargo.toml"; exit 1; fi
+        dir="$RUNNER_TEMP/jj"
+        mkdir -p "$dir"
+        curl -fsSL "https://github.com/jj-vcs/jj/releases/download/v$version/jj-v$version-x86_64-unknown-linux-musl.tar.gz" \
+          | tar -xz -C "$dir" ./jj
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/jj" --version
+        "$dir/jj" --version | grep -q "^jj $version" || { echo "::error::Expected jj $version"; exit 1; }
