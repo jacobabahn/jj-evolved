@@ -7,12 +7,12 @@ import { RevisionLog } from "../src/revisions/revision-log";
 import { fixture } from "./fixture";
 import { writeFileSync } from "node:fs";
 
-async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void> = async () => {}, interval = 0) {
+async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promise<void> = async () => {}, interval = 0, snapshotInterval?: number) {
   const f = await fixture();
   await prepare(f);
   const repo = await Repository.open(f.path);
   const screen = await createTestRenderer({ width: 110, height: 32 });
-  const app = createApp(screen.renderer, repo, undefined, undefined, undefined, { refreshIntervalMs: interval });
+  const app = createApp(screen.renderer, repo, undefined, undefined, undefined, { refreshIntervalMs: interval, snapshotIntervalMs: snapshotInterval });
   await app.start();
   const node = <T>(id: string) => screen.renderer.root.findDescendantById(id) as T;
   async function until(predicate: () => boolean | Promise<boolean>) {
@@ -163,6 +163,43 @@ test("idle polls read only the operation ID after startup, refreshes, and mutati
     await t.text("describe completed");
     await idlePoll();
   } finally { spawn.mockRestore(); snapshot.mockRestore(); graph.mockRestore(); await t.cleanup(); }
+});
+
+test("polls without a snapshot read only the operation ID, catch jj commands, and snapshot once they see one", async () => {
+  const t = await setup();
+  const snapshotted = spyOn(t.repo, "snapshotOperationId");
+  try {
+    await t.app.checkForUpdates();
+    await Bun.write(`${t.f.path}/unseen.txt`, "not snapshotted yet\n");
+    snapshotted.mockClear();
+    await t.app.checkForUpdates({ snapshot: false });
+    expect(snapshotted).not.toHaveBeenCalled();
+    await t.screen.renderOnce();
+    expect(t.screen.captureCharFrame()).not.toContain("unseen.txt");
+    await t.f.jj("--ignore-working-copy", "bookmark", "create", "external", "-r", "@-");
+    await t.app.checkForUpdates({ snapshot: false });
+    expect(snapshotted).toHaveBeenCalledTimes(1);
+    await t.text("external");
+    await t.text("unseen.txt");
+  } finally { snapshotted.mockRestore(); await t.cleanup(); }
+});
+
+test("the refresh timer snapshots only every snapshot interval", async () => {
+  const t = await setup(undefined, 10, 60_000);
+  const snapshotted = spyOn(t.repo, "snapshotOperationId");
+  const read = spyOn(t.repo, "operationId");
+  try {
+    await t.until(() => read.mock.calls.length >= 5);
+    expect(snapshotted).not.toHaveBeenCalled();
+  } finally { snapshotted.mockRestore(); read.mockRestore(); await t.cleanup(); }
+});
+
+test("the refresh timer picks up a file edit at the next timed snapshot", async () => {
+  const t = await setup(undefined, 10, 100);
+  try {
+    await Bun.write(`${t.f.path}/timed.txt`, "found by the timed snapshot\n");
+    await t.text("+ found by the timed snapshot");
+  } finally { await t.cleanup(); }
 });
 
 test("idle polls detect external file edits and refresh an open status view", async () => {
