@@ -234,9 +234,11 @@ export class Repository {
 
   async bookmarks(): Promise<Bookmark[]> {
     // JJ counts from the remote's side, so its "behind" is how far the local bookmark is ahead. Only tracked remotes have counts.
-    const template = `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(added_targets.map(|c| c.commit_id())) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']\n'`;
+    const template = (targets: string) => `'[' ++ json(name) ++ ',' ++ json(if(remote, stringify(remote), "")) ++ ',' ++ json(${targets}) ++ ',' ++ json(conflict) ++ ',' ++ json(tracked) ++ if(remote && tracked, ',' ++ json(tracking_behind_count.lower()) ++ ',' ++ json(tracking_ahead_count.lower())) ++ ']\n'`;
+    // The helper prints the same target IDs without loading each target commit; see native/PROTOCOL.md.
     const [output, remotes] = await Promise.all([
-      read(this.root, { kind: "bookmarks", template }, () => run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T", template])),
+      read(this.root, { kind: "bookmarks", template: template("jj_evolved_added_target_ids") },
+        () => run(this.root, ["--ignore-working-copy", "--at-op=@", "bookmark", "list", "--all-remotes", "-T", template("added_targets.map(|c| c.commit_id())")])),
       this.remotes().catch(() => [])]);
     const bookmarks = tuples(output).map(([name, remote, targets, conflict, tracked, ahead, behind]): Bookmark => ({
       tracked: boolean(tracked), name: string(name), remote: string(remote), targets: array(targets).map(string), conflict: boolean(conflict),

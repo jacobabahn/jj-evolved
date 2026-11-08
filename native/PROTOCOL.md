@@ -46,6 +46,16 @@ operation ID is served only if it equals the current head, otherwise `ok: false`
 | `tags` | `template` | `jj --ignore-working-copy --at-op=@ tag list -T <template>` |
 | `remotes` | | `jj --ignore-working-copy git remote list` |
 
+## Helper-only template methods
+
+The helper's template language has these methods on top of jj's. Each prints exactly what the jj expression beside it
+prints, without its cost, so a client sends the left form to the helper and the right form to its CLI fallback. This is
+the one place a request's text differs from the CLI command it mirrors; the payload is still byte-identical.
+
+| Method | Same output as | Why |
+|---|---|---|
+| `CommitRef.jj_evolved_added_target_ids` | `added_targets.map(\|c\| c.commit_id())` | Reads IDs from the view instead of loading each commit: 285 ms to 37 ms for 50,000 bookmarks |
+
 ## Freshness
 
 Before each request, read the op heads directly. Exactly one head equal to the cached one: reuse the cached workspace

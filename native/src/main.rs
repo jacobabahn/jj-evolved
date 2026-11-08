@@ -5,6 +5,7 @@
 
 mod config_watch;
 mod requests;
+mod template_ext;
 
 use std::io::BufRead as _;
 use std::io::Write as _;
@@ -47,6 +48,7 @@ enum HelperCommand {
 fn main() -> ExitCode {
     let status = CliRunner::init()
         .name("jj-evolved-helper")
+        .add_commit_template_extension(Box::new(template_ext::HelperTemplates))
         .add_subcommand(serve)
         .add_dispatch_hook(async |ui, command, serve_or_jj| {
             // The runner brings every jj command with it, including the ones that write. Only `serve` is reachable.
