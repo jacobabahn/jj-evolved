@@ -13,11 +13,12 @@ runs:
         declare -A sha256=(
           [0.45.1]=f35438350b5d61963aac5dd74ede510b31d6b9690769d1a6268cf058cc825f72
         )
-        version=$(sed -nE 's/^jj-cli = .*version = "=([0-9.]+)".*/\1/p' native/Cargo.toml)
+        version=$(sed -nE '/^jj-cli = /{s/.*version = "=([0-9.]+)".*/\1/p;q}' native/Cargo.toml)
         if [ -z "$version" ]; then echo "::error::No exact jj-cli pin in native/Cargo.toml"; exit 1; fi
-        lib=$(sed -nE 's/^jj-lib = .*version = "=([0-9.]+)".*/\1/p' native/Cargo.toml)
+        lib=$(sed -nE '/^jj-lib = /{s/.*version = "=([0-9.]+)".*/\1/p;q}' native/Cargo.toml)
+        if [ -z "$lib" ]; then echo "::error::No exact jj-lib pin (version = \"=X.Y.Z\") in native/Cargo.toml"; exit 1; fi
         if [ "$lib" != "$version" ]; then echo "::error::jj-lib pin ($lib) differs from jj-cli pin ($version)"; exit 1; fi
-        helper=$(sed -nE 's/^const JJ_VERSION: &str = "([^"]+)";/\1/p' native/src/main.rs)
+        helper=$(sed -nE '/^const JJ_VERSION: /{s/^const JJ_VERSION: &str = "([^"]+)";/\1/p;q}' native/src/main.rs)
         if [ "$helper" != "$version" ]; then
           echo "::error file=native/src/main.rs::JJ_VERSION ($helper) differs from the jj-cli pin ($version)"; exit 1
         fi
