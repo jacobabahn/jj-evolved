@@ -108,8 +108,25 @@ function withTerminalTints(theme: Theme, colors: TerminalColors | undefined): Th
 }
 
 function mix(from: string, to: string, amount: number) {
-  const a = hexToRgb(from), b = hexToRgb(to);
+  return blend(hexToRgb(from), hexToRgb(to), amount);
+}
+
+function blend(a: RGBA, b: RGBA, amount: number) {
   return RGBA.fromValues(a.r + (b.r - a.r) * amount, a.g + (b.g - a.g) * amount, a.b + (b.b - a.b) * amount);
+}
+
+/**
+ * The row tint for a search match: halfway from the panel to the selection band, so a match reads as marked without
+ * looking selected. Without a band, or when the panel is the terminal's own background and the terminal has not
+ * reported it, there is nothing to mix, and the match marker alone shows the match.
+ */
+export function matchTint(context: RenderContext): RGBA | undefined {
+  const theme = getTheme(context);
+  if (!hasSelectionBand(theme)) return undefined;
+  const panel = parseColor(theme.panel), band = parseColor(theme.graphSelected);
+  const reported = contextTerminalColors.get(context)?.defaultBackground;
+  const background = panel.intent === "rgb" ? panel : reported ? hexToRgb(reported) : undefined;
+  return background && band.intent === "rgb" ? blend(background, band, 0.5) : undefined;
 }
 
 export function setTheme(context: RenderContext, theme: Theme) {

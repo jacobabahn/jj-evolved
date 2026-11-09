@@ -315,7 +315,7 @@ test("expanded files follow a rewritten change, keep the selected file, and coll
     await t.text("Change preview");
     t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressKey("l");
-    await t.text("▾ ○");
+    await t.text("▾  ○");
     await t.text("┃ A hello.txt");
     await t.f.jj("abandon", "feature");
     await t.app.checkForUpdates();

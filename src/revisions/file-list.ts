@@ -37,7 +37,8 @@ export class FileList extends ScrollBoxRenderable {
   setFiles(files: ChangedFile[], prefix: string, maxRows: number, selectPath?: string) {
     for (const row of this.rows) row.destroyRecursively();
     this.files = files;
-    this.prefix = `  ${prefix}`;
+    // The revision rows' three-column gutter, so the lanes line up.
+    this.prefix = `   ${prefix}`;
     this.selectedIndex = Math.max(0, files.findIndex(file => file.path === selectPath));
     this.rows = files.map((_, index) => {
       const row = new TextRenderable(this.ctx, { id: `${this.id}-row-${index}`, height: 1, width: "100%", flexShrink: 0, selectable: false, wrapMode: "none", truncate: true, onMouseDown: event => { if (event.button === 0) this.setSelectedIndex(index); } });

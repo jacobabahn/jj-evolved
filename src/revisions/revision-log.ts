@@ -1,4 +1,4 @@
-import { cursorBar, getTheme, hasSelectionBand } from "../ui/theme";
+import { cursorBar, getTheme, hasSelectionBand, matchTint } from "../ui/theme";
 import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
@@ -335,20 +335,22 @@ export class RevisionLog extends ScrollBoxRenderable {
     const moving = row.revisionIndex !== null && this.movingCommits.has(this.revisions[row.revisionIndex]?.commitId ?? "");
     const source = (row.revisionIndex === this.sourceIndex || draggingSource || moving) && row.heading;
     const drop = this.dropIndex !== null && row.revisionIndex === this.dropIndex;
-    const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : getTheme(this.ctx).panel;
     const id = row.revisionIndex === null ? "" : this.revisions[row.revisionIndex]?.commitId ?? "";
     const match = this.searchMatches.has(id);
+    // A match tints its whole row, both lines, more faintly than the selection.
+    const tint = match ? matchTint(this.ctx) : undefined;
+    const background = drop ? getTheme(this.ctx).drop : selected ? getTheme(this.ctx).graphSelected : tint ?? getTheme(this.ctx).panel;
     const outside = this.outsideFilter.has(id);
     const theme = getTheme(this.ctx);
-    // Two-column gutter: the cursor bar (or source/drop/expanded marker) at the edge, then the search or filter marker.
+    // Three-column gutter: the cursor bar (or source/drop/expanded marker) at the edge, the search or filter marker, then
+    // a space so the marker never runs into the graph.
     const indicator = drop && row.heading ? fg(theme.text)("→") : source ? fg(theme.accent)("●") : expanded && row.heading ? fg(theme.text)("▾") : selected ? fg(theme.accent)(cursorBar(theme)) : " ";
     const marker = row.heading && outside ? "+" : row.heading && match ? "*" : " ";
     // Without a band, bold the description (the last chunk) so the change ID keeps its prefix emphasis.
     const emphasize = selected && !row.heading && !hasSelectionBand(theme);
     const chunks = (draggingSource ? this.rowText(row).drag : this.rowText(row).plain).chunks
-      .map((chunk, index, all) => emphasize && index === all.length - 1 ? bold(chunk) : chunk)
-      .map(chunk => match ? bg(theme.selected)(chunk) : chunk);
-    row.label.content = new StyledText([bold(indicator), bold(fg(theme.accent)(marker)), ...chunks]);
+      .map((chunk, index, all) => emphasize && index === all.length - 1 ? bold(chunk) : chunk);
+    row.label.content = new StyledText([bold(indicator), bold(fg(theme.accent)(`${marker} `)), ...chunks]);
     row.node.backgroundColor = background;
     row.label.bg = background;
     const bookmark = row.heading && drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"

@@ -3,7 +3,7 @@ import { TextRenderable, DiffRenderable, RGBA, parseColor, type TerminalColors }
 import { createTestRenderer } from "@opentui/core/testing";
 import { ActionOverlay } from "../../src/ui/action-overlay";
 import { ChangePreview } from "../../src/preview/change-preview";
-import { getTheme, hasSelectionBand, setTerminalColors, setTheme, themes, themeNames } from "../../src/ui/theme";
+import { getTheme, hasSelectionBand, matchTint, setTerminalColors, setTheme, themes, themeNames } from "../../src/ui/theme";
 
 test("terminal defaults retain terminal color intent", () => {
   expect(themes.terminal.bg.intent).toBe("default");
@@ -76,6 +76,22 @@ test("the terminal theme tints diff lines and the selection band from the colors
     setTerminalColors(screen.renderer, { ...reported, defaultBackground: null });
     setTheme(screen.renderer, themes.terminal);
     expect(getTheme(screen.renderer)).toBe(themes.terminal);
+  } finally {
+    screen.renderer.destroy();
+  }
+});
+
+test("search matches are tinted halfway to the selection band, or not at all without one", async () => {
+  const screen = await createTestRenderer({ width: 40, height: 10 });
+  try {
+    setTheme(screen.renderer, themes.dark);
+    // #15212c panel and #294a51 band.
+    expect(matchTint(screen.renderer)?.toInts().slice(0, 3)).toEqual([31, 54, 63]);
+    setTheme(screen.renderer, themes.terminal);
+    expect(matchTint(screen.renderer)).toBeUndefined();
+    // The panel is the terminal's own background, so the tint mixes the reported one.
+    setTerminalColors(screen.renderer, { palette: [], defaultBackground: "#000000", defaultForeground: "#ffffff" } as unknown as TerminalColors);
+    expect(matchTint(screen.renderer)).toEqual(RGBA.fromValues(0.075, 0.075, 0.075));
   } finally {
     screen.renderer.destroy();
   }
