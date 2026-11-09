@@ -202,6 +202,21 @@ test("the refresh timer picks up a file edit at the next timed snapshot", async 
   } finally { await t.cleanup(); }
 });
 
+test("a key pressed after a quiet spell snapshots, standing in for a terminal that reports no focus", async () => {
+  const t = await setup(undefined, 100, 60_000);
+  const snapshotted = spyOn(t.repo, "snapshotOperationId");
+  try {
+    await Bun.write(`${t.f.path}/returned.txt`, "seen after a key\n");
+    await Bun.sleep(200);
+    expect(snapshotted).not.toHaveBeenCalled();
+    // Only the first of two quick keys follows a quiet spell.
+    t.screen.mockInput.pressKey("k");
+    t.screen.mockInput.pressKey("k");
+    await t.text("+ seen after a key");
+    expect(snapshotted).toHaveBeenCalledTimes(1);
+  } finally { snapshotted.mockRestore(); await t.cleanup(); }
+});
+
 test("idle polls detect external file edits and refresh an open status view", async () => {
   const t = await setup();
   try {
