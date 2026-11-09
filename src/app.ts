@@ -186,10 +186,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
   const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, marginTop: 1, ...fieldColors(colors), placeholderColor: colors.muted });
   const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
-  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, width: "100%", placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
-  const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, wrapMode: "none", truncate: true, fg: colors.accent });
+  const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, flexGrow: 1, minWidth: 1, placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
+  const searchPrefix = new TextRenderable(renderer, { id: "search-prefix", visible: false, flexShrink: 0, fg: colors.accent, content: "/" });
+  const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, flexShrink: 0, marginLeft: 2, wrapMode: "none", fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) · + outside filter" });
-  const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
+  const message = new TextRenderable(renderer, { id: "message", height: 1, flexGrow: 1, flexShrink: 1, minWidth: 0, fg: colors.muted, content: "Loading history…" });
+  // The message row also holds the search: the query being typed, or a kept search and its position at the right end,
+  // so searching never pushes the panes down.
+  const statusRow = new BoxRenderable(renderer, { id: "status-row", height: 1, flexShrink: 0, flexDirection: "row" });
+  for (const child of [message, searchPrefix, searchInput, searchStatus]) statusRow.add(child);
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 2, flexShrink: 0, visible: false, fg: colors.accent });
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, wrapMode: "none", fg: colors.accent });
   const chooser = new GroupedSelect(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
@@ -219,10 +224,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   preview.add(detail);
   body.add(listBox);
   body.add(preview);
-  for (const child of [header, filter, message, navigationStatus, searchInput, searchStatus, inlineHint, body, shortcuts, overlay]) app.add(child);
+  for (const child of [header, filter, statusRow, navigationStatus, inlineHint, body, shortcuts, overlay]) app.add(child);
   // Dim everything behind an open overlay except the footer, which shows the overlay's keys.
   overlay.onVisibility = visible => {
-    for (const child of [header, filter, message, navigationStatus, searchInput, searchStatus, inlineHint, body]) child.opacity = visible ? 0.35 : 1;
+    for (const child of [header, filter, message, searchPrefix, searchInput, searchStatus, navigationStatus, inlineHint, body]) child.opacity = visible ? 0.35 : 1;
   };
   renderer.root.add(app);
 
@@ -590,10 +595,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function updateSearchStatus() {
     navigationStatus.visible = returnPoint !== null;
-    searchStatus.visible = search.query.length > 0 || prompt.kind === "search";
+    const typing = prompt.kind === "search";
+    searchStatus.visible = search.query.length > 0 || typing;
+    message.visible = !typing;
+    searchPrefix.visible = typing;
     const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
-    const position = search.matches.length ? (index < 0 ? `${search.matches.length} matches` : `${index + 1}/${search.matches.length}`) : search.query ? "No matches" : "Type to search";
-    searchStatus.content = terminalText(`Search in revset · ${position}${search.query ? ` · ${search.query}` : ""}`);
+    const count = search.matches.length;
+    const position = count ? (index < 0 ? `${count} ${count === 1 ? "match" : "matches"}` : `${index + 1} of ${count}`) : search.query ? "No matches" : "Type to search";
+    // While typing, the query is in the input beside it.
+    searchStatus.content = terminalText(typing ? position : `/${search.query}  ${position}`);
     list.markNavigation(new Set(search.matches.map(item => item.commitId)), outsideFilter);
     paintShortcuts();
   }
@@ -625,7 +635,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (prompt.kind !== "search") return;
     ++searchRequest;
     clearTimeout(searchTimer);
-    searchStatus.content = "Searching active revset…";
+    searchStatus.content = "Searching…";
     searchTimer = setTimeout(() => {
       void updateSearch().catch(error => report(errorText(error), true));
     }, 100);
@@ -1003,7 +1013,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const themed: [object[], (colors: Theme) => object][] = [
       [[app], c => ({ backgroundColor: c.bg })],
       [[suggestions], c => ({ fg: c.text })],
-      [[header, navigationStatus, searchStatus, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
+      [[header, navigationStatus, searchPrefix, searchStatus, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
       [[filter, message], c => ({ fg: c.muted })],
       [[listBox], c => ({ backgroundColor: c.panel })],
       [[overlayPreview], c => ({ borderColor: c.border })],
