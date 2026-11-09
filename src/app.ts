@@ -1,4 +1,5 @@
 import { ListSearch, RevisionSearch, matchingRevisions } from "./ui/revision-search";
+import { GroupedSelect } from "./ui/grouped-select";
 import { contextView, loadHistory, searchScope, type LoadedHistory, type NavigationView, type Search } from "./revisions/history-view";
 import { bindingLabel, defaultBindings, KeySequence, keyLabel, keymap, presetNames, scopeActions, type Action, type Keybindings, type Keymap, type Scope } from "./ui/keybindings";
 import { applyCompletion, bookmarkNameCompletions, historyCompletions, revsetCompletions, type Completion } from "./revisions/revset-completion";
@@ -141,6 +142,10 @@ function syncState(local: Bookmark, remote: Bookmark) {
     : ahead ? `ahead of ${remote.remote} by ${ahead}` : behind ? `behind ${remote.remote} by ${behind}` : `differs from ${remote.remote}`;
 }
 
+/** A group header in a picker: drawn as a heading, skipped by movement, and never chosen. */
+function groupHeader(name: string): Choice {
+  return { name, description: "", header: true, choose: () => {} };
+}
 function fieldColors(colors: Theme) {
   return { textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel };
 }
@@ -187,7 +192,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const message = new TextRenderable(renderer, { id: "message", height: 1, fg: colors.muted, content: "Loading history…" });
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 2, flexShrink: 0, visible: false, fg: colors.accent });
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, wrapMode: "none", fg: colors.accent });
-  const chooser = new SelectRenderable(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
+  const chooser = new GroupedSelect(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
+  chooser.isHeader = index => prompt.kind === "picker" && Boolean(prompt.choices[index]?.header);
   const overlay = new ActionOverlay(renderer, "action-overlay");
   overlay.visible = false;
   overlay.onKeys = paintShortcuts;
@@ -420,6 +426,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     overlay.place("84%");
     overlay.body.marginBottom = 1;
     overlayPreview.visible = true;
+    chooser.flexGrow = 0;
     overlay.visible = true;
     setMessage("");
     list.mouseSelectionEnabled = false;
@@ -1070,7 +1077,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function showChoices(choices: Choice[]) {
     if (prompt.kind !== "picker") return;
     prompt.choices = choices;
-    const width = Math.max(0, ...choices.map(choice => choice.key?.length ?? 0));
+    // The key column is as wide as the widest key in the whole list, so filtering does not move the names.
+    const width = Math.max(0, ...prompt.all.map(choice => choice.key?.length ?? 0));
     chooser.options = choices.map(choice => ({
       value: choice.name,
       name: terminalText(choice.header ? `── ${choice.name} ──` : width ? `${(choice.key ?? "").padEnd(width)}  ${choice.name}` : choice.name),
@@ -1095,8 +1103,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     prompt = { kind: "picker", title, all: choices, choices, attach: options.attach };
     chooser.visible = true;
     chooser.showDescription = true;
+    // A Selection pane that would only repeat the highlighted row's name and one-line description gives its rows to the list.
+    const repeatsRow = choices.every(choice => !choice.preview && !choice.description.includes("\n"));
+    overlayPreview.visible = !repeatsRow;
+    chooser.flexGrow = repeatsRow ? 1 : 0;
     chooser.focus();
-    overlay.keys = { left: [[choose, "choose"], ["Enter", "select"], previewScroll], right: [exit("close")] };
+    overlay.keys = { left: [[choose, "choose"], ["Enter", "select"], ...(repeatsRow ? [] : [previewScroll])], right: [exit("close")] };
     showChoices(choices);
     options.attach?.();
   }
@@ -1523,14 +1535,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function actions(revision: Revision) {
     const key = (action?: Action) => action && bindings[action].length ? keyLabel(bindings, action, true) : "—";
-    const header = (name: string): Choice => ({ name, description: "", header: true, choose: () => {} });
     const choices: Choice[] = [
-      header("Edit"),
+      groupHeader("Edit"),
       { key: key("describe"), name: "Describe", description: "Edit the selected change's description in the app", choose: () => describe(revision) },
       { key: key("describeExternal"), name: "Describe in editor", description: "Edit the full multiline description in JJ's configured editor", choose: () => describeExternally(revision) },
       { key: key("edit"), name: "Edit (make working copy)", description: "Make the selected change the working copy", choose: () => confirm({ kind: "edit", revision }) },
       { key: key("new"), name: "New child", description: "Create an empty child of the selected change immediately", choose: () => createChild(revision) },
-      header("History"),
+      groupHeader("History"),
       { key: key("rebase"), name: "Rebase", description: "Choose source, destination, scope and preview in a form", choose: () => openHistory(revision, "rebase", false) },
       { key: key(), name: "Rebase with descendants", description: "Move the selected change and its descendants", choose: () => openHistory(revision, "rebase", true) },
       { key: key("squash"), name: "Squash", description: "Choose destination, files and description in a form", choose: () => openHistory(revision, "squash") },
@@ -1540,15 +1551,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       { key: key("absorb"), name: "Absorb into ancestors", description: "Preview automatic fixups into mutable ancestors", choose: () => confirm({ kind: "absorb", revision }) },
       { key: key("abandon"), name: "Abandon", description: "Remove the selected change and rebase its descendants", choose: () => confirm({ kind: "abandon", revision }) },
       ...(revision.conflict ? [{ key: key(), name: "Resolve conflicts", description: "Open JJ's configured merge tool for this change", choose: () => editInteractively({ kind: "resolve", revision }) }] : []),
-      header("Bookmarks & remotes"),
+      groupHeader("Bookmarks & remotes"),
       { key: key("setBookmark"), name: "Set bookmark", description: "Create a bookmark on the selected change, or move an existing one here", choose: () => editBookmark(revision) },
       { key: key("publish"), name: "Publish change", description: "Push under this change's bookmark, advance the nearest one, or name a new one", choose: () => showGit(revision, "publish") },
       { key: key("git"), name: "Git", description: "Push the selected change, fetch, sync its stack with trunk, or browse remotes", choose: () => showGit(revision) },
-      header("Inspect"),
+      groupHeader("Inspect"),
       { key: key("files"), name: "Browse changed files", description: "Preview one file at a time", choose: () => browseFiles(revision) },
       { key: key(), name: "Open in Hunk", description: "Review the selected change in the external Hunk viewer", choose: () => openExternal("Hunk", () => repository.openHunk(revision)) },
       { key: key("evolution"), name: "Change evolution", description: "Browse previous versions and their rewrite diffs", choose: () => showEvolution(revision) },
-      header("Repository"),
+      groupHeader("Repository"),
       { key: key("status"), name: "Working-copy status", description: "Show jj status in the preview", choose: () => { closePrompt(); showStatus(); } },
       { key: key("undo"), name: "Undo", description: "Preview undo of the latest operation", choose: undo },
       { key: key("loadMore"), name: "Load more revisions", description: "Load 200 more revisions, keeping selection", choose: () => { closePrompt(); void run("Loading more history…", loadMoreHistory); } },
@@ -1556,11 +1567,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pick("Actions", choices, { attach: () => {
       pickerSearch = new ListSearch(renderer, "action-search", { moveDown: () => moveChoice(1), moveUp: () => moveChoice(-1), focus: () => chooser.focus() }, choices, matchingChoices, matches => {
         showChoices(matches);
-        if (!matches.length) showOverlay("No matching actions. Edit the filter or press Escape to clear it.", "Actions");
+        overlay.report(matches.length ? "" : "No matching actions. Edit the filter or press Escape to clear it.");
       }, "Filter actions by name");
       pickerSearch.onActiveChange = paintShortcuts;
       overlay.fields.add(pickerSearch.input);
-      overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "filter"], previewScroll] };
+      overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "filter"]] };
     } });
   }
   function describeExternally(revision: Revision) {
