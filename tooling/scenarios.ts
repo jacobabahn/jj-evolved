@@ -540,6 +540,40 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "narrow", title: "Long names at 80 columns: two header rows and one rule for cutting text",
+    async run(ui) {
+      const description = "Validate retry behaviour on intermittent network failures in the dashboard widgets loader";
+      await ui.f.jj("describe", "-m", description);
+      await ui.f.jj("bookmark", "create", "login-flow-redesign", "deps-upgrade-candidate", "-r", "@");
+      await ui.resize(80, 24);
+      ui.key("r", { ctrl: true });
+      await ui.until("[deps-upgrade-");
+      await ui.settled();
+      const screen = ui.screen.captureCharFrame();
+      const rows = screen.split("\n");
+      assert.match(rows[0] ?? "", /^jj-evolved {2}· {2}/);
+      assert.match(rows[1] ?? "", /^revset: .*Ready\.\s*$/);
+      assert.match(screen, /Validate retry .*…/);
+      assert.match(screen, /\[deps-upgrade-\S*…│/);
+      assert.doesNotMatch(screen, /\.\.\./);
+      await ui.capture("Graph and preview at 80x24");
+      ui.key("r");
+      await ui.until("Rebase: choose destination");
+      ui.key("j");
+      ui.key("RETURN");
+      await ui.until("Current tree");
+      assert.doesNotMatch(ui.screen.captureCharFrame(), /\.\.\./);
+      await ui.capture("Rebase review at 80x24");
+      // The pane title stays visible above the review, so wait for the inline hint the review covered.
+      ui.key("ESCAPE"); await ui.until("Rebase from");
+      ui.key("ESCAPE"); await ui.until("Cancelled.");
+      await ui.resize(120, 40);
+      ui.key("k");
+      await ui.until("Commit   ");
+      await ui.capture("Graph and preview at 120x40");
+    },
+  },
+  {
     name: "bookmarks", title: "Drag a bookmark and cancel the preview",
     async run(ui) {
       const snapshot = await ui.repo.snapshot("all()");
