@@ -208,6 +208,7 @@ export const scenarios: Scenario[] = [
       await ui.f.jj("git", "remote", "add", "origin", remote);
       ui.key("b");
       await ui.until("Git remotes");
+      await ui.capture("Bookmark picker");
       ui.choose("Git remotes");
       await ui.until("origin");
       ui.choose("origin");
@@ -333,6 +334,34 @@ export const scenarios: Scenario[] = [
       await ui.capture("Help at 80x24");
       await ui.scroll("overlay-preview", "down");
       await ui.capture("Scroll the narrow help overlay");
+    },
+  },
+  {
+    name: "search", title: "Search the graph, keep the search and step between matches",
+    async run(ui) {
+      for (const message of ["Add request log", "Tidy README", "Rotate log files"]) await ui.f.jj("new", "-m", message);
+      ui.key("r", { ctrl: true });
+      await ui.until("Rotate log files");
+      ui.key("@");
+      await ui.settled();
+      await ui.capture("Graph before searching");
+      ui.key("/");
+      await ui.until("Type to search");
+      await ui.type("log");
+      await ui.until("1/2");
+      await ui.capture("Typing a search marks the matches");
+      ui.key("RETURN");
+      await ui.until("clear search");
+      await ui.capture("A kept search stays marked while browsing");
+      ui.key("'");
+      await ui.until("2/2");
+      await ui.capture("Next match moves the selection");
+      await ui.resize(80, 24);
+      await ui.until("2/2");
+      await ui.capture("Kept search at 80x24");
+      ui.key("ESCAPE");
+      await ui.until("Rotate log files");
+      await ui.capture("Clearing the search restores the graph");
     },
   },
   {
