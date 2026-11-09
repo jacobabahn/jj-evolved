@@ -963,7 +963,7 @@ test("dragging an individual bookmark highlights a change and moves only after c
     await t.screen.mockMouse.pressDown(badge.x + 2, badge.y);
     await t.screen.mockMouse.emitMouseEvent("drag", target.x + 2, target.y);
     await t.until("Move feature →");
-    expect(t.screen.captureCharFrame()).toContain(`→ @`);
+    expect(t.screen.captureCharFrame()).toContain(`→  @`);
     await t.screen.mockMouse.release(target.x + 2, target.y);
     await t.until("Review before applying");
     expect(await t.repo.bookmarks()).toEqual(before);
@@ -1683,7 +1683,7 @@ test("files expand beneath the revision in the graph, preview one file at a time
     await t.screen.renderOnce();
     const frame = t.screen.captureCharFrame();
     expect(frame).toContain("M hello.txt");
-    expect(frame).toContain(`▾ @  ${working.changeId.slice(0, 8)}`);
+    expect(frame).toContain(`▾  @  ${working.changeId.slice(0, 8)}`);
     expect(frame).toContain("Initial feature");
     expect(String(listBox.title)).toBe(` Revisions · files of ${working.changeId.slice(0, 8)} `);
     expect(t.screen.renderer.root.findDescendantById("revisions")?.visible).toBe(true);
@@ -1703,7 +1703,7 @@ test("files expand beneath the revision in the graph, preview one file at a time
     expect(String(listBox.title)).toBe(" Revisions ");
     expect(t.screen.renderer.root.findDescendantById("changed-files")).toBeUndefined();
     expect(t.screen.captureCharFrame()).not.toContain("A added.txt");
-    expect(t.screen.captureCharFrame()).toContain(`┃ @  ${working.changeId.slice(0, 8)}`);
+    expect(t.screen.captureCharFrame()).toContain(`┃  @  ${working.changeId.slice(0, 8)}`);
     expect(t.screen.captureCharFrame()).toContain("- hello from jj-evolved");
   } finally { await t.cleanup(); }
 }, 15_000);
