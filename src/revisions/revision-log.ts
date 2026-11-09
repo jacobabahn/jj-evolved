@@ -2,12 +2,13 @@ import { cursorBar, getTheme, hasSelectionBand, matchTint } from "../ui/theme";
 import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
+import { EllipsisText } from "../ui/ellipsis-text";
 import { isRealRemote, sameTarget, shortChangeId, type Bookmark, type GraphRow, type Revision, type Snapshot } from "../repository/model";
 
 
 // Rows are pooled across snapshots: a refresh updates them in place and recreates only badges and conflict markers.
 // Setting row text is the expensive part, so only rows near the viewport are painted; the rest paint as they scroll in.
-type Row = { position: number; node: BoxRenderable; label: TextRenderable; bookmarkPreview: TextRenderable | null; badges: TextRenderable[]; extras: Renderable[]; revisionIndex: number | null; heading: boolean; graph: GraphRow | null; text: { plain: StyledText; drag: StyledText } | null };
+type Row = { position: number; node: BoxRenderable; label: EllipsisText; bookmarkPreview: EllipsisText | null; badges: EllipsisText[]; extras: Renderable[]; revisionIndex: number | null; heading: boolean; graph: GraphRow | null; text: { plain: StyledText; drag: StyledText } | null };
 type BookmarkSource = { bookmark: Bookmark; revision: Revision };
 type DragSource = ({ action: "bookmark" } & BookmarkSource) | { action: "rebase"; revision: Revision };
 type Drag = DragSource & { kind: "pressed" | "dragging" };
@@ -102,8 +103,8 @@ export class RevisionLog extends ScrollBoxRenderable {
         for (const [index, bookmark] of bookmarks.filter(item => item.targets.includes(revision.commitId)).entries()) {
           const text = badgeText(bookmark, bookmarks);
           if (!text) continue;
-          const badge = new TextRenderable(this.ctx, {
-            id: `bookmark-${rowIndex}-${index}`, height: 1, marginLeft: 1, flexShrink: 0, selectable: false, wrapMode: "none",
+          const badge = new EllipsisText(this.ctx, {
+            id: `bookmark-${rowIndex}-${index}`, height: 1, marginLeft: 1, flexShrink: 0, selectable: false,
             content: terminalText(text),
           });
           painted.node.add(badge);
@@ -112,7 +113,7 @@ export class RevisionLog extends ScrollBoxRenderable {
           if (!bookmark.remote) this.bookmarkSources.set(badge, { bookmark, revision });
         }
         if (revision.conflict) {
-          const marker = new TextRenderable(this.ctx, { height: 1, flexShrink: 0, selectable: false, content: " ! conflict", fg: theme.conflict });
+          const marker = new EllipsisText(this.ctx, { height: 1, flexShrink: 0, selectable: false, content: " ! conflict", fg: theme.conflict });
           painted.node.add(marker);
           painted.extras.push(marker);
         }
@@ -136,7 +137,7 @@ export class RevisionLog extends ScrollBoxRenderable {
             (!event.target || !this.bookmarkSources.has(event.target))) this.setSelectedIndex(row.revisionIndex);
         },
       }),
-      label: new TextRenderable(this.ctx, { id: `revision-label-${rowIndex}`, height: 1, wrapMode: "none", truncate: true, selectable: false }),
+      label: new EllipsisText(this.ctx, { id: `revision-label-${rowIndex}`, height: 1, selectable: false }),
       bookmarkPreview: null,
       badges: [], extras: [], revisionIndex: null, heading: false, graph: null, text: null,
     };
@@ -356,9 +357,9 @@ export class RevisionLog extends ScrollBoxRenderable {
     const bookmark = row.heading && drop && this.drag?.kind === "dragging" && this.drag.action === "bookmark"
       ? this.drag.bookmark : null;
     if (bookmark && !row.bookmarkPreview) {
-      row.bookmarkPreview = new TextRenderable(this.ctx, {
+      row.bookmarkPreview = new EllipsisText(this.ctx, {
         id: `bookmark-preview-${row.position}`, height: 1, marginLeft: 1, flexShrink: 0,
-        selectable: false, wrapMode: "none", opacity: 0.5, fg: getTheme(this.ctx).bookmark,
+        selectable: false, opacity: 0.5, fg: getTheme(this.ctx).bookmark,
       });
       row.node.add(row.bookmarkPreview, 1);
     }

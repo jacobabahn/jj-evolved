@@ -21,6 +21,7 @@ import { RevisionLog } from "./revisions/revision-log";
 import { FileList } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
+import { EllipsisText, fitText } from "./ui/ellipsis-text";
 import { isRealRemote, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: (signal: AbortSignal) => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
@@ -188,7 +189,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, flexGrow: 1, minWidth: 1, placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchPrefix = new TextRenderable(renderer, { id: "search-prefix", visible: false, flexShrink: 0, fg: colors.accent, content: "/" });
-  const searchStatus = new TextRenderable(renderer, { id: "search-status", visible: false, height: 1, flexShrink: 0, marginLeft: 2, wrapMode: "none", fg: colors.accent });
+  const searchStatus = new EllipsisText(renderer, { id: "search-status", visible: false, height: 1, flexShrink: 0, marginLeft: 2, fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) · + outside filter" });
   const message = new TextRenderable(renderer, { id: "message", height: 1, flexGrow: 1, flexShrink: 1, minWidth: 0, fg: colors.muted, content: "Loading history…" });
   // The message row also holds the search: the query being typed, or a kept search and its position at the right end,
@@ -212,9 +213,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlayPreview.add(helpBox);
   overlay.fields.add(input);
   overlay.body.add(descriptionInput);
-  const suggestions = new TextRenderable(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text, wrapMode: "none", truncate: true });
+  const suggestions = new EllipsisText(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text });
   const bookmarkInput = new InputRenderable(renderer, { id: "bookmark-input", flexGrow: 1, minWidth: 16, marginLeft: 1, placeholder: "bookmark name", ...bookmarkFieldColors(colors) });
-  const bookmarkSuggestions = new TextRenderable(renderer, { id: "bookmark-suggestions", width: "100%", wrapMode: "none", truncate: true, selectable: false });
+  const bookmarkSuggestions = new EllipsisText(renderer, { id: "bookmark-suggestions", width: "100%", selectable: false });
   overlay.body.add(suggestions);
   overlay.body.add(chooser);
   overlay.body.add(overlayPreview);
@@ -1120,15 +1121,22 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function showChoices(choices: Choice[]) {
     if (prompt.kind !== "picker") return;
     prompt.choices = choices;
-    // The key column is as wide as the widest key in the whole list, so filtering does not move the names.
-    const width = Math.max(0, ...prompt.all.map(choice => choice.key?.length ?? 0));
-    chooser.options = choices.map(choice => ({
-      value: choice.name,
-      name: terminalText(choice.header ? `── ${choice.name} ──` : width ? `${(choice.key ?? "").padEnd(width)}  ${choice.name}` : choice.name),
-      description: terminalText(width && !choice.header ? `${" ".repeat(width + 2)}${choice.description}` : choice.description),
-    }));
+    fitChoices();
     chooser.setSelectedIndex(Math.max(0, choices.findIndex(choice => !choice.header)));
     previewChoice();
+  }
+  // The chooser draws its rows itself, so their text is cut to its width here, by the same rule as other text.
+  function fitChoices() {
+    if (prompt.kind !== "picker") return;
+    // The chooser fills the overlay inside its border, and draws text after a column of padding and the "▶ " indicator.
+    const room = overlay.innerWidth - 3;
+    // The key column is as wide as the widest key in the whole list, so filtering does not move the names.
+    const width = Math.max(0, ...prompt.all.map(choice => choice.key?.length ?? 0));
+    chooser.options = prompt.choices.map(choice => ({
+      value: choice.name,
+      name: fitText(terminalText(choice.header ? `── ${choice.name} ──` : width ? `${(choice.key ?? "").padEnd(width)}  ${choice.name}` : choice.name), room),
+      description: fitText(terminalText(width && !choice.header ? `${" ".repeat(width + 2)}${choice.description}` : choice.description), room),
+    }));
   }
   function moveChoice(direction: 1 | -1) {
     if (prompt.kind !== "picker") return;
@@ -1728,6 +1736,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function onResize(width: number) {
     if (preview.visible) listBox.width = revisionPaneWidth();
+    fitChoices();
     updateFilesTitle(width);
     paintPanes();
     // The graph's new height is known once layout runs, so the cap follows on the next frame.

@@ -2,6 +2,7 @@ import { cursorBar, getTheme, hasSelectionBand, type Theme } from "../ui/theme";
 import { graphChunks } from "../ui/jj-highlighting";
 import { ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, type RenderContext } from "@opentui/core";
 import { terminalText } from "../terminal-text";
+import { EllipsisText } from "../ui/ellipsis-text";
 import type { ChangedFile } from "../repository/model";
 
 const statuses: Record<string, { letter: string; color: keyof Theme }> = {
@@ -24,7 +25,7 @@ export class FileList extends ScrollBoxRenderable {
 
   constructor(context: RenderContext, id = "changed-files") {
     super(context, { id, width: "100%", height: 1, flexShrink: 0, scrollY: true, scrollX: false, backgroundColor: getTheme(context).panel, contentOptions: { flexDirection: "column" } });
-    this.empty = new TextRenderable(context, { id: `${id}-empty`, height: 1, width: "100%", flexShrink: 0, selectable: false, wrapMode: "none", truncate: true, visible: false });
+    this.empty = new EllipsisText(context, { id: `${id}-empty`, height: 1, width: "100%", flexShrink: 0, selectable: false, visible: false });
     this.add(this.empty);
   }
 
@@ -41,7 +42,7 @@ export class FileList extends ScrollBoxRenderable {
     this.prefix = `   ${prefix}`;
     this.selectedIndex = Math.max(0, files.findIndex(file => file.path === selectPath));
     this.rows = files.map((_, index) => {
-      const row = new TextRenderable(this.ctx, { id: `${this.id}-row-${index}`, height: 1, width: "100%", flexShrink: 0, selectable: false, wrapMode: "none", truncate: true, onMouseDown: event => { if (event.button === 0) this.setSelectedIndex(index); } });
+      const row = new EllipsisText(this.ctx, { id: `${this.id}-row-${index}`, height: 1, width: "100%", flexShrink: 0, selectable: false, onMouseDown: event => { if (event.button === 0) this.setSelectedIndex(index); } });
       this.add(row);
       return row;
     });

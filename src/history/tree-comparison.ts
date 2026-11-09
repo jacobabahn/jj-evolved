@@ -2,6 +2,7 @@ import { getTheme } from "../ui/theme";
 import { highlightJjText } from "../ui/jj-highlighting";
 import { BorderChars, BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
 import type { TreeComparison } from "../repository/model";
+import { EllipsisText } from "../ui/ellipsis-text";
 
 export class TreeComparisonView extends BoxRenderable {
   private readonly afterColumn: BoxRenderable;
@@ -14,8 +15,8 @@ export class TreeComparisonView extends BoxRenderable {
       const column = new BoxRenderable(ctx, { id: `${id}-${side}-column`, title, border: first ? true : ["top", "right", "bottom"],
         customBorderChars: first ? { ...BorderChars.single, topRight: "┬", bottomRight: "┴" } : BorderChars.single,
         borderColor: getTheme(this.ctx).accent, width: "50%", height: "100%", minWidth: 0 });
-      const text = new TextRenderable(ctx, { id: `${id}-${side}`, width: "100%",
-        fg: getTheme(this.ctx).text, wrapMode: "none", truncate: true, flexShrink: 0 });
+      const text = new EllipsisText(ctx, { id: `${id}-${side}`, width: "100%",
+        fg: getTheme(this.ctx).text, flexShrink: 0 });
       const viewport = new BoxRenderable(ctx, { width: "100%", height: "100%", overflow: "hidden" });
       viewport.add(text);
       column.add(viewport);
