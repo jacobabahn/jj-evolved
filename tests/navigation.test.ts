@@ -42,7 +42,7 @@ async function setup(prepare: (f: Awaited<ReturnType<typeof fixture>>) => Promis
       if (input?.visible) break;
       await Bun.sleep(10);
     }
-    await until("Search in revset ·");
+    await until("Enter keep");
     const node = screen.renderer.root.findDescendantById("search-input");
     if (!(node instanceof InputRenderable)) throw new Error("Missing search input");
     node.value = query;
@@ -69,7 +69,7 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     const operation = await t.repo.operationId();
     await Bun.write(`${t.f.path}/unsnapshotted.txt`, "navigation must leave this alone\n");
     await t.search("FEATURE");
-    const searching = await t.until("1/1");
+    const searching = await t.until("1 of 1");
     expect(searching).toContain("Enter keep");
     expect(searching).toContain("Esc cancel");
     expect(searching).toContain("┃*");
@@ -79,7 +79,7 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await t.until("Change preview");
     expect(t.list().getSelectedIndex()).toBe(original);
     await t.search("change");
-    await t.until("1/1");
+    await t.until("1 of 1");
     t.screen.mockInput.pressEnter();
     await Bun.sleep(100);
     t.screen.mockInput.pressKey("'");
@@ -90,11 +90,11 @@ test("search previews, wraps, cancels and clears without changing the revset or 
     await t.until("No matches");
     expect(t.list().getSelectedIndex()).toBe(original);
     t.screen.mockInput.pressEscape();
-    expect(await t.until("1/1")).toContain("' \" match");
+    expect(await t.until("1 of 1")).toContain("' \" match");
     t.screen.mockInput.pressEscape();
     await Bun.sleep(80);
     const frame = await t.until("revset: @ | parents(@)");
-    expect(frame).not.toContain("Search in revset");
+    expect(frame).not.toContain("/change");
     expect(frame).toContain("/ search");
     // Match keys only appear while a search is active; Space stays pinned at 80 columns.
     expect(frame).not.toContain("' \" match");
@@ -157,7 +157,7 @@ test("search finds history beyond 200 loaded rows and returns to the original vi
     expect((await t.repo.snapshot("all()", true)).revisions).toHaveLength(200);
     const operation = await t.repo.operationId();
     await t.search("Initial feature");
-    await t.until("1/1");
+    await t.until("1 of 1");
     await t.until("temporary view");
     t.screen.mockInput.pressEnter();
     await Bun.sleep(100);
@@ -196,10 +196,10 @@ test("search matches multiline descriptions, bookmark names and both IDs, with n
   });
   try {
     await t.search("SHARED NEEDLE");
-    await t.until("1/2");
+    await t.until("1 of 2");
     t.screen.mockInput.pressEnter();
     await Bun.sleep(80);
-    for (const [key, position] of [["'", "2/2"], ["'", "1/2"], ['"', "2/2"]]) {
+    for (const [key, position] of [["'", "2 of 2"], ["'", "1 of 2"], ['"', "2 of 2"]]) {
       if (!key || !position) throw new Error("Missing navigation test case");
       t.screen.mockInput.pressKey(key);
       await t.until(position);
@@ -209,7 +209,7 @@ test("search matches multiline descriptions, bookmark names and both IDs, with n
     if (!target) throw new Error("Missing feature revision");
     for (const query of ["SEARCH-BOOKMARK", "search-bookmark@git", target.changeId, target.commitId.slice(0, 16)]) {
       await t.search(query);
-      await t.until("1/1");
+      await t.until("1 of 1");
       expect(t.list().getSelectedIndex()).toBe(1);
       t.screen.mockInput.pressEnter();
       await Bun.sleep(80);
@@ -286,7 +286,7 @@ test("selection moves repaint only the affected rows and keep search markers", a
   const t = await setup();
   try {
     await t.search("FEATURE");
-    await t.until("1/1");
+    await t.until("1 of 1");
     t.screen.mockInput.pressEnter();
     await t.until("Esc clear search");
     const list = t.list() as unknown as { paintRow: (row: { revisionIndex: number | null }) => void };
@@ -303,6 +303,6 @@ test("selection moves repaint only the affected rows and keep search markers", a
     painted.clear();
     t.screen.mockInput.pressKey("j");
     expect([...painted].sort()).toEqual([0, 1]);
-    expect(await t.until("┃*")).toContain("1/1");
+    expect(await t.until("┃*")).toContain("1 of 1");
   } finally { await t.cleanup(); }
 }, 15_000);

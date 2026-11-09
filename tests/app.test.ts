@@ -1611,7 +1611,7 @@ test("focus refresh preserves accepted search and preview scroll", async () => {
     await t.until("Type to search");
     await t.screen.mockInput.typeText("Next change");
     t.screen.mockInput.pressEnter();
-    await t.until("1/1");
+    await t.until("1 of 1");
     await t.until("+ line 0");
     await t.screen.waitForVisualIdle();
     const original = t.repo.snapshot.bind(t.repo);
@@ -1630,7 +1630,7 @@ test("focus refresh preserves accepted search and preview scroll", async () => {
     gate.resolve();
     await t.until("Ready.");
     expect(preview.scrollTop).toBe(top);
-    expect(t.screen.captureCharFrame()).toContain("1/1");
+    expect(t.screen.captureCharFrame()).toContain("1 of 1");
     expect(t.screen.captureCharFrame()).toContain("Next change");
   } finally { gate.resolve(); await t.cleanup(); }
 }, 15_000);
