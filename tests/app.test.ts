@@ -1077,9 +1077,10 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
     expect(t.screen.captureCharFrame()).toContain("[feature@origin]");
     t.screen.mockInput.pressKey("b");
     await t.overlayReady("Git remotes");
-    expect(t.chooser().options.map(option => option.value)).toEqual(["Git remotes", "feature", "solo"]);
+    expect(t.chooser().options.map(option => option.value)).toEqual(["Remotes", "Git remotes", "Bookmarks", "feature", "solo"]);
+    expect(t.chooser().options.map(option => option.name)).toContain("── Bookmarks ──");
     expect(t.chooser().options.map(option => option.description)).toEqual([
-      "Fetch and push", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
+      "", "Fetch and push", "", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
     ]);
     t.choose("solo");
     await t.until("Push to origin");
