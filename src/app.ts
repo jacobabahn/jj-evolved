@@ -1393,7 +1393,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           ]),
         };
       });
-      pick("Bookmarks", [{ name: "Git remotes", description: "Fetch and push", choose: showRemotes }, ...rows]);
+      // Headers keep the remotes command apart from the bookmark rows, as the action menu groups its actions.
+      pick("Bookmarks", [groupHeader("Remotes"), { name: "Git remotes", description: "Fetch and push", choose: showRemotes },
+        ...(rows.length ? [groupHeader("Bookmarks"), ...rows] : [])]);
     }, true);
   }
   function showOperations(limit = 50) {
