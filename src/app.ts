@@ -261,6 +261,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let observedOperation: string | null = null;
   // When the working copy was last snapshotted, so idle polls know when one is due.
   let lastSnapshot = 0;
+  // Set by input after a quiet spell: the user may be back from editing files elsewhere, so the next check snapshots.
+  let snapshotRequested = false;
+  let lastInput = Date.now();
+  const refreshInterval = options.refreshIntervalMs ?? 2000;
   let refreshError = "";
   let replacing = false;
   let focusRefreshPending = false;
@@ -455,6 +459,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // Read the ID before the view so a concurrent change costs one extra reload, never a missed one.
     lastSnapshot = Date.now();
     const operation = await repository.snapshotOperationId();
+    snapshotRequested = false;
     const loaded = await loadHistory(repository, { revset: nextRevset, limit, previous: captureView, selectWorkingCopy: workingCopy, query: preserveView ? search.query : "" });
     if (stopped || request !== refreshRequest) return;
     observedOperation = operation;
@@ -508,7 +513,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
    * every Git ref, which on a large repository costs hundreds of milliseconds even when nothing changed. With
    * `snapshot: false` it first reads the operation ID without one, which only catches other jj commands, and snapshots
    * only when that ID moved. The timer snapshots every `snapshotIntervalMs`, and focus, reloads and the app's own
-   * actions snapshot too, so a file edit seen by none of them waits at most that long.
+   * actions snapshot too, so a file edit seen by none of them waits at most that long. Not every terminal reports focus,
+   * so input after a quiet spell also asks for a snapshot (`noteInput`).
    */
   async function checkForUpdates({ snapshot = true }: { snapshot?: boolean } = {}) {
     if (stopped || checkingUpdates || isBusy() || !idle() || list.dragActive) return;
@@ -524,6 +530,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       }
       lastSnapshot = Date.now();
       let operation = await repository.snapshotOperationId();
+      snapshotRequested = false;
       if (!valid()) return;
       if (operation === observedOperation) return unchanged();
       // status snapshots too, so it must precede the ID that the re-check compares against.
@@ -549,6 +556,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         report(`Auto-refresh failed; will retry. ${text}`, true);
       }
     } finally { checkingUpdates = false; }
+  }
+  /**
+   * A key or mouse event after at least one poll interval without input stands in for focus returning. The check it
+   * starts may be cancelled by the next key; the request stays set, so the next timer tick snapshots instead.
+   */
+  function noteInput() {
+    const now = Date.now();
+    const quiet = now - lastInput >= refreshInterval;
+    lastInput = now;
+    if (!quiet || refreshInterval <= 0 || stopped) return;
+    snapshotRequested = true;
+    setTimeout(() => { void checkForUpdates(); }, 0);
   }
   // The one place a reload replaces the view, the search and the return point.
   function showHistory(loaded: LoadedHistory, keepScroll: boolean) {
@@ -1707,6 +1726,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function onKey(key: KeyEvent) {
     if (stopped) return;
     ++activity;
+    noteInput();
     list.cancelDrag();
     if (key.ctrl && key.name === "c") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (key.name === "escape" && repository.networkActive) { key.preventDefault(); repository.cancelNetwork(); report("Cancelling…"); return; }
@@ -1979,7 +1999,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (text) { heldMessage ??= [shown, shownError]; report(text); }
     else if (heldMessage) { setMessage(...heldMessage); heldMessage = null; }
   };
-  app.onMouse = event => { ++activity; list.handleDragMouse(event); };
+  app.onMouse = event => { ++activity; noteInput(); list.handleDragMouse(event); };
   renderer.on("focus", onTerminalFocus);
   renderer.on("resize", onResize);
   renderer.keyInput.on("keypress", onKey);
@@ -1994,10 +2014,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void renderer.getPalette().then(detected => { if (!stopped) applyTerminalColors(detected); }).catch(() => {});
     historySaved = historyStore.load().then(entries => { revsetHistory = entries; }).catch(error => report(`Couldn't read revset history: ${errorText(error)}`, true));
     await run("Loading history…", async () => { defaultRevset = await repository.logRevset(); await refresh(defaultRevset); });
-    const interval = options.refreshIntervalMs ?? 2000;
     const snapshotInterval = options.snapshotIntervalMs ?? 30_000;
-    const poll = () => { void checkForUpdates({ snapshot: Date.now() - lastSnapshot >= snapshotInterval }); };
-    if (!stopped && interval > 0) { refreshTimer = setInterval(poll, interval); refreshTimer.unref(); }
+    const poll = () => { void checkForUpdates({ snapshot: snapshotRequested || Date.now() - lastSnapshot >= snapshotInterval }); };
+    if (!stopped && refreshInterval > 0) { refreshTimer = setInterval(poll, refreshInterval); refreshTimer.unref(); }
   }, stop, checkForUpdates,
   // Silent refreshes leave no message to wait for, so tests wait here instead, including for a focus refresh queued as a microtask.
   async settled() { do { await Promise.resolve(); await running; } while (running); } };
