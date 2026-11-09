@@ -2,6 +2,7 @@ import { getTheme } from "./theme";
 import { BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
 import { terminalText } from "../terminal-text";
 import type { ShortcutLine } from "./shortcut-bar";
+import { EllipsisText } from "./ellipsis-text";
 
 export class ActionOverlay extends BoxRenderable {
   onError?: (message: string) => void;
@@ -15,6 +16,7 @@ export class ActionOverlay extends BoxRenderable {
   onVisibility?: (visible: boolean) => void;
   private shortcuts: ShortcutLine = { left: [] };
   private rows: number | `${number}%` = "84%";
+  private columns = 1;
 
   constructor(ctx: RenderContext, id: string) {
     super(ctx, {
@@ -22,7 +24,7 @@ export class ActionOverlay extends BoxRenderable {
       zIndex: 20, border: true, borderColor: getTheme(ctx).accent, backgroundColor: getTheme(ctx).panel,
       flexDirection: "column",
     });
-    this.context = new TextRenderable(ctx, { id: `${id}-source`, height: 2, flexShrink: 0, fg: getTheme(this.ctx).muted, truncate: true });
+    this.context = new EllipsisText(ctx, { id: `${id}-source`, height: 2, flexShrink: 0, fg: getTheme(this.ctx).muted });
     this.fields = new BoxRenderable(ctx, { id: `${id}-fields`, flexDirection: "column", flexShrink: 0 });
     this.feedback = new TextRenderable(ctx, { id: `${id}-feedback`, height: 2, flexShrink: 0, fg: getTheme(this.ctx).muted, visible: false });
     this.body = new BoxRenderable(ctx, { id: `${id}-body`, marginBottom: 1, height: 0, flexGrow: 1, minHeight: 1, flexDirection: "column" });
@@ -48,10 +50,14 @@ export class ActionOverlay extends BoxRenderable {
     const margin = Math.round(width * 0.08);
     const tall = Math.min(height, typeof rows === "number" ? rows : Math.round(height * Number.parseFloat(rows) / 100));
     this.left = margin;
-    this.width = Math.max(1, width - 2 * margin);
+    this.columns = Math.max(1, width - 2 * margin);
+    this.width = this.columns;
     this.height = tall;
     this.top = Math.floor((height - tall) / 2);
   }
+
+  /** Columns inside the border, known as soon as the overlay is placed rather than after the next layout. */
+  get innerWidth() { return Math.max(0, this.columns - 2); }
 
   get keys(): ShortcutLine { return this.shortcuts; }
   set keys(keys: ShortcutLine) {
