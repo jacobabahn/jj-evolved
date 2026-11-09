@@ -133,7 +133,7 @@ impl<'a> Server<'a> {
         loop {
             line.clear();
             // A line with no newline means the client went away while writing it.
-            if !matches!(stdin.read_until(b'\n', &mut line), Ok(_) if line.ends_with(b"\n")) {
+            if !(stdin.read_until(b'\n', &mut line).is_ok() && line.ends_with(b"\n")) {
                 return;
             }
             if self.config.changed() {

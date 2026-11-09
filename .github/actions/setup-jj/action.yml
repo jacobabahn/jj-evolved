@@ -1,0 +1,39 @@
+name: Set up jj
+description: >-
+  Installs the official prebuilt jj release that the helper links against. The version is read from the jj-cli pin
+  in native/Cargo.toml; bumping it also means adding the new tarball's checksum below and updating JJ_VERSION in
+  native/src/main.rs, which this action checks.
+runs:
+  using: composite
+  steps:
+    - name: Install jj
+      shell: bash
+      run: |
+        # SHA-256 of jj-v<version>-x86_64-unknown-linux-musl.tar.gz, as listed in the GitHub release's asset digest.
+        declare -A sha256=(
+          [0.45.1]=f35438350b5d61963aac5dd74ede510b31d6b9690769d1a6268cf058cc825f72
+        )
+        version=$(sed -nE '/^jj-cli = /{s/.*version = "=([0-9.]+)".*/\1/p;q}' native/Cargo.toml)
+        if [ -z "$version" ]; then echo "::error::No exact jj-cli pin in native/Cargo.toml"; exit 1; fi
+        lib=$(sed -nE '/^jj-lib = /{s/.*version = "=([0-9.]+)".*/\1/p;q}' native/Cargo.toml)
+        if [ -z "$lib" ]; then echo "::error::No exact jj-lib pin (version = \"=X.Y.Z\") in native/Cargo.toml"; exit 1; fi
+        if [ "$lib" != "$version" ]; then echo "::error::jj-lib pin ($lib) differs from jj-cli pin ($version)"; exit 1; fi
+        helper=$(sed -nE '/^const JJ_VERSION: /{s/^const JJ_VERSION: &str = "([^"]+)";/\1/p;q}' native/src/main.rs)
+        if [ "$helper" != "$version" ]; then
+          echo "::error file=native/src/main.rs::JJ_VERSION ($helper) differs from the jj-cli pin ($version)"; exit 1
+        fi
+        expected=${sha256[$version]:-}
+        if [ -z "$expected" ]; then echo "::error::No checksum for jj $version in .github/actions/setup-jj"; exit 1; fi
+
+        dir="$RUNNER_TEMP/jj"
+        mkdir -p "$dir"
+        tarball="$RUNNER_TEMP/jj.tar.gz"
+        curl -fsSL --retry 3 -o "$tarball" \
+          "https://github.com/jj-vcs/jj/releases/download/v$version/jj-v$version-x86_64-unknown-linux-musl.tar.gz"
+        echo "$expected  $tarball" | sha256sum -c -
+        tar -xzf "$tarball" -C "$dir" ./jj
+        echo "$dir" >> "$GITHUB_PATH"
+
+        installed=$("$dir/jj" --version | awk '{print $2}')
+        echo "jj $installed"
+        if [ "${installed%%-*}" != "$version" ]; then echo "::error::Expected jj $version, got $installed"; exit 1; fi
