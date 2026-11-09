@@ -35,7 +35,8 @@ export const scenarios: Scenario[] = [
       await ui.until("Rebase preview");
       assert.equal(ui.screen.renderer.root.findDescendantById("prompt-input")?.visible, false);
       await ui.capture("Operation review keeps source context with less chrome");
-      ui.key("ESCAPE"); await ui.until("Rebase: choose destination");
+      // The pane title stays visible above the review, so wait for the inline hint the review covered.
+      ui.key("ESCAPE"); await ui.until("Rebase from");
       ui.key("ESCAPE"); await ui.until("Cancelled.");
       ui.key("TAB"); await ui.until("(focused)");
       await ui.until("Empty change.");

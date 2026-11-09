@@ -22,6 +22,7 @@ import { FileList } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { EllipsisText, fitText } from "./ui/ellipsis-text";
+import { homedir } from "node:os";
 import { isRealRemote, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: (signal: AbortSignal) => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
@@ -153,6 +154,10 @@ function fieldColors(colors: Theme) {
 function bookmarkFieldColors(colors: Theme) {
   return { textColor: colors.bookmark, focusedTextColor: colors.bookmark, backgroundColor: colors.graphSelected, focusedBackgroundColor: colors.graphSelected, placeholderColor: colors.muted };
 }
+/** A path inside the home directory, written from `~`. */
+export function homePath(path: string, home = homedir()) {
+  return home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
+}
 function chooserColors(colors: Theme) {
   return { ...fieldColors(colors), descriptionColor: colors.muted, selectedBackgroundColor: colors.selected, selectedTextColor: colors.selectedText, selectedDescriptionColor: colors.selectedText };
 }
@@ -168,13 +173,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let colors = theme;
   const applyTerminalColors = (detected: TerminalColors) => { setTerminalColors(renderer, detected); applyTheme(colors); };
   const app = new BoxRenderable(renderer, { id: "app", width: "100%", height: "100%", flexDirection: "column", backgroundColor: colors.bg });
-  const header = new TextRenderable(renderer, { id: "header", height: 1, fg: colors.accent, content: terminalText(`jj-evolved  /  ${repository.root}`) });
-  const filter = new TextRenderable(renderer, { id: "revset", height: 1, fg: colors.muted, content: "revset:" });
+  const header = new EllipsisText(renderer, { id: "header", height: 1, flexShrink: 0, fg: colors.accent, content: terminalText(`jj-evolved  ·  ${homePath(repository.root)}`) });
+  // The revset, the status message and the search share one row: the revset on the left, cut with "…" when the message
+  // or the search needs the room, so neither ever pushes the panes down.
+  const statusRow = new BoxRenderable(renderer, { id: "status-row", height: 1, flexShrink: 0, flexDirection: "row" });
+  const filter = new EllipsisText(renderer, { id: "revset", height: 1, flexGrow: 1, flexShrink: 1, minWidth: 0, fg: colors.muted, content: "revset:" });
   const body = new BoxRenderable(renderer, { id: "body", flexDirection: "row", flexGrow: 1, minHeight: 1 });
   // The revisions pane takes 42% of the terminal in whole cells. A percentage width is fractional at most sizes
   // (33.6 cells at 80 columns), which leaves the preview beside it fractional too, and its text then lays out a column
   // wider than the space it has.
   const revisionPaneWidth = () => Math.round(renderer.width * 0.42);
+  // The status message may take the revset row up to the revset's first few columns.
+  const statusWidth = () => Math.max(8, renderer.width - 16);
   const listBox = new BoxRenderable(renderer, { id: "revision-pane", width: revisionPaneWidth(), minWidth: 26, flexShrink: 0, border: true, customBorderChars: { ...BorderChars.single, topRight: "┬", bottomRight: "┴" }, borderColor: colors.accent, title: " Revisions ", backgroundColor: colors.panel });
   const list = new RevisionLog(renderer);
   list.height = 0;
@@ -188,14 +198,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, marginTop: 1, ...fieldColors(colors), placeholderColor: colors.muted });
   const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, flexGrow: 1, minWidth: 1, placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
-  const searchPrefix = new TextRenderable(renderer, { id: "search-prefix", visible: false, flexShrink: 0, fg: colors.accent, content: "/" });
+  const searchPrefix = new TextRenderable(renderer, { id: "search-prefix", visible: false, flexShrink: 0, marginLeft: 2, fg: colors.accent, content: "/" });
   const searchStatus = new EllipsisText(renderer, { id: "search-status", visible: false, height: 1, flexShrink: 0, marginLeft: 2, fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) · + outside filter" });
-  const message = new TextRenderable(renderer, { id: "message", height: 1, flexGrow: 1, flexShrink: 1, minWidth: 0, fg: colors.muted, content: "Loading history…" });
-  // The message row also holds the search: the query being typed, or a kept search and its position at the right end,
-  // so searching never pushes the panes down.
-  const statusRow = new BoxRenderable(renderer, { id: "status-row", height: 1, flexShrink: 0, flexDirection: "row" });
-  for (const child of [message, searchPrefix, searchInput, searchStatus]) statusRow.add(child);
+  // The one status slot: progress, results, errors and a kept search's position all report here, at the right end of the
+  // revset row. While a search is typed, its field takes the message's place.
+  const message = new EllipsisText(renderer, { id: "message", height: 1, flexShrink: 0, marginLeft: 2, maxWidth: statusWidth(), fg: colors.muted, content: "Loading history…" });
+  for (const child of [filter, message, searchPrefix, searchInput, searchStatus]) statusRow.add(child);
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 2, flexShrink: 0, visible: false, fg: colors.accent });
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, wrapMode: "none", fg: colors.accent });
   const chooser = new GroupedSelect(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
@@ -225,10 +234,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   preview.add(detail);
   body.add(listBox);
   body.add(preview);
-  for (const child of [header, filter, statusRow, navigationStatus, inlineHint, body, shortcuts, overlay]) app.add(child);
+  for (const child of [header, statusRow, navigationStatus, inlineHint, body, shortcuts, overlay]) app.add(child);
   // Dim everything behind an open overlay except the footer, which shows the overlay's keys.
   overlay.onVisibility = visible => {
-    for (const child of [header, filter, message, searchPrefix, searchInput, searchStatus, navigationStatus, inlineHint, body]) child.opacity = visible ? 0.35 : 1;
+    for (const child of [header, statusRow, navigationStatus, inlineHint, body]) child.opacity = visible ? 0.35 : 1;
   };
   renderer.root.add(app);
 
@@ -320,7 +329,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function errorSummary(text: string) {
     const suffix = `  ${actionKeys("lastError")} full error`;
     const line = text.split("\n")[0] ?? "";
-    const room = Math.max(8, renderer.width - suffix.length);
+    const room = Math.max(8, statusWidth() - suffix.length);
     return `${line.length > room ? `${line.slice(0, room - 1)}…` : line}${suffix}`;
   }
   function report(text: string, error = false) {
@@ -1736,6 +1745,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function onResize(width: number) {
     if (preview.visible) listBox.width = revisionPaneWidth();
+    message.maxWidth = statusWidth();
     fitChoices();
     updateFilesTitle(width);
     paintPanes();

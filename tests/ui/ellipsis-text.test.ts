@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { BoxRenderable } from "@opentui/core";
 import { EllipsisText, fitText } from "../../src/ui/ellipsis-text";
+import { homePath } from "../../src/app";
 
 test("fitText keeps the start and ends a cut with one ellipsis column", () => {
   expect(fitText("Validate retry on network failures", 12)).toBe("Validate re…");
@@ -36,3 +37,9 @@ test("EllipsisText cuts at its own edge and at the edge of a clipping row, and g
   }
 });
 
+test("the header writes a path inside the home directory from ~", () => {
+  expect(homePath("/home/me/dev/repo", "/home/me")).toBe("~/dev/repo");
+  expect(homePath("/home/me", "/home/me")).toBe("~");
+  expect(homePath("/home/meadow/repo", "/home/me")).toBe("/home/meadow/repo");
+  expect(homePath("/tmp/repo", "")).toBe("/tmp/repo");
+});
