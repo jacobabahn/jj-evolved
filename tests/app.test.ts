@@ -1878,6 +1878,30 @@ test("refreshing an unchanged repository repaints no cells", async () => {
   } finally { snapshot.mockRestore(); await t.cleanup(); }
 }, 15_000);
 
+test("g and the action menu's Git entry say there are no remotes, and Escape returns to where they came from", async () => {
+  const t = await setup();
+  const overlay = () => t.screen.renderer.root.findDescendantById("action-overlay")!;
+  try {
+    t.screen.mockInput.pressKey("g");
+    await t.until("No Git remotes");
+    expect(overlay().visible).toBe(true);
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    // From the action menu the message opens over the menu, which hides its Selection pane, and Escape goes back to it.
+    t.screen.mockInput.pressKey(" ");
+    await t.until("Actions");
+    t.choose("Git");
+    await t.until("No Git remotes");
+    expect(t.screen.captureCharFrame()).toContain("Esc back");
+    t.screen.mockInput.pressEscape();
+    await t.until("Actions");
+    expect(t.screen.captureCharFrame()).not.toContain("No Git remotes");
+    expect(overlay().visible).toBe(true);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 test("g then p names a bookmark on the selected change, then tracks and pushes it after one review", async () => {
   const t = await setup();
   const remote = `${t.f.path}-remote.git`;

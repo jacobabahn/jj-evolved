@@ -50,6 +50,7 @@ type Prompt =
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null; extras: ReviewExtras };
 
 
+const noRemotes = "No Git remotes are configured. Add one in your terminal with jj git remote add <name> <url>.";
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows: [string, string][] }[] {
   const bindings = scopes.revisions, files = scopes.files, menu = scopes.menu, prompt = scopes.prompt;
@@ -436,6 +437,19 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function showOverlay(text: string, title: string) {
     previews.show({ target: "overlay", text, title });
   }
+  // Says why a command has nothing to offer, such as Git with no remotes. It opens as an overlay level of its own, so it
+  // shows whether or not a picker was open, and Escape returns to that picker or closes.
+  function notice(title: string, text: string) {
+    pick(title, []);
+    chooser.visible = false;
+    overlay.context.visible = false;
+    overlay.place(7);
+    // The message is the whole overlay, so it goes without a box of its own.
+    overlayPreview.visible = true;
+    overlayPreview.border = false;
+    showOverlay(text, "");
+    overlay.keys = { left: [], right: [exit("close")] };
+  }
   function activateOverlay(title: string, cancelPreview = true) {
     if (cancelPreview) previews.cancel();
     if (!overlay.visible) {
@@ -444,6 +458,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     overlay.title = ` ${title} `;
     overlay.context.visible = true;
+    overlayPreview.border = true;
     overlay.place("84%");
     overlay.body.marginBottom = 1;
     overlayPreview.visible = true;
@@ -1297,7 +1312,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void run("Loading remotes…", async () => {
       const remotes = await repository.remotes();
       if (stopped) return;
-      if (!remotes.length) { showOverlay("No Git remotes configured. Add one with jj git remote add in your terminal.", "Remotes"); return; }
+      if (!remotes.length) { notice("Git remotes", noRemotes); return; }
       pick("Git remotes", [...fetchAllChoice(remotes), ...remotes.map(remote => ({
         name: remote.name, description: remote.url,
         choose: () => pick(`Remote ${remote.name}`, [
@@ -1307,7 +1322,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
               const bookmarks = await repository.bookmarks();
               if (stopped) return;
               const names = [...new Set(bookmarks.filter(item => !item.remote || item.remote === remote.name && item.tracked).map(item => item.name))];
-              if (!names.length) { showOverlay("No local or tracked deleted bookmarks to push.", "Push bookmark"); return; }
+              if (!names.length) { notice("Push bookmark", "No local or tracked deleted bookmarks to push."); return; }
               pick(`Push to ${remote.name}`, names.map(name => ({ name,
                 description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Publish this bookmark" : "Delete the remote bookmark after a review",
                 choose: () => applyNow({ kind: "git-push", remote: remote.name, name }),
@@ -1353,7 +1368,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const [remotes, bookmarks] = await Promise.all([repository.remotes(), repository.bookmarks()]);
       const [preferred, inferred] = await Promise.all([repository.defaultPushRemote(remotes), revision ? repository.publishBookmarks(revision, bookmarks) : null]);
       if (stopped) return;
-      if (!remotes.length) { showOverlay("No Git remotes configured. Add one with jj git remote add in your terminal.", "Remotes"); return; }
+      if (!remotes.length) { notice("Git", noRemotes); return; }
       const each = (title: string, choose: (remote: Remote) => void) => eachRemote(remotes, preferred, title, choose);
       const { names, advance } = inferred ?? { names: [], advance: false };
       // Like every push, a publish applies at once and stops for review only when it would move the remote bookmark backward or sideways.
@@ -1423,7 +1438,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           name,
           description: others.map(remote => `remote only on ${remote.remote} (${remote.tracked ? "tracked, deleted locally" : "untracked"}) ${short(remote)}`).join(" · ") || "Local Git bookmark",
           choose: () => {
-            if (!others.length) { showOverlay("The @git bookmark reflects the local Git repository. Manage it with Git.", "Local Git bookmark"); return; }
+            if (!others.length) { notice("Local Git bookmark", "The @git bookmark reflects the local Git repository. Manage it with Git."); return; }
             pick(name, others.flatMap(remote => [
               ...(remote.tracked ? [{ name: `Push deletion to ${remote.remote}`, description: "Delete this bookmark on the remote after a review", choose: () => applyNow({ kind: "git-push", remote: remote.remote, name }) }] : []),
               tracking(remote),
@@ -1481,6 +1496,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void run("Loading change evolution…", async () => {
       const page = await repository.evolution(revision, { limit, operationId });
       if (stopped) return;
+      if (!page.entries.length) { notice("Change evolution", "No evolution history is available for this revision."); return; }
       const choices: Choice[] = page.entries.map(entry => ({
         name: `${entry.commitId === revision.commitId ? "Selected · " : ""}${entry.commitId.slice(0, 12)} ${entry.description.split("\n")[0] || "(no description)"}`,
         description: `${entry.operationDescription} · ${entry.time}`,
@@ -1494,7 +1510,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       pick("Change evolution", choices, { replace: operationId !== undefined });
       chooser.setSelectedIndex(selectedIndex);
       overlay.keys = { ...overlay.keys, left: [[choose, "version"], ["Enter", "preview"], ["PgDn/PgUp", "scroll"]] };
-      if (!page.entries.length) showOverlay("No evolution history is available for this revision.", "Change evolution");
     }, true);
   }
   function undo() {
