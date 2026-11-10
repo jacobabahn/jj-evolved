@@ -336,6 +336,8 @@ export class Repository {
           rebasing = await this.rebaseScope(action.revision, operationId);
           summary += `\n${rebaseScopeSummary(rebasing)}\n\nTrees show up to 40 revisions; the list above includes the full rebase scope.`;
         } else {
+          // Only the selected change moves; the trees mark it.
+          if (action.kind === "rebase") rebasing = [action.revision];
           const affected = await logRevisions(this.root, `${action.revision.commitId}::`, operationId, 200);
           summary += `\nAffected revision/descendant context (up to 200):\n${affected.map(label).join("\n")}`;
         }
@@ -343,6 +345,7 @@ export class Repository {
         break;
       }
       case "squash":
+        rebasing = [action.revision];
         summary = `Squash from ${label(action.revision)}\nInto ${label(action.destination)}\nFiles: ${action.files.length ? action.files.join(", ") : "all"}\nThe source is abandoned if emptied.\nDestination description:\n${action.description}\n\n${await this.diff(action.revision, action.files)}`;
         break;
       case "split": {

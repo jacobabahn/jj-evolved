@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
+import { RGBA } from "@opentui/core";
 import { fixture } from "../fixture";
 import { Repository } from "../../src/repository/repository";
 
@@ -29,7 +31,12 @@ for (const descendants of [false, true]) {
         expect(prepared.trees?.after.match(/● /g)).toHaveLength(2);
         expect(prepared.trees?.after).toContain(`● ${source.changeId.slice(0, 8)}`);
         expect(prepared.trees?.after).not.toContain(`● ${destination.changeId.slice(0, 8)}`);
-      } else expect(prepared.trees?.before).not.toContain("● ");
+      } else {
+        // Only the selected change moves, and both trees mark it.
+        expect(prepared.trees?.before.match(/● /g)).toHaveLength(1);
+        expect(prepared.trees?.after).toContain(`● ${source.changeId.slice(0, 8)}`);
+      }
+      expect(prepared.trees?.newConflicts).toBe(0);
       await repo.apply(prepared);
       const actual = await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template);
       expect(prepared.trees?.after.replaceAll("● ", "")).toBe(actual);
@@ -74,7 +81,9 @@ for (const partial of [false, true]) {
       const snapshot = await repo.snapshot("all()");
       const beforeTree = await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template);
       const prepared = await repo.prepare({ kind: "squash", revision: source, destination, files: partial ? ["one.txt"] : [], description: "Combined" });
-      expect(prepared.trees?.before).toBe(beforeTree);
+      // The source is marked ● in the trees; without the mark they are jj's own log.
+      expect(prepared.trees?.before).toContain(`● ${source.changeId.slice(0, 8)}`);
+      expect(prepared.trees?.before.replaceAll("● ", "")).toBe(beforeTree);
       expect(await repo.operationId()).toBe(before);
       expect((await repo.snapshot("all()")).revisions).toEqual(snapshot.revisions);
       expect(await Bun.file(`${f.path}/one.txt`).text()).toBe("one\n");
@@ -82,7 +91,7 @@ for (const partial of [false, true]) {
       expect(prepared.trees?.after?.includes(source.changeId.slice(0, 8))).toBe(partial);
       await repo.apply(prepared);
       const actual = await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template);
-      expect(prepared.trees?.after).toBe(actual);
+      expect(prepared.trees?.after.replaceAll("● ", "")).toBe(actual);
     } finally { await f.cleanup(); }
   });
 }
@@ -96,7 +105,7 @@ test("an unchanged rebase still renders a tree without creating a live operation
     if (!source || !destination) throw new Error("Missing revisions");
     const before = await repo.operationId();
     const prepared = await repo.prepare({ kind: "rebase", revision: source, destination, descendants: false });
-    expect(prepared.trees?.after).toBe(await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template));
+    expect(prepared.trees?.after.replaceAll("● ", "")).toBe(await f.jj("log", "--config", "ui.log-word-wrap=false", "-r", "all()", "-T", template));
     expect(await repo.operationId()).toBe(before);
   } finally { await f.cleanup(); }
 });
@@ -175,4 +184,58 @@ test("rebase previews retain ancestry lines beside descriptions like the standar
       expect(frame.some(line => line.slice(text.x, text.x + text.width).startsWith(expectedLine))).toBe(true);
     }
   } finally { trees.destroyRecursively(); screen.renderer.destroy(); await f.cleanup(); }
+});
+
+test("a rebase that conflicts counts the changes it newly conflicts, and one that resolves a conflict does not", async () => {
+  const f = await fixture();
+  try {
+    const repo = await Repository.open(f.path);
+    await Bun.write(join(f.path, "hello.txt"), "left\n");
+    await f.jj("describe", "-m", "Left edit");
+    await f.jj("new", "feature", "-m", "Right edit");
+    await Bun.write(join(f.path, "hello.txt"), "right\n");
+    await f.jj("new", "-m", "Above right");
+    const [left] = (await repo.snapshot("description(exact:'Left edit\n')")).revisions;
+    const [right] = (await repo.snapshot("description(exact:'Right edit\n')")).revisions;
+    if (!left || !right) throw new Error("Missing revisions");
+    // Right, and the change above it, conflict once Right sits on Left.
+    const conflicting = await repo.prepare({ kind: "rebase", revision: right, destination: left, descendants: true });
+    expect(conflicting.trees?.newConflicts).toBe(2);
+    await repo.apply(conflicting);
+    // Moving Right back resolves both and creates none.
+    const [moved] = (await repo.snapshot("description(exact:'Right edit\n')")).revisions;
+    const [feature] = (await repo.snapshot("feature")).revisions;
+    if (!moved || !feature) throw new Error("Missing revisions");
+    expect((await repo.prepare({ kind: "rebase", revision: moved, destination: feature, descendants: true })).trees?.newConflicts).toBe(0);
+  } finally { await f.cleanup(); }
+});
+
+test("preview trees colour moved rows, both lines, and head the trees with the conflicts the result creates", async () => {
+  const { createTestRenderer } = await import("@opentui/core/testing");
+  const { TreeComparisonView } = await import("../../src/history/tree-comparison");
+  const { themes, setTheme } = await import("../../src/ui/theme");
+  const screen = await createTestRenderer({ width: 120, height: 15 });
+  setTheme(screen.renderer, themes.dark);
+  const trees = new TreeComparisonView(screen.renderer, "moved-trees");
+  screen.renderer.root.add(trees);
+  const prefixes = new Map([["qwrtyuok", "qw"], ["xvtltxry", "x"], ["zzzzzzzz", "z"]]);
+  const spanOf = (text: string) => screen.captureSpans().lines.flatMap(line => line.spans).filter(span => span.text.includes(text));
+  try {
+    trees.setTrees({
+      beforePrefixes: prefixes, afterPrefixes: prefixes,
+      before: "@  ● qwrtyuok [feature]\n│  Moved change\n○  xvtltxry\n│  Stays put\n◆  zzzzzzzz\n   Root\n",
+      after: "×  ● qwrtyuok [feature] [conflict]\n│  Moved change\n○  xvtltxry\n│  Stays put\n◆  zzzzzzzz\n   Root\n",
+      newConflicts: 1,
+    }, "rebase");
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).toContain("! Creates 1 conflict");
+    for (const span of [...spanOf("Moved change"), ...spanOf("●")]) expect(span.fg).toEqual(RGBA.fromHex(themes.dark.accent));
+    for (const span of spanOf("Stays put")) expect(span.fg).toEqual(RGBA.fromHex(themes.dark.text));
+    trees.setTrees({ beforePrefixes: prefixes, afterPrefixes: prefixes, before: "@  qwrtyuok\n", after: "@  qwrtyuok\n", newConflicts: 0 });
+    await screen.waitForVisualIdle();
+    expect(screen.captureCharFrame()).not.toContain("Creates");
+  } finally {
+    trees.destroyRecursively();
+    screen.renderer.destroy();
+  }
 });

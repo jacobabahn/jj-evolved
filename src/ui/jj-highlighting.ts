@@ -24,21 +24,30 @@ export function highlightJjText(text: string, prefixes: ReadonlyMap<string, stri
     return changeIdChunks(id, matches.length === 1 ? matches[0]?.[1] : undefined, colors);
   };
   const lines = terminalText(text).split("\n");
+  // A revision that moves in a pending rebase or squash is marked ● in preview trees; its row, both lines, takes the
+  // accent so the moved changes stand out from the rest of the tree.
+  let moving = false;
   return new StyledText(lines.flatMap((line, index) => {
     const graph = /^([│─┬┴├┤┼┌┐└┘╭╮╰╯╷╵╲╱\\/| @○◆●×~]*)\b([k-z]{8,})\b(.*)$/.exec(line);
     const revision = /^(Source |Squash from |Rebase from |Into |Change\s+)([k-z]+)(.*)$/.exec(line);
     const commit = /^(Commit\s+|Parents\s+)([0-9a-f ,]+)$/.exec(line);
     const bookmarks = /^(Bookmarks\s+)(.*)$/.exec(line);
     const chunks = [];
+    const description = moving && !graph ? /^([│─┬┴├┤┼┌┐└┘╭╮╰╯╷╵╲╱\\/| ~]*)(.*)$/.exec(line) : null;
+    moving = false;
     if (graph) {
-      chunks.push(...graphChunks(graph[1] ?? "", colors), ...idChunks(graph[2] ?? ""));
-      const tail = graph[3] ?? "";
+      const prefix = graph[1] ?? "", tail = graph[3] ?? "";
+      // Summary lines also start "● <change> / <commit>"; only tree rows carry their description on the next line.
+      moving = prefix.includes("●") && !tail.startsWith(" / ");
+      chunks.push(...graphChunks(prefix, colors).map(chunk => chunk.text === "●" ? bold(fg(colors.accent)("●")) : chunk), ...idChunks(graph[2] ?? ""));
       const conflict = tail.endsWith(" [conflict]");
       const body = conflict ? tail.slice(0, -11) : tail;
       const bookmarks = /^(?: \[[^\]]+\])*/.exec(body)?.[0] ?? "";
       if (bookmarks) chunks.push(fg(colors.bookmark)(bookmarks));
-      chunks.push(fg(colors.text)(body.slice(bookmarks.length)));
+      chunks.push(fg(moving ? colors.accent : colors.text)(body.slice(bookmarks.length)));
       if (conflict) chunks.push(bold(fg(colors.conflict)(" [conflict]")));
+    } else if (description) {
+      chunks.push(...graphChunks(description[1] ?? "", colors), fg(colors.accent)(description[2] ?? ""));
     } else if (revision) {
       chunks.push(fg(colors.muted)(revision[1] ?? ""), ...idChunks(revision[2] ?? ""));
       const tail = revision[3] ?? "";

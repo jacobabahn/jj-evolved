@@ -1709,7 +1709,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const scope = prompt.action.kind === "rebase"
       ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""}`
       : "All files · Keep destination description";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${prompt.source.changeId.slice(0, 8)} → ${destination?.changeId.slice(0, 8) || "Choose destination"}\n${scope}`);
+    // The cursor starts on the source, which cannot be its own destination, so the hint asks for one until it moves.
+    const target = destination && destination.commitId !== source.commitId ? destination.changeId.slice(0, 8) : "choose a destination";
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${source.changeId.slice(0, 8)} → ${target}\n${scope}`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
