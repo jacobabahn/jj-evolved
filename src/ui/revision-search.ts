@@ -1,4 +1,4 @@
-import { InputRenderable, type KeyEvent, type RenderContext, type SelectRenderable } from "@opentui/core";
+import { BoxRenderable, InputRenderable, TextRenderable, type KeyEvent, type RenderContext, type SelectRenderable } from "@opentui/core";
 import { shortChangeId, type Bookmark, type Resolution, type Revision } from "../repository/model";
 import { getTheme } from "./theme";
 
@@ -15,6 +15,8 @@ type Chooser = Pick<SelectRenderable, "moveUp" | "moveDown" | "focus">;
 /** Adds / filtering to a chooser without taking over its accept/cancel actions. */
 export class ListSearch<T> {
   readonly input: InputRenderable;
+  /** The input behind a "/" glyph, as the graph's search is typed: the row to add to a layout. */
+  readonly field: BoxRenderable;
   matches: T[];
   // Called when the search input opens or closes, so the footer can switch to the search keys.
   onActiveChange?: () => void;
@@ -24,7 +26,10 @@ export class ListSearch<T> {
     private readonly filter: (items: T[], query: string) => T[], private readonly render: (matches: T[]) => void, placeholder: string) {
     const colors = getTheme(ctx);
     this.matches = items;
-    this.input = new InputRenderable(ctx, { id, visible: false, width: "100%", placeholder, textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+    this.input = new InputRenderable(ctx, { id, flexGrow: 1, minWidth: 1, placeholder, textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+    this.field = new BoxRenderable(ctx, { id: `${id}-field`, visible: false, width: "100%", height: 1, flexShrink: 0, flexDirection: "row" });
+    this.field.add(new TextRenderable(ctx, { id: `${id}-glyph`, content: "/ ", fg: colors.accent, flexShrink: 0 }));
+    this.field.add(this.input);
     this.input.on("input", () => {
       this.matches = this.filter(this.items, this.input.value);
       this.render(this.matches);
@@ -35,7 +40,7 @@ export class ListSearch<T> {
 
   start() {
     this.editing = true;
-    this.input.visible = true;
+    this.field.visible = true;
     this.input.focus();
     this.onActiveChange?.();
   }
@@ -50,7 +55,7 @@ export class ListSearch<T> {
     if (key.name === "escape") {
       key.preventDefault();
       this.editing = false;
-      this.input.visible = false;
+      this.field.visible = false;
       this.input.blur();
       this.input.value = "";
       this.matches = this.items;
@@ -65,7 +70,7 @@ export class ListSearch<T> {
     return true;
   }
 
-  dispose() { this.input.destroyRecursively(); }
+  dispose() { this.field.destroyRecursively(); }
 }
 
 const noMatches = "No matching destinations. Edit the search or press Escape to clear it.";

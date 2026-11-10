@@ -33,7 +33,7 @@ export const scenarios: Scenario[] = [
       await ui.capture("Rebase mode labels and colors the destination pane");
       ui.key("j"); ui.key("j"); ui.key("RETURN");
       await ui.until("Rebase preview");
-      assert.equal(ui.screen.renderer.root.findDescendantById("prompt-input")?.visible, false);
+      assert.equal(ui.screen.renderer.root.findDescendantById("prompt-field")?.visible, false);
       await ui.capture("Operation review keeps source context with less chrome");
       // The pane title stays visible above the review, so wait for the inline hint the review covered.
       ui.key("ESCAPE"); await ui.until("Rebase from");
@@ -43,7 +43,7 @@ export const scenarios: Scenario[] = [
       await ui.capture("Focused preview shows scrolling controls");
       ui.key("TAB"); ui.key("L");
       ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true }); await ui.type("foo("); ui.key("RETURN");
-      await ui.until("Error:");
+      await ui.until("Failed to parse revset");
       await ui.capture("Invalid revset retains the draft and error");
       ui.key("ESCAPE");
       for (let i = 0; i < 100 && ui.screen.renderer.root.findDescendantById("action-overlay")?.visible; i++) { await Bun.sleep(10); await ui.screen.renderOnce(); }
@@ -87,7 +87,7 @@ export const scenarios: Scenario[] = [
       ui.key("h");
       await ui.until("Help · ");
       assert.equal(ui.screen.renderer.root.findDescendantById("preview")?.visible, false);
-      assert(ui.screen.captureCharFrame().includes("x/down / k/up"));
+      assert(ui.screen.captureCharFrame().includes("x/k, down/up"));
       await ui.capture("Custom movement and describe shortcuts in help");
       ui.key("j");
       await ui.until("Help · ");
