@@ -47,7 +47,7 @@ export function highlightJjText(text: string, prefixes: ReadonlyMap<string, stri
       chunks.push(fg(moving ? colors.accent : colors.text)(body.slice(bookmarks.length)));
       if (conflict) chunks.push(bold(fg(colors.conflict)(" [conflict]")));
     } else if (description) {
-      chunks.push(...graphChunks(description[1] ?? "", colors), fg(colors.accent)(description[2] ?? ""));
+      chunks.push(fg(colors.text)(description[1] ?? ""), fg(colors.accent)(description[2] ?? ""));
     } else if (revision) {
       chunks.push(fg(colors.muted)(revision[1] ?? ""), ...idChunks(revision[2] ?? ""));
       const tail = revision[3] ?? "";

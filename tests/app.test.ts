@@ -745,7 +745,7 @@ test("inline squash reviews a graph destination before applying", async () => {
     t.screen.mockInput.pressKey("S");
     await t.until("Squash from ●");
     t.screen.mockInput.pressEnter();
-    await t.until("Choose a different destination");
+    await t.until("Choose another destination");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressKey("j");
     await t.until("Keep destination description");
@@ -914,8 +914,9 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     await t.until("[ ] include descendants");
     t.screen.mockInput.pressTab();
     t.screen.mockInput.pressKey("k");
+    // With its descendants, the change cannot move onto one of them; the destination is refused before jj runs.
     t.screen.mockInput.pressEnter();
-    await t.until("Error");
+    await t.until("Choose another destination");
     expect(t.screen.captureCharFrame()).toContain("Rebase from ●");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressTab();

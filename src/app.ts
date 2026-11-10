@@ -1698,6 +1698,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void followFiles(true).catch(error => report(errorText(error), true));
     scheduleFocusRefresh();
   }
+  // A change cannot move onto itself, nor, with its descendants, onto one of them.
+  function movesItself(state: Extract<Prompt, { kind: "inline" }>, destination: Revision) {
+    const moving = state.action.kind === "rebase" && state.action.descendants ? state.action.scope : [state.source];
+    return moving.some(revision => revision.commitId === destination.commitId);
+  }
   function updateInlineHint() {
     if (prompt.kind !== "inline") return;
     const source = prompt.source;
@@ -1710,7 +1715,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""}`
       : "All files · Keep destination description";
     // The cursor starts on the source, which cannot be its own destination, so the hint asks for one until it moves.
-    const target = destination && destination.commitId !== source.commitId ? destination.changeId.slice(0, 8) : "choose a destination";
+    const target = destination && !movesItself(prompt, destination) ? destination.changeId.slice(0, 8) : "choose a destination";
     inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${source.changeId.slice(0, 8)} → ${target}\n${scope}`);
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
@@ -1876,7 +1881,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       updateInlineHint();
     } else if (key.name === "return") {
       const destination = selected();
-      if (!destination || destination.commitId === state.source.commitId) { report("Choose a different destination revision.", true); return; }
+      if (!destination || movesItself(state, destination)) { report("Choose another destination.", true); return; }
       const action: Mutation = state.action.kind === "rebase"
         ? { kind: "rebase", revision: state.source, destination, descendants: state.action.descendants }
         : { kind: "squash", revision: state.source, destination, files: [], description: destination.description };
