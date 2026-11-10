@@ -213,7 +213,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlay.visible = false;
   overlay.onKeys = paintShortcuts;
   repository.onNetworkChange = () => { if (!stopped) paintShortcuts(); };
-  const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, minHeight: 1, wrapperOptions: { flexBasis: 0 }, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
+  const overlayPreview = new ScrollBoxRenderable(renderer, { id: "overlay-preview", flexGrow: 1, flexBasis: 0, minHeight: 1, wrapperOptions: { flexBasis: 0 }, contentOptions: { width: "100%", minHeight: 0 }, border: true, borderColor: colors.border, title: " Preview " });
   const overlayText = new ChangePreview(renderer, "overlay-preview-text");
   const comparison = new TreeComparisonView(renderer, "confirmation-trees");
   const helpBox = new BoxRenderable(renderer, { id: "help", visible: false, width: "100%", paddingRight: 1, flexDirection: "column", flexShrink: 0 });
