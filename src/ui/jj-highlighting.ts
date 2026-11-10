@@ -40,12 +40,13 @@ export function highlightJjText(text: string, prefixes: ReadonlyMap<string, stri
       // Summary lines also start "● <change> / <commit>"; only tree rows carry their description on the next line.
       moving = prefix.includes("●") && !tail.startsWith(" / ");
       chunks.push(...graphChunks(prefix, colors).map(chunk => chunk.text === "●" ? bold(fg(colors.accent)("●")) : chunk), ...idChunks(graph[2] ?? ""));
-      const conflict = tail.endsWith(" [conflict]");
+      // The graph's own conflict marker, so a conflict reads the same in the graph and in preview trees.
+      const conflict = tail.endsWith(" ! conflict");
       const body = conflict ? tail.slice(0, -11) : tail;
       const bookmarks = /^(?: \[[^\]]+\])*/.exec(body)?.[0] ?? "";
       if (bookmarks) chunks.push(fg(colors.bookmark)(bookmarks));
       chunks.push(fg(moving ? colors.accent : colors.text)(body.slice(bookmarks.length)));
-      if (conflict) chunks.push(bold(fg(colors.conflict)(" [conflict]")));
+      if (conflict) chunks.push(bold(fg(colors.conflict)(" ! conflict")));
     } else if (description) {
       chunks.push(fg(colors.text)(description[1] ?? ""), fg(colors.accent)(description[2] ?? ""));
     } else if (revision) {
@@ -57,6 +58,9 @@ export function highlightJjText(text: string, prefixes: ReadonlyMap<string, stri
     } else if (commit || bookmarks) {
       const match = commit ?? bookmarks;
       chunks.push(fg(colors.muted)(match?.[1] ?? ""), fg(commit ? colors.commit : colors.bookmark)(match?.[2] ?? ""));
+    } else if (/^(Working copy {2})?! conflict$/.test(line)) {
+      // The preview's metadata marks a conflicted change as the graph does.
+      chunks.push(fg(colors.text)(line.slice(0, -"! conflict".length)), bold(fg(colors.conflict)("! conflict")));
     } else chunks.push(fg(colors.text)(line));
     if (index < lines.length - 1) chunks.push(fg(colors.text)("\n"));
     return chunks;

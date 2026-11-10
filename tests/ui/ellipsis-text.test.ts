@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { BoxRenderable } from "@opentui/core";
+import { BoxRenderable, RGBA, StyledText, fg } from "@opentui/core";
 import { EllipsisText, fitText } from "../../src/ui/ellipsis-text";
 import { homePath } from "../../src/app";
 
@@ -32,6 +32,24 @@ test("EllipsisText cuts at its own edge and at the edge of a clipping row, and g
     row.width = 40;
     await screen.renderOnce();
     expect(screen.captureCharFrame().split("\n")[0]).toBe("Validate retry on network failures      ");
+  } finally {
+    screen.renderer.destroy();
+  }
+});
+
+// Styled text colours its chunks and leaves the renderable's own colour unset, so an … drawn in that colour came out
+// in the default white, invisible on the Light theme's pale selection band.
+test("EllipsisText draws the … in the colour of the text it replaces", async () => {
+  const screen = await createTestRenderer({ width: 20, height: 2 });
+  const blue = RGBA.fromHex("#005a9c"), purple = RGBA.fromHex("#7540a0");
+  try {
+    const text = new EllipsisText(screen.renderer, { width: 10, height: 2,
+      content: new StyledText([fg(purple)("abc "), fg(blue)("defghijklmnop\n"), fg(purple)("short")]) });
+    screen.renderer.root.add(text);
+    await screen.renderOnce();
+    expect(screen.captureCharFrame().split("\n")[0]?.slice(0, 10)).toBe("abc defgh…");
+    const cut = screen.captureSpans().lines[0]?.spans.find(span => span.text.includes("…"));
+    expect(cut?.fg).toEqual(blue);
   } finally {
     screen.renderer.destroy();
   }

@@ -137,7 +137,7 @@ test("partial squash leaves unselected files and rebase reports conflicts", asyn
     const destination = await t.revision("@");
     const beforePreview = await t.repo.operationId();
     const prepared = await t.repo.prepare({ kind: "rebase", revision: remaining, destination, descendants: false });
-    expect(prepared.trees?.after).toContain("[conflict]");
+    expect(prepared.trees?.after).toContain(" ! conflict");
     expect(await t.repo.operationId()).toBe(beforePreview);
     await t.repo.apply(prepared);
     const conflicted = await t.revision(remaining.changeId);

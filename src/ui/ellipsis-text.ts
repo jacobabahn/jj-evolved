@@ -35,8 +35,28 @@ export class EllipsisText extends TextRenderable {
     if (right <= 0) return;
     const widths = this.lineInfo.lineWidthCols;
     for (let row = 0; row < Math.min(this.height, widths.length - this.scrollY); row++) {
-      if (this.screenX + (widths[row + this.scrollY] ?? 0) - this.scrollX > right) buffer.drawText(ELLIPSIS, right - 1, this.screenY + row, this.fg);
+      if (this.screenX + (widths[row + this.scrollY] ?? 0) - this.scrollX > right) {
+        buffer.drawText(ELLIPSIS, right - 1, this.screenY + row, this.colorAt(row + this.scrollY, right - 1 - this.screenX + this.scrollX));
+      }
     }
+  }
+
+  /**
+   * The colour of the text at `column` of `line`, so the … takes the colour of what it replaces. Styled content sets
+   * colours per chunk, and the renderable's own colour applies only where a chunk sets none.
+   */
+  private colorAt(line: number, column: number) {
+    let row = 0, start = 0;
+    for (const chunk of this.content.chunks) {
+      for (const [index, part] of chunk.text.split("\n").entries()) {
+        if (index > 0) { row++; start = 0; }
+        if (row > line) return this.fg;
+        const width = Bun.stringWidth(part);
+        if (row === line && column < start + width) return chunk.fg ?? this.fg;
+        start += width;
+      }
+    }
+    return this.fg;
   }
 }
 

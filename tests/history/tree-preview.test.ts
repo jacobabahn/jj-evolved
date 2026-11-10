@@ -4,7 +4,7 @@ import { RGBA } from "@opentui/core";
 import { fixture } from "../fixture";
 import { Repository } from "../../src/repository/repository";
 
-const template = 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ "]").join(" ") ++ if(conflict, " [conflict]") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"';
+const template = 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ "]").join(" ") ++ if(conflict, " ! conflict") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"';
 
 
 for (const descendants of [false, true]) {
@@ -128,7 +128,7 @@ test("popup trees and revision summaries render JJ token colors", async () => {
     trees.setTrees({
       beforePrefixes: new Map([["qwrtyuok", "qw"], ["zzzzzzzz", "z"]]),
       afterPrefixes: new Map([["qwrtyuok", "qw"], ["zzzzzzzz", "z"]]),
-      before: "@  qwrtyuok [feature] Description [conflict]\n◆  zzzzzzzz  Root\n",
+      before: "@  qwrtyuok [feature] Description ! conflict\n◆  zzzzzzzz  Root\n",
       after: "@  qwrtyuok [feature] Description\n◆  zzzzzzzz  Root\n",
     });
     await screen.waitForVisualIdle();
@@ -136,7 +136,7 @@ test("popup trees and revision summaries render JJ token colors", async () => {
     for (const [token, color] of [
       ["qw", jjColors.changeId], ["rtyuok", jjColors.muted], ["[feature]", jjColors.bookmark],
       ["@", jjColors.accent], ["◆", jjColors.commit],
-      ["[conflict]", jjColors.conflict], ["abcdef123456", jjColors.commit],
+      ["! conflict", jjColors.conflict], ["abcdef123456", jjColors.commit],
     ] satisfies [string, InstanceType<typeof RGBA>][]) {
       const matches = spans.filter(span => token === "@" || token === "◆" ? span.text.includes(token) : span.text.trim() === token);
       if (!matches.length) throw new Error(`Missing token ${token}: ${screen.captureCharFrame()}`);
@@ -231,7 +231,7 @@ test("preview trees colour moved rows, both lines, and head the trees with the c
     trees.setTrees({
       beforePrefixes: prefixes, afterPrefixes: prefixes,
       before: "@  ● qwrtyuok [feature]\n│  Moved change\n○  xvtltxry\n│  Stays put\n◆  zzzzzzzz\n   Root\n",
-      after: "×  ● qwrtyuok [feature] [conflict]\n│  Moved change\n○  xvtltxry\n│  Stays put\n◆  zzzzzzzz\n   Root\n",
+      after: "×  ● qwrtyuok [feature] ! conflict\n│  Moved change\n○  xvtltxry\n│  Stays put\n◆  zzzzzzzz\n   Root\n",
       newConflicts: 1,
     }, "rebase");
     await screen.waitForVisualIdle();
