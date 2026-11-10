@@ -204,7 +204,7 @@ export class Repository {
 
   async operations(limit = 50): Promise<Operation[]> {
     const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "log", "--no-graph", "--limit", String(limit), "-T",
-      `'[' ++ json(id) ++ ',' ++ json(description) ++ ',' ++ json(stringify(time)) ++ ',' ++ json(current_operation) ++ ']\n'`]);
+      `'[' ++ json(id) ++ ',' ++ json(description) ++ ',' ++ json(time.end().ago()) ++ ',' ++ json(current_operation) ++ ']\n'`]);
     return tuples(output).map(([id, description, time, current]) => ({ id: string(id), description: string(description), time: string(time), current: boolean(current) }));
   }
 
@@ -217,7 +217,7 @@ export class Repository {
     const operationId = options.operationId ?? await this.operationId();
     const output = await run(this.root, ["--at-op", operationId, "evolog", "--config", "ui.log-word-wrap=false", "--no-graph", "-r", revision.commitId,
       "--limit", String(limit + 1), "-T",
-      `'[' ++ json(commit.commit_id()) ++ ',' ++ json(commit.description()) ++ ',' ++ json(operation.description()) ++ ',' ++ json(stringify(operation.time())) ++ ']\n'`]);
+      `'[' ++ json(commit.commit_id()) ++ ',' ++ json(commit.description()) ++ ',' ++ json(operation.description()) ++ ',' ++ json(operation.time().end().ago()) ++ ']\n'`]);
     const entries = tuples(output).map(([id, description, operationDescription, time]) => {
       const commitId = string(id);
       if (!/^[0-9a-f]{40,64}$/.test(commitId)) throw new Error("Unexpected commit ID in jj evolution output.");
@@ -372,9 +372,9 @@ export class Repository {
       }
       case "undo":
         if (operationId !== action.operation.id) throw new Error("The latest operation changed. Open operation history again.");
-        summary = `Undo this exact operation by applying its inverse:\n${action.operation.description}\n${action.operation.id}\n\n${await this.operationDiff(action.operation)}`;
+        summary = `Undo this exact operation by applying its inverse:\n${action.operation.description}\n${action.operation.id.slice(0, 12)} · ${action.operation.time}\n\n${await this.operationDiff(action.operation)}`;
         break;
-      case "restore": summary = `Restore repository state and local bookmarks to:\n${action.operation.description}\n${action.operation.id}\n\nLater changes leave the current view but remain in operation history. Remote-tracking state is preserved.`; break;
+      case "restore": summary = `Restore repository state and local bookmarks to:\n${action.operation.description}\n${action.operation.id.slice(0, 12)} · ${action.operation.time}\n\nLater changes leave the current view but remain in operation history. Remote-tracking state is preserved.`; break;
       default: { const exhaustive: never = action; throw new Error(`Unknown action ${exhaustive}`); }
     }
     const trees = action.kind === "rebase" || action.kind === "squash"

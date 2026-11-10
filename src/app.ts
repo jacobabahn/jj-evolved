@@ -247,8 +247,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlay.body.add(suggestions);
   overlay.body.add(chooser);
   overlay.body.add(overlayPreview);
-  const result = new TextRenderable(renderer, { id: "action-result", height: 2, visible: false, fg: colors.accent });
-  listBox.add(result);
   listBox.add(list);
   preview.add(detail);
   body.add(listBox);
@@ -260,7 +258,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   };
   renderer.root.add(app);
 
-  let resultTimer: ReturnType<typeof setTimeout> | undefined;
   let revisions: Revision[] = [];
   let historyLimit = 200;
   let refreshRequest = 0;
@@ -506,7 +503,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     restorePreviewScroll = undefined;
     const revision = selected();
     if (!revision) { show(`No revisions match this revset. Press ${actionKeys("filter")} to change it.`, "No revisions"); return; }
-    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId.slice(0, 12)}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `! conflict\n${actionKeys("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
+    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange    ${revision.changeId}\nCommit    ${revision.commitId.slice(0, 12)}\nAuthor    ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents   ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `! conflict\n${actionKeys("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
       prefix: metadata, read: signal => repository.diff(revision, [], { signal }), empty: "Empty change. No file differences.",
       cached: repository.cachedDiff(revision), delay: debounce, key: `change ${revision.changeId}` });
@@ -1003,8 +1000,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const value = current.kind === "describe" ? descriptionInput.plainText : input.value;
     if (current.kind === "text") { current.accept(value); return; }
     if (current.kind === "bookmark") { submitBookmark(current.revision); return; }
+    let note = "";
     if (current.kind === "confirm") {
-      let note = "";
       await run(networkLabel(current.action) ?? "Applying jj operation…", async () => { note = await applyReviewed(current.extras.then) ?? ""; });
       if (note && !stopped && prompt.kind === "browse") report(note);
       return;
@@ -1018,8 +1015,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         .catch(error => report(`Couldn't save revset history: ${errorText(error)}`, true));
     });
     else if (current.kind === "describe") await run("Applying jj operation…", async () => {
-      if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) await applyReviewed();
+      if (await review.prepare({ kind: "describe", revision: current.revision, description: value })) note = await applyReviewed() ?? "";
     });
+    if (note && !stopped && prompt.kind === "browse") report(note);
   }
   async function refreshAfterMutation(action: Mutation) {
     if (stopped) return;
@@ -1049,14 +1047,30 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (outcome.kind !== "applied" || stopped) return;
     closePrompt();
     if (outcome.refreshError) throw new Error(outcome.refreshError);
-    const text = outcome.report ?? `${outcome.action.kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
-    result.content = text;
-    // Two rows, or three for a fetch that also names the bookmarks it left conflicted.
-    result.height = Math.max(2, text.split("\n").length);
-    result.visible = true;
-    clearTimeout(resultTimer);
-    resultTimer = setTimeout(() => { if (!stopped) result.visible = false; }, 4000);
-    return then?.();
+    // What happened goes in the message slot, the one place status is shown; a next step's note replaces it.
+    return await then?.() ?? (outcome.report ? terminalText(outcome.report).replace(/\n/g, ", ") : completedText(outcome.action));
+  }
+  function completedText(action: Mutation): string {
+    const id = (revision: Revision) => shortChangeId(revision);
+    switch (action.kind) {
+      case "new": return `Created a new change on ${id(action.parent)}.`;
+      case "edit": return `${id(action.revision)} is now the working copy.`;
+      case "describe": return `Saved the description of ${id(action.revision)}.`;
+      case "abandon": return `Abandoned ${id(action.revision)}.`;
+      case "absorb": return `Absorbed ${id(action.revision)} into its ancestors.`;
+      case "rebase": return `Rebased ${id(action.revision)}${action.descendants ? " and its descendants" : ""} onto ${id(action.destination)}.`;
+      case "squash": return `Squashed ${id(action.revision)} into ${id(action.destination)}.`;
+      case "split": return `Split ${id(action.revision)}.`;
+      case "bookmark-create": return `Created bookmark ${action.name}.`;
+      case "bookmark-move": return `Moved bookmark ${action.name} to ${id(action.revision)}.`;
+      case "bookmark-rename": return `Renamed bookmark ${action.name} to ${action.newName}.`;
+      case "bookmark-delete": return `Deleted bookmark ${action.name}${action.push && action.remotes?.length ? ` here and on ${action.remotes.join(", ")}` : ""}.`;
+      case "bookmark-track": return `Tracking ${action.name}@${action.remote}.`;
+      case "bookmark-untrack": return `Stopped tracking ${action.name}@${action.remote}.`;
+      case "undo": return "Undid the last operation.";
+      case "restore": return "Restored the repository to the chosen operation.";
+      default: return `${operationLabel(action.kind)} completed.`;
+    }
   }
   function operationLabel(kind: Mutation["kind"]) {
     return kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ").replace(/^[a-z]/, letter => letter.toUpperCase());
@@ -1117,7 +1131,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const themed: [object[], (colors: Theme) => object][] = [
       [[app], c => ({ backgroundColor: c.bg })],
       [[suggestions], c => ({ fg: c.text })],
-      [[header, navigationStatus, searchPrefix, searchStatus, inlineHint, shortcuts, result], c => ({ fg: c.accent })],
+      [[header, navigationStatus, searchPrefix, searchStatus, inlineHint, shortcuts], c => ({ fg: c.accent })],
       [[filter, message], c => ({ fg: c.muted })],
       [[listBox], c => ({ backgroundColor: c.panel })],
       [[overlayPreview], c => ({ borderColor: c.border })],
@@ -1575,7 +1589,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         description: `${operation.id.slice(0, 12)} ${operation.time}`,
         preview: () => repository.operationDiff(operation),
         choose: () => pick("Operation actions", [
-          { name: "Inspect operation", description: operation.id, preview: () => repository.operationDiff(operation), choose: () => { void previews.load({ target: "overlay", title: "Operation details", loading: "Loading operation…", read: () => repository.operationDiff(operation) }); } },
+          { name: "Inspect operation", description: operation.id.slice(0, 12), preview: () => repository.operationDiff(operation), choose: () => { void previews.load({ target: "overlay", title: "Operation details", loading: "Loading operation…", read: () => repository.operationDiff(operation) }); } },
           { name: "Restore this operation", description: "Restore repository state and local bookmarks", choose: () => confirm({ kind: "restore", operation }) },
         ]),
       }));
@@ -1617,7 +1631,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const form = new HistoryForm(renderer, repository, revision,
       kind === "rebase" ? { kind, descendants } : { kind, files: [], description: "", keepDescription: true },
       review, async () => {
-        try { await applyReviewed(); report("Ready."); }
+        try { report(await applyReviewed() ?? "Ready."); }
         catch (error) { if (prompt.kind === "browse") report(errorText(error), true); throw error; }
       }, moving => list.markSource(revisions.findIndex(item => item.commitId === revision.commitId), new Set(moving.map(item => item.commitId))));
     form.onError = text => { lastError = text; };
@@ -1838,7 +1852,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     prompt = state;
     list.markSource(revisions.findIndex(revision => revision.commitId === state.source.commitId));
     inlineHint.visible = true;
-    result.visible = false;
     setMessage("");
     listBox.title = ` ${state.action.kind === "rebase" ? "Rebase" : "Squash"}: choose destination `;
     setFocus("list");
@@ -2130,7 +2143,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     repository.cancelNetwork();
     renderer.off("palette", applyTerminalColors);
     clearInterval(refreshTimer);
-    clearTimeout(resultTimer);
     clearTimeout(searchTimer);
     ++searchRequest;
     if (prompt.kind === "form") prompt.form.dispose();

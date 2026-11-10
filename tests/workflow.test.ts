@@ -160,7 +160,7 @@ test("idle polls read only the operation ID after startup, refreshes, and mutati
     const editor = t.node<TextareaRenderable>("description-input");
     editor.setText("Described in the app");
     t.screen.mockInput.pressKey("s", { ctrl: true });
-    await t.text("describe completed");
+    await t.text("Saved the description");
     await idlePoll();
   } finally { spawn.mockRestore(); snapshot.mockRestore(); graph.mockRestore(); await t.cleanup(); }
 });

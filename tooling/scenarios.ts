@@ -102,7 +102,7 @@ export const scenarios: Scenario[] = [
       await ui.type("xhD stay text in prompts");
       await ui.capture("Browse shortcuts remain text in the description prompt");
       ui.key("s", { ctrl: true });
-      await ui.until("Ready.");
+      await ui.until("Saved the description");
       assert.equal((await ui.repo.snapshot("@-")).revisions[0]?.description.trim(), "xhD stay text in prompts");
     },
   },
@@ -237,7 +237,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Targets:");
       await ui.capture("Review remote bookmark tracking change");
       ui.key("RETURN");
-      await ui.until("Bookmark untrack completed");
+      await ui.until("Stopped tracking ");
       assert.equal((await ui.repo.bookmarks()).find(bookmark => bookmark.remote === "origin")?.tracked, false);
     },
   },
@@ -310,7 +310,7 @@ export const scenarios: Scenario[] = [
       await ui.until("New target:");
       await ui.capture("Review moving the bookmark to origin's target");
       ui.key("RETURN");
-      await ui.until("Bookmark move completed");
+      await ui.until("Moved bookmark feature to ");
       const feature = (await ui.repo.bookmarks()).find(item => item.name === "feature" && !item.remote);
       assert.deepEqual([feature?.conflict, feature?.targets], [false, [upstream]]);
       await ui.until("[feature]");
@@ -552,9 +552,9 @@ export const scenarios: Scenario[] = [
       assert.equal(await ui.repo.operationId(), before);
       await ui.capture("Escape cancels without touching the repository");
       ui.key("n");
-      await ui.until("new completed");
+      await ui.until("Created a new change");
       await ui.until("5 revisions");
-      await ui.until("Ready.");
+      await ui.settled();
       const child = (await ui.repo.snapshot("@")).revisions[0];
       assert(child);
       const parent = (await ui.repo.snapshot("feature")).revisions[0];
@@ -616,7 +616,7 @@ export const scenarios: Scenario[] = [
       ui.key("ESCAPE"); await ui.until("Cancelled.");
       await ui.resize(120, 40);
       ui.key("k");
-      await ui.until("Commit   ");
+      await ui.until("Commit    ");
       await ui.capture("Graph and preview at 120x40");
     },
   },
@@ -669,7 +669,7 @@ export const scenarios: Scenario[] = [
       await ui.paste(description);
       await ui.capture("Pasted Unicode description");
       ui.key("s", { ctrl: true });
-      await ui.until("Ready.");
+      await ui.until("Saved the description");
       assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description.trim(), description);
       await ui.capture("Saved Unicode description");
     },
@@ -691,7 +691,7 @@ export const scenarios: Scenario[] = [
       assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description.trim(), "Next change");
       await ui.capture("Enter starts a second line without saving");
       ui.key("s", { ctrl: true });
-      await ui.until("Ready.");
+      await ui.until("Saved the description");
       assert.equal((await ui.repo.snapshot("@")).revisions[0]?.description, "Add login form\nValidates the email field before submitting.\n");
       await ui.until("Add login form");
       await ui.capture("Ctrl+S saved both lines; the graph shows the new subject");
@@ -736,7 +736,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Preview ready");
       await ui.capture("Refreshed review is ready to apply");
       ui.key("RETURN");
-      await ui.until("rebase completed");
+      await ui.until("Rebased ");
       assert.deepEqual((await ui.repo.snapshot(source.changeId)).revisions[0]?.parents, ["0".repeat(40)]);
       assert.equal(ui.screen.renderer.root.findDescendantById("history-form"), undefined);
       await ui.capture("Rebase applied once and form closed");
