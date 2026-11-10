@@ -506,7 +506,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     restorePreviewScroll = undefined;
     const revision = selected();
     if (!revision) { show(`No revisions match this revset. Press ${actionKeys("filter")} to change it.`, "No revisions"); return; }
-    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId.slice(0, 12)}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `CONFLICT\n${actionKeys("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
+    const metadata = terminalText(`${revision.description.trimEnd() || "(no description)"}\n\nChange   ${revision.changeId}\nCommit   ${revision.commitId.slice(0, 12)}\nAuthor   ${revision.author}\nBookmarks ${revision.bookmarks || "none"}\nParents  ${revision.parents.map(id => id.slice(0, 12)).join(", ") || "none"}\n${revision.workingCopy ? "Working copy  " : ""}${revision.conflict ? `! conflict\n${actionKeys("actions")} → Resolve conflicts opens your configured merge tool.` : ""}`.trimEnd() + "\n\n");
     await previews.load({ target: "main", title: "Change preview", loading: "Loading diff…",
       prefix: metadata, read: signal => repository.diff(revision, [], { signal }), empty: "Empty change. No file differences.",
       cached: repository.cachedDiff(revision), delay: debounce, key: `change ${revision.changeId}` });
