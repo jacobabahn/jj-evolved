@@ -4,6 +4,9 @@ import { terminalText } from "../terminal-text";
 import type { ShortcutLine } from "./shortcut-bar";
 import { EllipsisText } from "./ellipsis-text";
 
+/** Narrower than this, an overlay spans the screen: side margins would leave slivers of the panes behind it. */
+export const FULL_WIDTH_BELOW = 100;
+
 export class ActionOverlay extends BoxRenderable {
   onError?: (message: string) => void;
   readonly context: TextRenderable;
@@ -41,13 +44,14 @@ export class ActionOverlay extends BoxRenderable {
   }
 
   /**
-   * Sets the overlay's height and centres it on the screen, 84% wide with equal side margins.
+   * Sets the overlay's height and centres it on the screen, 84% wide with equal side margins, or the full width on a
+   * screen narrower than {@link FULL_WIDTH_BELOW} columns.
    * Geometry is in whole cells: a fractional percentage width lets text inputs inside draw past the border.
    */
   place(rows: number | `${number}%`) {
     this.rows = rows;
     const { width, height } = this.ctx;
-    const margin = Math.round(width * 0.08);
+    const margin = width < FULL_WIDTH_BELOW ? 0 : Math.round(width * 0.08);
     const tall = Math.min(height, typeof rows === "number" ? rows : Math.round(height * Number.parseFloat(rows) / 100));
     this.left = margin;
     this.columns = Math.max(1, width - 2 * margin);

@@ -1050,7 +1050,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function openReview(action: Mutation, prepared: PreparedMutation, edit: (() => void) | null, back: (() => void) | null, extras: ReviewExtras = {}) {
     showOverlay(prepared.summary, `${operationLabel(action.kind)} preview`);
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
-    openPrompt({ kind: "confirm", action, edit, back, extras }, "Review before applying");
+    openPrompt({ kind: "confirm", action, edit, back, extras }, `Review before applying · ${operationLabel(action.kind)} preview`);
+    // The overlay's title names the preview, so the preview needs no box of its own inside it.
+    overlayPreview.border = false;
   }
   /** Where Escape and a failed apply return to from a review opened over the current prompt. */
   function reviewReturns() {
@@ -1726,8 +1728,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     overlayText.visible = false;
     buildHelp();
     helpBox.visible = true;
-    // The border title is the only heading; the preset and how to switch it end the reference.
+    // The border title is the only heading; the preset and how to switch it end the reference. The help needs no box
+    // of its own inside the overlay's.
     overlayPreview.title = "";
+    overlayPreview.border = false;
     overlayPreview.scrollTo(0);
     overlay.context.visible = false;
   }
