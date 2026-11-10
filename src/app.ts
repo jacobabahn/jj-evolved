@@ -51,6 +51,21 @@ type Prompt =
 
 
 const noRemotes = "No Git remotes are configured. Add one in your terminal with jj git remote add <name> <url>.";
+// How many rows `text` takes when wrapped at word boundaries to `width` columns.
+function wrappedLines(text: string, width: number) {
+  let rows = 0;
+  for (const line of text.split("\n")) {
+    let used = 0;
+    rows++;
+    for (const word of line.split(" ")) {
+      const size = Bun.stringWidth(word);
+      if (used && used + 1 + size > width) { rows++; used = 0; }
+      used = used ? used + 1 + size : size;
+      while (used > width) { rows++; used -= width; }
+    }
+  }
+  return rows;
+}
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows: [string, string][] }[] {
   const bindings = scopes.revisions, files = scopes.files, menu = scopes.menu, prompt = scopes.prompt;
@@ -443,12 +458,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pick(title, []);
     chooser.visible = false;
     overlay.context.visible = false;
-    overlay.place(7);
+    // The box fits the wrapped message: its lines, the border and the margin below them.
+    overlay.place(wrappedLines(text, overlay.innerWidth) + 3);
     // The message is the whole overlay, so it goes without a box of its own.
     overlayPreview.visible = true;
     overlayPreview.border = false;
     showOverlay(text, "");
-    overlay.keys = { left: [], right: [exit("close")] };
+    overlay.keys = { left: [["Enter", "dismiss"]], right: [exit("close")] };
   }
   function activateOverlay(title: string, cancelPreview = true) {
     if (cancelPreview) previews.cancel();
@@ -1484,7 +1500,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         description: `${operation.id.slice(0, 12)} ${operation.time}`,
         preview: () => repository.operationDiff(operation),
         choose: () => pick("Operation actions", [
-          { name: "Inspect operation", description: operation.id, choose: () => { void previews.load({ target: "overlay", title: "Operation details", loading: "Loading operation…", read: () => repository.operationDiff(operation) }); } },
+          { name: "Inspect operation", description: operation.id, preview: () => repository.operationDiff(operation), choose: () => { void previews.load({ target: "overlay", title: "Operation details", loading: "Loading operation…", read: () => repository.operationDiff(operation) }); } },
           { name: "Restore this operation", description: "Restore repository state and local bookmarks", choose: () => confirm({ kind: "restore", operation }) },
         ]),
       }));
@@ -1925,7 +1941,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     key.preventDefault();
     if (isBusy()) return;
     const move = moveKey(key);
-    if (key.name === "escape" || keyAction === "back") goBack();
+    // A notice has nothing to choose, so Enter dismisses it like Escape.
+    if (key.name === "escape" || keyAction === "back" || (key.name === "return" && !state.all.length)) goBack();
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
     else if (move) moveChoice(move);
     else if (key.name === "return") chooseSelected();
