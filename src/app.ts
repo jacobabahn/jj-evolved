@@ -6,7 +6,7 @@ import { applyCompletion, bookmarkNameCompletions, historyCompletions, revsetCom
 import { memoryRevsetHistory, recordRevset, type RevsetHistoryStore } from "./revisions/revset-history";
 import { MutationReview } from "./history/mutation-review";
 import { PreviewSession } from "./preview/preview-session";
-import { setTerminalColors, setTheme, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
+import { setTerminalColors, setTheme, themeScrollbars, themes, themeNames, themeLabels, type ThemeName, type Theme } from "./ui/theme";
 import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
 import { ChangePreview } from "./preview/change-preview";
 import {
@@ -236,6 +236,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlayPreview.add(comparison);
   overlayPreview.add(overlayText);
   overlayPreview.add(helpBox);
+  paintScrollbars();
   overlay.fields.add(input);
   overlay.body.add(descriptionInput);
   const suggestions = new EllipsisText(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text });
@@ -1101,6 +1102,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     for (const [widgets, style] of themed) for (const widget of widgets) Object.assign(widget, style(colors));
     paintPanes();
     for (const widget of [list, fileList, detail, overlay, overlayText, comparison]) widget.applyTheme();
+    paintScrollbars();
+  }
+  // The preview sits on the screen background; the overlay's preview on the overlay's panel.
+  function paintScrollbars() {
+    themeScrollbars(preview, "bg");
+    themeScrollbars(overlayPreview, "panel");
   }
 
   function previewTheme() {

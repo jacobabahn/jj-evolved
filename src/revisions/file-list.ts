@@ -1,4 +1,4 @@
-import { cursorBar, getTheme, hasSelectionBand, type Theme } from "../ui/theme";
+import { cursorBar, getTheme, hasSelectionBand, themeScrollbars, type Theme } from "../ui/theme";
 import { graphChunks } from "../ui/jj-highlighting";
 import { ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, type RenderContext } from "@opentui/core";
 import { terminalText } from "../terminal-text";
@@ -27,10 +27,12 @@ export class FileList extends ScrollBoxRenderable {
     super(context, { id, width: "100%", height: 1, flexShrink: 0, scrollY: true, scrollX: false, backgroundColor: getTheme(context).panel, contentOptions: { flexDirection: "column" } });
     this.empty = new EllipsisText(context, { id: `${id}-empty`, height: 1, width: "100%", flexShrink: 0, selectable: false, visible: false });
     this.add(this.empty);
+    themeScrollbars(this, "panel");
   }
 
   applyTheme() {
     this.backgroundColor = getTheme(this.ctx).panel;
+    themeScrollbars(this, "panel");
     this.paint();
   }
 
