@@ -704,7 +704,13 @@ export const scenarios: Scenario[] = [
       const chooser = ui.node("action-choices");
       assert(chooser instanceof SelectRenderable);
       const selected = () => chooser.getSelectedOption()?.value;
-      assert.equal(chooser.options[0]?.name, "── Edit ──");
+      assert.equal(chooser.options[0]?.description, "── Edit ──");
+      // The gap between groups is above a header, so each header sits directly on its first item.
+      const box = ui.node("action-overlay");
+      const lines = ui.screen.captureCharFrame().split("\n").map(line => Array.from(line).slice(box.screenX + 1, box.screenX + box.width - 1).join(""));
+      const history = lines.findIndex(line => line.includes("── History ──"));
+      assert.equal(lines[history - 1]?.trim(), "");
+      assert.match(lines[history + 1] ?? "", /\bRebase\b/);
       assert.equal(chooser.getSelectedOption()?.name, "Enter  Describe");
       assert.equal(selected(), "Describe");
       await ui.capture("Grouped actions with a shortcut column");

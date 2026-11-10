@@ -41,7 +41,7 @@ type Prompt =
   | { kind: "search"; view: NavigationView; previous: Search; returnPoint: NavigationView | null }
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision; original: string; discard: boolean }
-  | { kind: "picker"; title: string; all: Choice[]; choices: Choice[]; attach?: () => void }
+  | { kind: "picker"; title: string; all: Choice[]; choices: Choice[]; attach?: () => void; source: boolean }
   | { kind: "files"; revision: Revision; files: ChangedFile[] }
   | { kind: "text"; label: string; accept: (value: string) => void }
   // Typing a bookmark name into the revision's row, with suggestions beneath it in the graph.
@@ -467,14 +467,19 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     showOverlay(text, "");
     overlay.keys = { left: [["Enter", "dismiss"]], right: [exit("close")] };
   }
-  function activateOverlay(title: string, cancelPreview = true) {
+  /**
+   * Opens the overlay, or moves it to a new level. `source` shows the selected revision above the content, for
+   * overlays that act on it; repository-wide ones (revsets, bookmarks, operations) leave it out, and so do the levels
+   * opened from them. Without `source`, a level keeps what the level below it showed.
+   */
+  function activateOverlay(title: string, cancelPreview = true, source = overlay.visible ? overlay.context.visible : true) {
     if (cancelPreview) previews.cancel();
     if (!overlay.visible) {
       const revision = selected();
       overlay.context.content = revision ? highlightJjText(`Source ${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)}\n${revision.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([revision]), colors) : "Repository actions";
     }
     overlay.title = ` ${title} `;
-    overlay.context.visible = true;
+    overlay.context.visible = source;
     overlayPreview.border = true;
     overlay.place("84%");
     overlay.body.marginBottom = 1;
@@ -883,7 +888,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (current.kind === "picker") {
       const chosen = current.choices[chooser.getSelectedIndex()], keys = overlay.keys;
       levels.push(() => {
-        pick(current.title, current.all, { attach: current.attach, replace: true });
+        pick(current.title, current.all, { attach: current.attach, replace: true, source: current.source });
         let index = chosen ? current.all.indexOf(chosen) : -1;
         if (index < 0 && chosen) index = current.all.findIndex(choice => choice.name === chosen.name && choice.description === chosen.description);
         if (index >= 0) chooser.setSelectedIndex(index);
@@ -940,7 +945,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pushLevel();
     pickerSearch?.dispose();
     pickerSearch = null;
-    activateOverlay(label);
+    // A revset is not about the selected revision, and Describe names its change in the title.
+    activateOverlay(label, true, next.kind === "revset" || next.kind === "describe" ? false : undefined);
     chooser.visible = false;
     prompt = next;
     suggestions.visible = false;
@@ -959,8 +965,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (next.kind === "describe") {
       overlay.place("65%");
       overlay.body.marginBottom = 0;
-      // The editor below holds the description, so the context names only the change.
-      overlay.context.content = highlightJjText(`Source ${shortChangeId(next.revision)} / ${next.revision.commitId.slice(0, 12)}`, revisionPrefixes([next.revision]), colors);
       descriptionInput.setText(terminalText(value));
       descriptionInput.gotoBufferEnd();
       descriptionInput.focus();
@@ -1190,11 +1194,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const room = overlay.innerWidth - 3;
     // The key column is as wide as the widest key in the whole list, so filtering does not move the names.
     const width = Math.max(0, ...prompt.all.map(choice => choice.key?.length ?? 0));
-    chooser.options = prompt.choices.map(choice => ({
+    // Every row is two lines, name and description. A header is drawn on its second line, so the blank line above
+    // separates it from the group before rather than from its own first item.
+    chooser.options = prompt.choices.map(choice => choice.header ? { value: choice.name, name: "", description: fitText(terminalText(`── ${choice.name} ──`), room) } : {
       value: choice.name,
-      name: fitText(terminalText(choice.header ? `── ${choice.name} ──` : width ? `${(choice.key ?? "").padEnd(width)}  ${choice.name}` : choice.name), room),
-      description: fitText(terminalText(width && !choice.header ? `${" ".repeat(width + 2)}${choice.description}` : choice.description), room),
-    }));
+      name: fitText(terminalText(width ? `${(choice.key ?? "").padEnd(width)}  ${choice.name}` : choice.name), room),
+      description: fitText(terminalText(width ? `${" ".repeat(width + 2)}${choice.description}` : choice.description), room),
+    });
   }
   function moveChoice(direction: 1 | -1) {
     if (prompt.kind !== "picker") return;
@@ -1202,14 +1208,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     while (prompt.choices[index]?.header) index += direction;
     if (prompt.choices[index]) chooser.setSelectedIndex(index);
   }
-  function pick(title: string, choices: Choice[], options: { attach?: () => void; replace?: boolean } = {}) {
+  function pick(title: string, choices: Choice[], options: { attach?: () => void; replace?: boolean; source?: boolean } = {}) {
     if (!options.replace) pushLevel();
     pickerSearch?.dispose();
     pickerSearch = null;
-    activateOverlay(title);
+    activateOverlay(title, true, options.source);
     input.blur();
     input.visible = false;
-    prompt = { kind: "picker", title, all: choices, choices, attach: options.attach };
+    prompt = { kind: "picker", title, all: choices, choices, attach: options.attach, source: overlay.context.visible };
     chooser.visible = true;
     chooser.showDescription = true;
     // A Selection pane that would only repeat the highlighted row's name and one-line description gives its rows to the list.
@@ -1504,7 +1510,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       });
       // Headers keep the remotes command apart from the bookmark rows, as the action menu groups its actions.
       pick("Bookmarks", [groupHeader("Remotes"), { name: "Git remotes", description: "Fetch and push", choose: showRemotes },
-        ...(rows.length ? [groupHeader("Bookmarks"), ...rows] : [])]);
+        ...(rows.length ? [groupHeader("Bookmarks"), ...rows] : [])], { source: false });
     }, true);
   }
   function showOperations(limit = 50) {
@@ -1521,7 +1527,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         ]),
       }));
       if (operations.length === limit) choices.push({ name: "Load older operations", description: `Show up to ${limit + 50} operations`, choose: () => showOperations(limit + 50) });
-      pick("Operation history", choices, { replace: limit > 50 });
+      pick("Operation history", choices, { replace: limit > 50, source: false });
     }, true);
   }
   function showEvolution(revision: Revision, limit = 50, operationId?: string, selectedIndex = 0) {
