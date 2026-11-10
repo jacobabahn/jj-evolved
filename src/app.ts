@@ -945,14 +945,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pushLevel();
     pickerSearch?.dispose();
     pickerSearch = null;
-    // A revset is not about the selected revision, and Describe names its change in the title.
-    activateOverlay(label, true, next.kind === "revset" || next.kind === "describe" ? false : undefined);
+    // A revset and an undo are not about the selected revision, and Describe names its change in the title.
+    const repositoryWide = next.kind === "revset" || next.kind === "describe" || (next.kind === "confirm" && next.action.kind === "undo");
+    activateOverlay(label, true, repositoryWide ? false : undefined);
+    // The field's top margin separates it from the source lines, and a short prompt drops their two rows with them.
+    input.marginTop = overlay.context.visible ? 1 : 0;
+    const contextRows = overlay.context.visible ? 0 : -2;
     chooser.visible = false;
     prompt = next;
     suggestions.visible = false;
     completed = null;
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") {
-      overlay.place(12);
+      overlay.place(12 + contextRows);
       overlayPreview.visible = false;
     }
     if (next.kind === "describe" || next.kind === "revset" || next.kind === "text") showOverlay(label, "Action");
@@ -972,7 +976,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.keys = { left: [[promptKey("saveDescription"), "save"], ["Enter", "newline"]], right: [exit("cancel")] };
     }
     if (next.kind === "revset") {
-      overlay.place(15);
+      overlay.place(15 + contextRows);
       overlay.keys = { left: [["Enter", "apply"], [bothKeys(promptKey("nextCompletion"), "Shift-Tab"), "complete"]], right: [exit("cancel")] };
       revsetOpened = input.value;
       updateCompletions();
@@ -1351,6 +1355,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const remotes = await repository.remotes();
       if (stopped) return;
       if (!remotes.length) { notice("Git remotes", noRemotes); return; }
+      // Remotes are repository-wide, wherever the list is opened from.
       pick("Git remotes", [...fetchAllChoice(remotes), ...remotes.map(remote => ({
         name: remote.name, description: remote.url,
         choose: () => pick(`Remote ${remote.name}`, [
@@ -1368,7 +1373,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             }, true);
           } },
         ]),
-      }))]);
+      }))], { source: false });
     }, true);
   }
   // With more than one remote, an entry fetches from every one of them, listed by name so the scope is explicit.

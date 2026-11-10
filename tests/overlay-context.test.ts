@@ -22,6 +22,19 @@ test("overlays show the selected revision only when they act on it", () => withU
   ui.key(" ");
   await ui.until("── Edit ──");
   expect(overlayText(ui)).toContain("Source ");
+  // Describe from the menu leaves it out; going back restores the menu's.
+  ui.key("RETURN");
+  await ui.until("─ Describe");
+  expect(overlayText(ui)).not.toContain("Source ");
+  ui.key("ESCAPE");
+  await ui.until("── Edit ──");
+  expect(overlayText(ui)).toContain("Source ");
+  ui.key("ESCAPE");
+  await closed(ui);
+  // Undo reverts the last operation, whatever is selected.
+  ui.key("u");
+  await ui.until("Review before applying");
+  expect(overlayText(ui)).not.toContain("Source ");
   ui.key("ESCAPE");
   await closed(ui);
   // Bookmarks and operation history leave it out, and so do the levels opened from them.
@@ -46,6 +59,8 @@ test("overlays show the selected revision only when they act on it", () => withU
     await ui.until(`─ ${title}`);
     await ui.settled();
     expect({ title, text: overlayText(ui) }).toEqual({ title, text: expect.not.stringContaining("Source ") });
+    // Without the source lines above it, the revset field starts on the first row inside the border.
+    if (title === "Revset") expect(overlayText(ui).split("\n")[1]).toContain("builtin_log()");
     ui.key("ESCAPE");
     await closed(ui);
   }
