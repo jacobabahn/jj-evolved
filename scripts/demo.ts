@@ -1,11 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultBindings } from "../src/ui/keybindings";
+import { demoText } from "./demo-text";
 
 if (!Bun.which("jj")) {
   process.stderr.write("Install Jujutsu first: jj must be on PATH.\n");
   process.exit(1);
 }
+const text = demoText(defaultBindings);
 const directory = await mkdtemp(join(tmpdir(), "jj-evolved-demo-"));
 async function jj(...args: string[]) {
   const proc = Bun.spawn(["jj", "--no-pager", "--color=never", ...args], {
@@ -44,11 +47,11 @@ try {
   });
   await change({
     parents: ["main"], description: "Document the keyboard controls", bookmarks: ["docs"],
-    files: { "docs/controls.md": "# Controls\n\nj/k: browse changes\nR: rebase a change\nS: squash changes\n" },
+    files: { "docs/controls.md": text.controls },
   });
   await change({
     parents: ["docs"], description: "Explain drag and drop", bookmarks: ["docs-drag"],
-    files: { "docs/controls.md": "# Controls\n\nj/k: browse changes\nR: rebase a change\nS: squash changes\n\nDrag a change onto another change to preview a rebase.\nDrag a bookmark label to move just that bookmark.\n" },
+    files: { "docs/controls.md": text.controlsWithDrag },
   });
   await change({
     parents: ["main"], description: "Add command-line options", bookmarks: ["cli"],
@@ -83,9 +86,9 @@ try {
   });
   await change({
     parents: ["@"],
-    description: "Try multiline descriptions\n\nPress d on this change to edit its description in the app.\nPress Shift+Enter (or Alt+Enter) for newlines, then Enter to save.\n\nThis final paragraph lets you check that blank lines are preserved.",
+    description: text.multiline,
     bookmarks: ["multiline-demo"],
-    files: { "docs/descriptions.md": "# Multiline descriptions\n\nPress d to edit a description. Shift+Enter or Alt+Enter adds a newline.\nEnter saves; Escape cancels. Space → Edit description in editor opens an external editor.\n" },
+    files: { "docs/descriptions.md": text.descriptionsDoc },
   });
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/index.ts"), directory], {
     stdin: "inherit", stdout: "inherit", stderr: "inherit",
