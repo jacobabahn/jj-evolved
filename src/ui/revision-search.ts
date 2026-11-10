@@ -26,7 +26,7 @@ export class ListSearch<T> {
     private readonly filter: (items: T[], query: string) => T[], private readonly render: (matches: T[]) => void, placeholder: string) {
     const colors = getTheme(ctx);
     this.matches = items;
-    this.input = new InputRenderable(ctx, { id, flexGrow: 1, minWidth: 1, placeholder, textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
+    this.input = new InputRenderable(ctx, { id, flexGrow: 1, width: 0, minWidth: 1, placeholder, textColor: colors.text, focusedTextColor: colors.text, backgroundColor: colors.panel, focusedBackgroundColor: colors.panel });
     this.field = new BoxRenderable(ctx, { id: `${id}-field`, visible: false, width: "100%", height: 1, flexShrink: 0, flexDirection: "row" });
     this.field.add(new TextRenderable(ctx, { id: `${id}-glyph`, content: "/ ", fg: colors.accent, flexShrink: 0 }));
     this.field.add(this.input);
