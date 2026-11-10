@@ -72,29 +72,40 @@ function wrappedLines(text: string, width: number) {
  * the feedback rows, so the caret goes under the field, with jj's note beside it and the error on the next row; the
  * full text stays one key away. Other errors are shown as they are.
  */
-export function revsetErrorFeedback(text: string, indent = 0) {
+export function revsetErrorFeedback(text: string, query: string, indent = 0, width = Infinity) {
   const column = /--> 1:(\d+)/.exec(text)?.[1];
   const marker = /^\s*\|\s(\s*)(\^-*\^?)\s*$/m.exec(text);
-  if (!column || !marker) return text;
+  const mark = marker?.[2];
+  if (!column || !mark) return text;
   const note = /^\s*= (.+)$/m.exec(text)?.[1] ?? "";
   const summary = (text.split("\n")[0] ?? "").replace(/^Error: /, "");
-  return `${" ".repeat(Number(column) - 1 + indent)}${marker[2]}${note && !summary.endsWith(note) ? ` ${note}` : ""}\n${summary}`;
+  const extra = note && !summary.endsWith(note) ? note : "";
+  // jj counts characters; the field draws wide ones in two cells. A caret that would fall past the field's edge, where
+  // the field scrolls, has nothing to point at, so the column goes into the message instead.
+  const at = indent + Bun.stringWidth([...query].slice(0, Number(column) - 1).join(""));
+  if (indent + Bun.stringWidth(query) > width || at + mark.length > width) return `${summary} at column ${column}${extra ? `: ${extra}` : ""}`;
+  const caret = `${" ".repeat(at)}${mark}`;
+  return `${caret}${extra ? fitText(` ${extra}`, width - Bun.stringWidth(caret)) : ""}\n${summary}`;
 }
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows: [string, string][] }[] {
   const bindings = scopes.revisions, files = scopes.files, menu = scopes.menu, prompt = scopes.prompt;
-  // Keys are written as the footer writes them: "/" pairs the actions of a row ("j/k" for down and up), and ", "
-  // separates further keys for the same actions ("j/k, down/up").
+  // "/" pairs a row's actions as the footer does ("j/k" for down and up), and ", " separates further sets of keys for
+  // the same actions ("j/k, down/up"). Sets are lined up from the last key, so an action's extra key comes first on
+  // its own ("Tab, ^N/^P" for next and previous suggestion).
   const keys = (actions: Action[], table = bindings) => {
     const bound = actions.filter(action => table[action].length);
     if (!bound.length) return actions.some(action => menuActions.has(action)) ? "(Space menu)" : "(unbound)";
+    // One action's keys are alternatives, written as the footer writes them ("l/Right").
+    if (bound.length === 1) return joinKeys(table[bound[0]!].map(bindingLabel));
     const depth = Math.max(...bound.map(action => table[action].length));
-    return Array.from({ length: depth }, (_, index) => bound.flatMap(action => table[action][index] ?? []).map(bindingLabel))
-      .map(joinKeys).join(", ");
+    const at = (action: Action, index: number) => table[action][index - (depth - table[action].length)];
+    const sets = Array.from({ length: depth }, (_, index) => bound.flatMap(action => at(action, index) ?? []).map(bindingLabel));
+    return sets.map(joinKeys).join(", ");
   };
   const slash = (...labels: string[]) => labels.filter(label => label !== "unbound").join("/");
-  // Every key for one action, and any fixed ones after them, as alternatives.
-  const either = (table: Keybindings, action: Action, ...fixed: string[]) => [...table[action].map(bindingLabel), ...fixed].join(", ");
+  // Every key for one action, and any fixed ones after them, as the footer writes alternatives.
+  const either = (table: Keybindings, action: Action, ...fixed: string[]) => joinKeys([...table[action].map(bindingLabel), ...fixed]);
   return [
     { title: "Navigate", rows: [
       [keys(["down", "up"]), "Move through revisions"],
@@ -235,7 +246,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const previewSides: BorderSides[] = ["top", "right", "bottom"];
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: previewSides, customBorderChars: { ...BorderChars.single, topLeft: "┬", bottomLeft: "┴" }, borderColor: colors.border, focusedBorderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
-  const input = new InputRenderable(renderer, { id: "prompt-input", flexGrow: 1, minWidth: 1, ...fieldColors(colors), placeholderColor: colors.muted });
+  const input = new InputRenderable(renderer, { id: "prompt-input", flexGrow: 1, width: 0, minWidth: 1, ...fieldColors(colors), placeholderColor: colors.muted });
   // The overlay's text field: its input behind a "›" glyph, so it reads as a place to type.
   const promptField = new BoxRenderable(renderer, { id: "prompt-field", visible: false, marginTop: 1, height: 1, flexShrink: 0, flexDirection: "row" });
   const promptGlyph = new TextRenderable(renderer, { id: "prompt-glyph", content: "› ", fg: colors.accent, flexShrink: 0 });
@@ -397,7 +408,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (error) lastError = text;
     if (overlay.visible) {
       setMessage("");
-      overlay.report(error && prompt.kind === "revset" ? revsetErrorFeedback(text, Bun.stringWidth(promptGlyph.plainText)) : text, error);
+      overlay.report(error && prompt.kind === "revset" ? revsetErrorFeedback(text, input.value, Bun.stringWidth(promptGlyph.plainText), overlay.innerWidth) : text, error);
       // The overlay keeps what it shows as the last error; the full-error key shows jj's whole message.
       if (error) lastError = text;
       return;
@@ -1857,10 +1868,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const sections = helpSections(tables);
     const column = Math.max(...sections.flatMap(section => section.rows.map(([key]) => key.length))) + 2;
     sections.forEach((section, index) => {
-      helpBox.add(new TextRenderable(renderer, { id: `help-${index}`, content: section.title, fg: colors.accent, flexShrink: 0, marginTop: index ? 1 : 0 }));
+      helpBox.add(new TextRenderable(renderer, { id: `help-${index}`, content: section.title, fg: colors.accent, attributes: TextAttributes.BOLD | TextAttributes.UNDERLINE, flexShrink: 0, marginTop: index ? 1 : 0 }));
       for (const [key, text] of section.rows) {
         const row = new BoxRenderable(renderer, { flexDirection: "row", width: "100%", flexShrink: 0 });
-        // Keys look as they do in the footer.
+        // Keys take the footer's colour and weight.
         row.add(new TextRenderable(renderer, { content: key, width: column, flexShrink: 0, fg: colors.accent, attributes: TextAttributes.BOLD }));
         row.add(new TextRenderable(renderer, { content: text, flexGrow: 1, width: 0, minWidth: 1, wrapMode: "word", flexShrink: 0, fg: colors.text }));
         helpBox.add(row);
@@ -2098,7 +2109,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function completionKey(key: KeyEvent) {
     if (prompt.kind === "revset" && revsetPrefilled && !isBusy()) {
-      const typed = key.sequence.length === 1 && key.sequence >= " " && !key.ctrl && !key.meta;
+      // One printable character, an emoji included; Backspace and Delete edit the revset instead.
+      const typed = [...key.sequence].length === 1 && key.sequence >= " " && key.sequence !== "\x7f"
+        && !key.ctrl && !key.meta && key.name !== "backspace" && key.name !== "delete";
       if (typed) input.value = "";
       if (typed || !["return", "escape", "tab", "up", "down"].includes(key.name)) editRevset();
     }
@@ -2244,8 +2257,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
-  // A paste is not a key, so it too turns a pre-filled revset into one being edited.
-  input.on("input", () => { if (revsetPrefilled && input.value !== revsetOpened) editRevset(); updateCompletions(); });
+  // A paste is not a key, so it replaces a pre-filled revset here, as typing does.
+  input.on("input", () => {
+    if (revsetPrefilled && input.value !== revsetOpened) {
+      editRevset();
+      if (input.value.startsWith(revsetOpened)) input.value = input.value.slice(revsetOpened.length);
+    }
+    updateCompletions();
+  });
   input.onCursorChange = updateCompletions;
   bookmarkInput.on("input", updateCompletions);
   bookmarkInput.onCursorChange = updateCompletions;
