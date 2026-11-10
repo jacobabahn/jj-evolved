@@ -1,4 +1,4 @@
-import { RGBA, hexToRgb, parseColor, type ColorInput, type RenderContext, type TerminalColors } from "@opentui/core";
+import { RGBA, hexToRgb, parseColor, type ColorInput, type RenderContext, type ScrollBoxRenderable, type TerminalColors } from "@opentui/core";
 
 export const darkTheme = {
   bg: "#101820", panel: "#15212c", text: "#d6e2eb", muted: "#91a6b7",
@@ -127,6 +127,28 @@ export function matchTint(context: RenderContext): RGBA | undefined {
   const reported = contextTerminalColors.get(context)?.defaultBackground;
   const background = panel.intent === "rgb" ? panel : reported ? hexToRgb(reported) : undefined;
   return background && band.intent === "rgb" ? blend(background, band, 0.5) : undefined;
+}
+
+/**
+ * Scroll bar colours for a pane drawn on `background`. The track is a faint step from the background toward the border
+ * and the thumb sits between the border and muted text, so the bar reads as part of the pane without competing with
+ * its text. A theme on the terminal's own colours has nothing to mix: its track is the background and its thumb the
+ * border colour.
+ */
+export function scrollbarColors(theme: Theme, background: ColorInput) {
+  const base = parseColor(background), border = parseColor(theme.border), muted = parseColor(theme.muted);
+  if (base.intent !== "rgb" || border.intent !== "rgb" || muted.intent !== "rgb") return { track: base, thumb: border };
+  return { track: blend(base, border, 0.3), thumb: blend(border, muted, 0.5) };
+}
+
+/** Colours both scroll bars of a scroll box for the context's theme, over the pane's `background` token. */
+export function themeScrollbars(box: ScrollBoxRenderable, background: "bg" | "panel") {
+  const theme = getTheme(box.ctx);
+  const { track, thumb } = scrollbarColors(theme, theme[background]);
+  for (const bar of [box.verticalScrollBar, box.horizontalScrollBar]) {
+    bar.slider.backgroundColor = track;
+    bar.slider.foregroundColor = thumb;
+  }
 }
 
 export function setTheme(context: RenderContext, theme: Theme) {

@@ -1,4 +1,4 @@
-import { cursorBar, getTheme, hasSelectionBand, matchTint } from "../ui/theme";
+import { cursorBar, getTheme, hasSelectionBand, matchTint, themeScrollbars } from "../ui/theme";
 import { changeIdChunks, graphChunks } from "../ui/jj-highlighting";
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, bg, type MouseEvent, type RenderContext, type Renderable } from "@opentui/core";
 import { terminalText } from "../terminal-text";
@@ -68,10 +68,12 @@ export class RevisionLog extends ScrollBoxRenderable {
       id: "revisions", width: "100%", height: "100%", scrollY: true, scrollX: false,
       backgroundColor: getTheme(context).panel, contentOptions: { flexDirection: "column" },
     });
+    themeScrollbars(this, "panel");
   }
 
   applyTheme() {
     this.backgroundColor = getTheme(this.ctx).panel;
+    themeScrollbars(this, "panel");
     if (this.snapshot) {
       const top = this.scrollTop;
       this.setSnapshot(this.snapshot.data, this.snapshot.bookmarks);

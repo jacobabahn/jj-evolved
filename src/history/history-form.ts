@@ -1,7 +1,7 @@
 import type { Action } from "../ui/keybindings";
 import { RevisionSearch } from "../ui/revision-search";
 import { MutationReview } from "./mutation-review";
-import { getTheme } from "../ui/theme";
+import { getTheme, themeScrollbars } from "../ui/theme";
 import { highlightJjText, revisionPrefixes } from "../ui/jj-highlighting";
 import { ChangePreview } from "../preview/change-preview";
 import { InputRenderable, ScrollBoxRenderable, SelectRenderable, type KeyEvent, type RenderContext } from "@opentui/core";
@@ -47,6 +47,7 @@ export class HistoryForm extends ActionOverlay {
     this.choices = new SelectRenderable(ctx, { id: "history-choices", height: 0, minHeight: 1, flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedBackgroundColor: getTheme(this.ctx).selected, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
     this.input = new InputRenderable(ctx, { id: "history-description", visible: false, textColor: getTheme(this.ctx).text, backgroundColor: getTheme(this.ctx).selected, focusedBackgroundColor: getTheme(this.ctx).panel, focusedTextColor: getTheme(this.ctx).text, placeholderColor: getTheme(this.ctx).muted });
     this.preview = new ScrollBoxRenderable(ctx, { id: "history-preview", flexGrow: 1, minHeight: 1, wrapperOptions: { flexBasis: 0 }, contentOptions: { width: "100%", minHeight: 0 }, border: true, title: " Preview ", borderColor: getTheme(this.ctx).border });
+    themeScrollbars(this.preview, "panel");
     this.text = new ChangePreview(ctx, "history-preview-text", "Choose a destination to preview the result.");
     this.fields.add(this.controls);
     this.fields.add(this.input);
