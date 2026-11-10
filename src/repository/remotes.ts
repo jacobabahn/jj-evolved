@@ -320,8 +320,8 @@ export function fetchReport(remote: string, output: string): string {
 
 /**
  * Summarizes a fetch from several remotes, naming each bookmark with its remote since the same name can come from more
- * than one. The first line counts the remotes rather than naming them, so it fits on one row of the revision panel and
- * leaves the next row for the bookmarks; the menu entry and the running status already named them.
+ * than one. The first line counts the remotes rather than naming them, which keeps the status message short; the menu
+ * entry and the running status already named them.
  */
 export function fetchAllReport(results: { remote: string; output: string }[]): string {
   return changedReport(`${results.length} remote${results.length === 1 ? "" : "s"}`, results.flatMap(({ remote, output }) => fetchedBookmarks(output).map(item => `${item.name}@${remote} ${item.state}`)));

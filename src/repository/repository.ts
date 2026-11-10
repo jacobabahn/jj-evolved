@@ -205,11 +205,11 @@ export class Repository {
   async operations(limit = 50): Promise<Operation[]> {
     const output = await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "log", "--no-graph", "--limit", String(limit), "-T",
       `'[' ++ json(id) ++ ',' ++ json(description) ++ ',' ++ json(time.end().ago()) ++ ',' ++ json(current_operation) ++ ']\n'`]);
-    return tuples(output).map(([id, description, time, current]) => ({ id: string(id), description: string(description), time: string(time), current: boolean(current) }));
+    return tuples(output).map(([id, description, time, current]) => ({ id: string(id), description: shortOperationIds(string(description)), time: string(time), current: boolean(current) }));
   }
 
   async operationDiff(operation: Operation): Promise<string> {
-    return terminalText(await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "show", operation.id, "--no-graph", "--git", "-p"]));
+    return shortOperationIds(terminalText(await run(this.root, ["--ignore-working-copy", "--at-op=@", "op", "show", operation.id, "--no-graph", "--git", "-p"])));
   }
 
   async evolution(revision: Revision, options: { limit?: number; operationId?: string } = {}): Promise<EvolutionPage> {
@@ -221,7 +221,7 @@ export class Repository {
     const entries = tuples(output).map(([id, description, operationDescription, time]) => {
       const commitId = string(id);
       if (!/^[0-9a-f]{40,64}$/.test(commitId)) throw new Error("Unexpected commit ID in jj evolution output.");
-      return { commitId, description: string(description), operationDescription: string(operationDescription), time: string(time) };
+      return { commitId, description: string(description), operationDescription: shortOperationIds(string(operationDescription)), time: string(time) };
     });
     return { operationId, entries: entries.slice(0, limit), hasMore: entries.length > limit };
   }
@@ -372,7 +372,7 @@ export class Repository {
       }
       case "undo":
         if (operationId !== action.operation.id) throw new Error("The latest operation changed. Open operation history again.");
-        summary = `Undo this exact operation by applying its inverse:\n${action.operation.description}\n${action.operation.id.slice(0, 12)} · ${action.operation.time}\n\n${await this.operationDiff(action.operation)}`;
+        summary = `Undo this exact operation by applying its inverse:\n\n${await this.operationDiff(action.operation)}`;
         break;
       case "restore": summary = `Restore repository state and local bookmarks to:\n${action.operation.description}\n${action.operation.id.slice(0, 12)} · ${action.operation.time}\n\nLater changes leave the current view but remain in operation history. Remote-tracking state is preserved.`; break;
       default: { const exhaustive: never = action; throw new Error(`Unknown action ${exhaustive}`); }
@@ -416,4 +416,12 @@ export class Repository {
     try { return await work(controller.signal); }
     finally { if (this.networkAbort === controller) { this.networkAbort = null; this.onNetworkChange?.(); } }
   };
+}
+
+/**
+ * jj writes operation IDs in full, 128 hex characters, in descriptions such as "revert operation <id>". They are
+ * shortened to the 12 characters jj's op log shows, which still name the operation.
+ */
+export function shortOperationIds(text: string) {
+  return text.replace(/\b[0-9a-f]{64,}\b/g, id => id.slice(0, 12));
 }
