@@ -2,7 +2,7 @@ import { getTheme } from "./theme";
 import { BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
 import { terminalText } from "../terminal-text";
 import type { ShortcutLine } from "./shortcut-bar";
-import { EllipsisText } from "./ellipsis-text";
+import { EllipsisText, fitText } from "./ellipsis-text";
 
 /** Narrower than this, an overlay spans the screen: side margins would leave slivers of the panes behind it. */
 export const FULL_WIDTH_BELOW = 100;
@@ -20,6 +20,7 @@ export class ActionOverlay extends BoxRenderable {
   private shortcuts: ShortcutLine = { left: [] };
   private rows: number | `${number}%` = "84%";
   private columns = 1;
+  private heading?: string;
 
   constructor(ctx: RenderContext, id: string) {
     super(ctx, {
@@ -34,6 +35,18 @@ export class ActionOverlay extends BoxRenderable {
     for (const child of [this.context, this.fields, this.feedback, this.body]) this.add(child);
     this.place(this.rows);
     ctx.on("resize", () => this.place(this.rows));
+  }
+
+  /** The border title, cut with … to the placed width: OpenTUI drops a title that does not fit rather than cutting it. */
+  override get title() { return this.heading; }
+  override set title(value: string | undefined) {
+    this.heading = value;
+    this.fitTitle();
+  }
+  private fitTitle() {
+    const text = this.heading?.trim();
+    // The border draws "─ " before the title and " ─" after it, inside its corners.
+    super.title = text ? ` ${fitText(text, Math.max(1, this.columns - 6))} ` : this.heading;
   }
 
   override get visible() { return super.visible; }
@@ -58,6 +71,7 @@ export class ActionOverlay extends BoxRenderable {
     this.width = this.columns;
     this.height = tall;
     this.top = Math.floor((height - tall) / 2);
+    this.fitTitle();
   }
 
   /** Columns inside the border, known as soon as the overlay is placed rather than after the next layout. */

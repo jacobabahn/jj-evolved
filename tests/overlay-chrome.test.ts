@@ -37,3 +37,26 @@ test("help and the review before applying draw no box inside the overlay's", () 
   await ui.until("Selection");
   expect(preview().border).toBe(true);
 }, { theme: "dark" }), 15_000);
+
+test("a review keeps a cut title on a narrow screen and a blank row before its text", () => withUiFixture("overlay-narrow-review", async ui => {
+  await ui.until("Empty change.");
+  ui.key("u");
+  await ui.until("Review before applying");
+  const preview = ui.node("overlay-preview") as ScrollBoxRenderable;
+  expect(preview.marginTop).toBe(1);
+  await ui.resize(40, 16);
+  await ui.settled();
+  const top = ui.screen.captureCharFrame().split("\n")[ui.node("action-overlay").screenY] ?? "";
+  // OpenTUI drops a border title that does not fit, so the overlay cuts it to fit instead.
+  expect(top).toMatch(/^┌─ Review before applying.*… ─*┐$/);
+}, { theme: "dark" }), 15_000);
+
+test("the rebase form's preview has no box of its own inside the form", () => withUiFixture("overlay-form-depth", async ui => {
+  await ui.until("Empty change.");
+  ui.key(" ");
+  ui.choose("Rebase");
+  await ui.until("Destination: Choose a revision");
+  const preview = ui.node("history-preview") as ScrollBoxRenderable;
+  expect(preview.border).toBe(false);
+  expect(preview.marginTop).toBe(1);
+}, { theme: "dark" }), 15_000);

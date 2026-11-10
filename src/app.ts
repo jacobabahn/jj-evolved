@@ -481,6 +481,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     overlay.title = ` ${title} `;
     overlay.context.visible = source;
     overlayPreview.border = true;
+    overlayPreview.marginTop = 0;
     overlay.place("84%");
     overlay.body.marginBottom = 1;
     overlayPreview.visible = true;
@@ -1059,8 +1060,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     showOverlay(prepared.summary, `${operationLabel(action.kind)} preview`);
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
     openPrompt({ kind: "confirm", action, edit, back, extras }, `Review before applying · ${operationLabel(action.kind)} preview`);
-    // The overlay's title names the preview, so the preview needs no box of its own inside it.
+    // The overlay's title names the preview, so the preview needs no box of its own inside it; a blank row keeps it
+    // apart from the source lines above.
     overlayPreview.border = false;
+    overlayPreview.marginTop = 1;
   }
   /** Where Escape and a failed apply return to from a review opened over the current prompt. */
   function reviewReturns() {
