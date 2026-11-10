@@ -1,14 +1,19 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultBindings } from "../src/ui/keybindings";
+import { parseArgs } from "node:util";
+import { parsePreset, readKeybindings } from "../src/ui/keybindings";
 import { demoText } from "./demo-text";
 
 if (!Bun.which("jj")) {
   process.stderr.write("Install Jujutsu first: jj must be on PATH.\n");
   process.exit(1);
 }
-const text = demoText(defaultBindings);
+// The demo passes its options on to the app, and its instructions name the keys the app will load.
+const appArgs = process.argv.slice(2);
+const { values } = parseArgs({ args: appArgs, options: { theme: { type: "string" }, keys: { type: "string" } } });
+const preset = values.keys ?? process.env.JJ_EVOLVED_KEYS;
+const text = demoText((await readKeybindings(undefined, preset === undefined ? undefined : parsePreset(preset, values.keys === undefined ? "JJ_EVOLVED_KEYS" : "--keys"))).scopes);
 const directory = await mkdtemp(join(tmpdir(), "jj-evolved-demo-"));
 async function jj(...args: string[]) {
   const proc = Bun.spawn(["jj", "--no-pager", "--color=never", ...args], {
@@ -90,7 +95,7 @@ try {
     bookmarks: ["multiline-demo"],
     files: { "docs/descriptions.md": text.descriptionsDoc },
   });
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/index.ts"), directory], {
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, "../src/index.ts"), ...appArgs, directory], {
     stdin: "inherit", stdout: "inherit", stderr: "inherit",
   });
   process.exitCode = await child.exited;
