@@ -641,6 +641,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const typing = prompt.kind === "search";
     searchStatus.visible = search.query.length > 0 || typing;
     message.visible = !typing;
+    // While a search is typed, its field starts right after the revset and takes the rest of the row.
+    filter.flexGrow = typing ? 0 : 1;
     searchPrefix.visible = typing;
     const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
     const count = search.matches.length;
