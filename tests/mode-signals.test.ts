@@ -11,7 +11,7 @@ test("inline mode restores its pane, confirmation removes duplicate chrome, and 
   expect(graph.borderColor).not.toEqual(border);
   ui.key("j"); ui.key("j"); ui.key("RETURN");
   await ui.until("Rebase preview");
-  expect(ui.screen.renderer.root.findDescendantById("prompt-input")?.visible).toBe(false);
+  expect(ui.screen.renderer.root.findDescendantById("prompt-field")?.visible).toBe(false);
   expect(ui.screen.renderer.root.findDescendantById("action-overlay-feedback")?.visible).toBe(false);
   expect(ui.screen.captureCharFrame()).not.toContain("Ready.");
   ui.key("ESCAPE");
@@ -32,9 +32,10 @@ test("overlay failures retain complete errors and the full-error key respects ov
   ui.key("L");
   ui.key("a", { ctrl: true }); ui.key("k", { ctrl: true });
   await ui.type("foo("); ui.key("RETURN");
-  await ui.until("Error:");
+  await ui.until("Failed to parse revset");
   const error = (ui.node("action-overlay-feedback") as TextRenderable).plainText;
-  expect(error).toContain("foo(");
+  // Under the field, a caret points at the error; the full text is kept for the full-error key.
+  expect(error).toContain("^");
   ui.key("ESCAPE");
   await ui.until("Empty change.");
   ui.key("x");
@@ -100,13 +101,13 @@ test("the files view footer pins help and opening help keeps the files expanded"
   await ui.until("Ready.");
   ui.key("l");
   await ui.until("files of");
-  expect(footer(ui)).toContain("Enter focus diff  Tab focus preview");
+  expect(footer(ui)).toContain("Enter/Tab focus diff");
   expect(footer(ui)).toContain("Esc/h/l collapse");
   expect(footer(ui)).toMatch(/\? help  q quit\s*$/);
   ui.key("?");
   await ui.until("Help · ");
   ui.key("ESCAPE");
-  await ui.until("Enter focus diff");
+  await ui.until("Enter/Tab focus diff");
   expect(ui.screen.captureCharFrame()).toContain("files of");
 }, { width: 80, height: 24 }));
 

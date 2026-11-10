@@ -158,7 +158,7 @@ export class HistoryForm extends ActionOverlay {
         query => this.repository.resolve(query), this.source);
       this.destinationSearch.onAccept = () => this.choose();
       this.destinationSearch.onActiveChange = () => this.showChoiceKeys();
-      this.fields.add(this.destinationSearch.input);
+      this.fields.add(this.destinationSearch.field);
     } else if (this.draft.kind === "rebase") {
       this.draft.descendants = !this.draft.descendants;
       this.renderFields();

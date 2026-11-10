@@ -10,7 +10,7 @@ import { setTerminalColors, setTheme, themeScrollbars, themes, themeNames, theme
 import { highlightJjText, revisionPrefixes } from "./ui/jj-highlighting";
 import { ChangePreview } from "./preview/change-preview";
 import {
-  BorderChars, BoxRenderable, InputRenderable, ScrollBoxRenderable, SelectRenderable, StyledText,
+  BorderChars, BoxRenderable, TextAttributes, InputRenderable, ScrollBoxRenderable, SelectRenderable, StyledText,
   TextRenderable, TextareaRenderable, bg, fg, type BorderSides, type CliRenderer, type KeyEvent, type TerminalColors,
 } from "@opentui/core";
 import { TreeComparisonView } from "./history/tree-comparison";
@@ -67,13 +67,34 @@ function wrappedLines(text: string, width: number) {
   }
   return rows;
 }
+/**
+ * jj points at a revset's syntax error with a caret under the query. The prompt's field shows the query directly above
+ * the feedback rows, so the caret goes under the field, with jj's note beside it and the error on the next row; the
+ * full text stays one key away. Other errors are shown as they are.
+ */
+export function revsetErrorFeedback(text: string, indent = 0) {
+  const column = /--> 1:(\d+)/.exec(text)?.[1];
+  const marker = /^\s*\|\s(\s*)(\^-*\^?)\s*$/m.exec(text);
+  if (!column || !marker) return text;
+  const note = /^\s*= (.+)$/m.exec(text)?.[1] ?? "";
+  const summary = (text.split("\n")[0] ?? "").replace(/^Error: /, "");
+  return `${" ".repeat(Number(column) - 1 + indent)}${marker[2]}${note && !summary.endsWith(note) ? ` ${note}` : ""}\n${summary}`;
+}
 const menuActions = new Set<Action>(["edit", "new", "describe", "describeExternal", "rebase", "squash", "split", "git", "publish", "abandon", "files", "absorb", "evolution", "status", "undo", "loadMore"]);
 function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows: [string, string][] }[] {
   const bindings = scopes.revisions, files = scopes.files, menu = scopes.menu, prompt = scopes.prompt;
-  const keys = (actions: Action[], table = bindings) => actions.some(action => table[action].length)
-    ? joinKeys(actions.filter(action => table[action].length).map(action => keyLabel(table, action)))
-    : actions.some(action => menuActions.has(action)) ? "(Space menu)" : "(unbound)";
+  // Keys are written as the footer writes them: "/" pairs the actions of a row ("j/k" for down and up), and ", "
+  // separates further keys for the same actions ("j/k, down/up").
+  const keys = (actions: Action[], table = bindings) => {
+    const bound = actions.filter(action => table[action].length);
+    if (!bound.length) return actions.some(action => menuActions.has(action)) ? "(Space menu)" : "(unbound)";
+    const depth = Math.max(...bound.map(action => table[action].length));
+    return Array.from({ length: depth }, (_, index) => bound.flatMap(action => table[action][index] ?? []).map(bindingLabel))
+      .map(joinKeys).join(", ");
+  };
   const slash = (...labels: string[]) => labels.filter(label => label !== "unbound").join("/");
+  // Every key for one action, and any fixed ones after them, as alternatives.
+  const either = (table: Keybindings, action: Action, ...fixed: string[]) => [...table[action].map(bindingLabel), ...fixed].join(", ");
   return [
     { title: "Navigate", rows: [
       [keys(["down", "up"]), "Move through revisions"],
@@ -84,7 +105,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["refresh"]), "Refresh history now; external changes also refresh automatically"],
       [keys(["help"]), "Show this help"],
       [keys(["lastError"]), `Show the last error in full; Esc or ${keyLabel(bindings, "diff")} returns to the diff`],
-      [joinKeys([...bindings.quit.length ? [keyLabel(bindings, "quit")] : [], "^C"]), "Quit"],
+      [either(bindings, "quit", "^C"), "Quit"],
     ] },
     { title: "Preview pane", rows: [
       [keys(["togglePreview"]), "Hide or show the preview; the graph expands when hidden"],
@@ -92,7 +113,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["previewDown", "previewUp"]), "Scroll the preview by line, keeping graph focus"],
       [keys(["previewHalfDown", "previewHalfUp"]), "Scroll the preview by half page"],
       [keys(["diff"]), "Show the selected revision's diff"],
-      [keys(["files"]), `Expand changed files under the revision; ${slash(keyLabel(files, "down", true), keyLabel(files, "up", true))} file, Enter focus diff, ${slash(keyLabel(files, "back"), "Esc")} collapse`],
+      [keys(["files"]), `Expand changed files under the revision; ${slash(keyLabel(files, "down", true), keyLabel(files, "up", true))} file, Enter focus diff, ${either(files, "back", "Esc")} collapse`],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -146,7 +167,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["saveDescription"], prompt), "Save the description"],
       [keys(["nextCompletion", "previousCompletion"], prompt), "Next / previous revset suggestion (functions, aliases, bookmarks, tags, recent revsets); Shift-Tab and arrows also work"],
       ["PgDn/PgUp", "Scroll the overlay preview"],
-      [slash(keyLabel(menu, "back"), "Esc"), "Go back one level in a menu, or cancel at the top"],
+      [either(menu, "back", "Esc"), "Go back one level in a menu, or cancel at the top"],
       ["Esc", "Cancel a prompt; press twice to discard description edits; cancels a half-typed key sequence anywhere"],
     ] },
   ];
@@ -214,7 +235,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const previewSides: BorderSides[] = ["top", "right", "bottom"];
   const preview = new ScrollBoxRenderable(renderer, { id: "preview", flexGrow: 1, width: 0, minWidth: 1, border: previewSides, customBorderChars: { ...BorderChars.single, topLeft: "┬", bottomLeft: "┴" }, borderColor: colors.border, focusedBorderColor: colors.border, title: " Change preview ", scrollY: true, scrollX: true, contentOptions: { width: "100%", minHeight: 0 } });
   const detail = new ChangePreview(renderer, "preview-text", "Loading repository…");
-  const input = new InputRenderable(renderer, { id: "prompt-input", visible: false, marginTop: 1, ...fieldColors(colors), placeholderColor: colors.muted });
+  const input = new InputRenderable(renderer, { id: "prompt-input", flexGrow: 1, minWidth: 1, ...fieldColors(colors), placeholderColor: colors.muted });
+  // The overlay's text field: its input behind a "›" glyph, so it reads as a place to type.
+  const promptField = new BoxRenderable(renderer, { id: "prompt-field", visible: false, marginTop: 1, height: 1, flexShrink: 0, flexDirection: "row" });
+  const promptGlyph = new TextRenderable(renderer, { id: "prompt-glyph", content: "› ", fg: colors.accent, flexShrink: 0 });
+  promptField.add(promptGlyph);
+  promptField.add(input);
   const descriptionInput = new TextareaRenderable(renderer, { id: "description-input", visible: false, height: 0, flexGrow: 1, minHeight: 1, wrapMode: "word", ...fieldColors(colors) });
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, flexGrow: 1, minWidth: 1, placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchPrefix = new TextRenderable(renderer, { id: "search-prefix", visible: false, flexShrink: 0, marginLeft: 2, fg: colors.accent, content: "/" });
@@ -240,7 +266,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   overlayPreview.add(overlayText);
   overlayPreview.add(helpBox);
   paintScrollbars();
-  overlay.fields.add(input);
+  overlay.fields.add(promptField);
   overlay.body.add(descriptionInput);
   const suggestions = new EllipsisText(renderer, { id: "revset-suggestions", visible: false, height: 5, fg: colors.text });
   const bookmarkInput = new InputRenderable(renderer, { id: "bookmark-input", flexGrow: 1, minWidth: 16, marginLeft: 1, placeholder: "bookmark name", ...bookmarkFieldColors(colors) });
@@ -283,6 +309,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let completionIndex = -1;
   // The value the revset prompt opened with: until it changes, the suggestions are the recent revsets.
   let revsetOpened = "";
+  // The revset prompt opens on the active revset, shown muted until it is edited: typing first replaces it, while
+  // moving the cursor or deleting keeps it to edit.
+  let revsetPrefilled = false;
+  function editRevset() {
+    revsetPrefilled = false;
+    input.focusedTextColor = input.textColor = colors.text;
+  }
   let revsetHistory: string[] = [];
   let revsetSymbols: { tags: string[]; aliases: RevsetAlias[] } = { tags: [], aliases: [] };
   const historyStore = options.revsetHistory ?? memoryRevsetHistory();
@@ -362,7 +395,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function report(text: string, error = false) {
     if (stopped) return;
     if (error) lastError = text;
-    if (overlay.visible) { setMessage(""); overlay.report(text, error); return; }
+    if (overlay.visible) {
+      setMessage("");
+      overlay.report(error && prompt.kind === "revset" ? revsetErrorFeedback(text, Bun.stringWidth(promptGlyph.plainText)) : text, error);
+      // The overlay keeps what it shows as the last error; the full-error key shows jj's whole message.
+      if (error) lastError = text;
+      return;
+    }
     setMessage(error ? errorSummary(text) : text, error);
   }
   function setPreviewTitle(title: string) {
@@ -418,7 +457,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       case "files": return [
         { left: focus === "preview"
           ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
-          : [[move, "file"], ["Enter", "focus diff"], ...(preview.visible ? [[key("focus"), "focus preview"] as Shortcut] : []), [page, "scroll diff"], togglePreview] },
+          : [[move, "file"], [preview.visible ? bothKeys("Enter", key("focus")) : "Enter", "focus diff"], [page, "scroll diff"], togglePreview] },
         { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), "collapse"]], right: quit },
       ];
       case "inline": return [{
@@ -881,6 +920,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function completeRevset(backwards: boolean) {
     if (!completionItems.length) return;
+    editRevset();
     completionIndex = (completionIndex + (backwards ? (completionIndex < 0 ? 0 : -1) : 1) + completionItems.length) % completionItems.length;
     const result = applyCompletion(completionOriginal, completionItems[completionIndex]!);
     const field = completionInput();
@@ -949,7 +989,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     fileList.blur();
     list.collapse();
     listBox.title = " Revisions ";
-    input.visible = false;
+    promptField.visible = false;
     setFocus(focus);
     scheduleFocusRefresh();
   }
@@ -958,11 +998,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pushLevel();
     pickerSearch?.dispose();
     pickerSearch = null;
+    editRevset();
     // A revset and an undo are not about the selected revision, and Describe names its change in the title.
     const repositoryWide = next.kind === "revset" || next.kind === "describe" || (next.kind === "confirm" && next.action.kind === "undo");
     activateOverlay(label, true, repositoryWide ? false : undefined);
     // The field's top margin separates it from the source lines, and a short prompt drops their two rows with them.
-    input.marginTop = overlay.context.visible ? 1 : 0;
+    promptField.marginTop = overlay.context.visible ? 1 : 0;
     const contextRows = overlay.context.visible ? 0 : -2;
     chooser.visible = false;
     prompt = next;
@@ -977,8 +1018,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     input.placeholder = "";
     input.value = terminalText(value);
     descriptionInput.visible = next.kind === "describe";
-    input.visible = next.kind !== "confirm" && next.kind !== "describe";
-    if (!input.visible) { list.blur(); preview.blur(); } else input.focus();
+    promptField.visible = next.kind !== "confirm" && next.kind !== "describe";
+    if (!promptField.visible) { list.blur(); preview.blur(); } else input.focus();
     if (next.kind === "describe") {
       overlay.place("65%");
       overlay.body.marginBottom = 0;
@@ -992,6 +1033,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       overlay.place(15 + contextRows);
       overlay.keys = { left: [["Enter", "apply"], [bothKeys(promptKey("nextCompletion"), "Shift-Tab"), "complete"]], right: [exit("cancel")] };
       revsetOpened = input.value;
+      revsetPrefilled = input.value !== "";
+      if (revsetPrefilled) input.focusedTextColor = input.textColor = colors.muted;
       updateCompletions();
       // Tags and aliases arrive after the prompt opens; bookmarks come from the last refresh.
       void repository.revsetSymbols().then(symbols => {
@@ -1151,7 +1194,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const themed: [object[], (colors: Theme) => object][] = [
       [[app], c => ({ backgroundColor: c.bg })],
       [[suggestions], c => ({ fg: c.text })],
-      [[header, navigationStatus, searchPrefix, searchStatus, inlineHint, shortcuts], c => ({ fg: c.accent })],
+      [[header, navigationStatus, searchPrefix, searchStatus, inlineHint, shortcuts, promptGlyph], c => ({ fg: c.accent })],
       [[filter, message], c => ({ fg: c.muted })],
       [[listBox], c => ({ backgroundColor: c.panel })],
       [[overlayPreview], c => ({ borderColor: c.border })],
@@ -1190,7 +1233,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     activateOverlay("Theme", false);
     prompt = { kind: "theme", original };
     input.blur();
-    input.visible = false;
+    promptField.visible = false;
     chooser.visible = true;
     chooser.showDescription = false;
     chooser.options = themeNames.map(name => ({
@@ -1262,7 +1305,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pickerSearch = null;
     activateOverlay(title, true, options.source);
     input.blur();
-    input.visible = false;
+    promptField.visible = false;
     prompt = { kind: "picker", title, all: choices, choices, attach: options.attach, source: overlay.context.visible };
     chooser.visible = true;
     chooser.showDescription = true;
@@ -1297,7 +1340,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         search.onAccept = chooseSelected;
         search.onActiveChange = paintShortcuts;
         pickerSearch = search;
-        overlay.fields.add(search.input);
+        overlay.fields.add(search.field);
         overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "search all destinations"], previewScroll] };
       } });
       if (searchImmediately) pickerSearch?.start();
@@ -1790,7 +1833,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         overlay.report(matches.length ? "" : "No matching actions. Edit the filter or press Escape to clear it.");
       }, "Filter actions by name");
       pickerSearch.onActiveChange = paintShortcuts;
-      overlay.fields.add(pickerSearch.input);
+      overlay.fields.add(pickerSearch.field);
       overlay.keys = { ...overlay.keys, left: [[choose, "choose"], ["Enter", "select"], ["/", "filter"]] };
     } });
   }
@@ -1817,7 +1860,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       helpBox.add(new TextRenderable(renderer, { id: `help-${index}`, content: section.title, fg: colors.accent, flexShrink: 0, marginTop: index ? 1 : 0 }));
       for (const [key, text] of section.rows) {
         const row = new BoxRenderable(renderer, { flexDirection: "row", width: "100%", flexShrink: 0 });
-        row.add(new TextRenderable(renderer, { content: key, width: column, flexShrink: 0, fg: colors.changeId }));
+        // Keys look as they do in the footer.
+        row.add(new TextRenderable(renderer, { content: key, width: column, flexShrink: 0, fg: colors.accent, attributes: TextAttributes.BOLD }));
         row.add(new TextRenderable(renderer, { content: text, flexGrow: 1, width: 0, minWidth: 1, wrapMode: "word", flexShrink: 0, fg: colors.text }));
         helpBox.add(row);
       }
@@ -1830,7 +1874,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     activateOverlay(`Help · ${presetLabel} keys`, false);
     prompt = { kind: "help" };
     input.blur();
-    input.visible = chooser.visible = false;
+    promptField.visible = chooser.visible = false;
     comparison.setTrees(null);
     overlayText.visible = false;
     buildHelp();
@@ -2053,6 +2097,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (key.name === "return") { key.preventDefault(); void submit(); }
   }
   function completionKey(key: KeyEvent) {
+    if (prompt.kind === "revset" && revsetPrefilled && !isBusy()) {
+      const typed = key.sequence.length === 1 && key.sequence >= " " && !key.ctrl && !key.meta;
+      if (typed) input.value = "";
+      if (typed || !["return", "escape", "tab", "up", "down"].includes(key.name)) editRevset();
+    }
     const backwards = key.name === "up" || keyAction === "previousCompletion" || (key.name === "tab" && key.shift);
     const forwards = key.name === "down" || keyAction === "nextCompletion";
     if (!isBusy() && (backwards || forwards)) { key.preventDefault(); completeRevset(backwards); }
@@ -2195,7 +2244,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.off("selectionChanged", previewChoice);
     app.destroyRecursively();
   }
-  input.on("input", updateCompletions);
+  // A paste is not a key, so it too turns a pre-filled revset into one being edited.
+  input.on("input", () => { if (revsetPrefilled && input.value !== revsetOpened) editRevset(); updateCompletions(); });
   input.onCursorChange = updateCompletions;
   bookmarkInput.on("input", updateCompletions);
   bookmarkInput.onCursorChange = updateCompletions;

@@ -357,7 +357,7 @@ test("invalid revset preserves history and cancelling description preserves mult
     t.screen.mockInput.pressKey("k", { ctrl: true });
     await t.screen.mockInput.typeText("invalid(((");
     t.screen.mockInput.pressEnter();
-    await t.until("Error");
+    await t.until("Failed to parse revset");
     expect(t.screen.captureCharFrame()).toContain(`revset: ${await t.repo.logRevset()}`);
     expect(t.screen.captureCharFrame()).toContain("Next change");
     t.screen.mockInput.pressEscape();
@@ -1968,7 +1968,7 @@ test("going back to a filtered action menu restores the full list and the chosen
     await t.until("Esc close");
     expect(chooser.options.length).toBeGreaterThan(20);
     expect(chooser.getSelectedOption()?.value).toBe("Describe");
-    expect(t.screen.renderer.root.findDescendantById("action-search")?.visible).toBe(false);
+    expect(t.screen.renderer.root.findDescendantById("action-search-field")?.visible).toBe(false);
   } finally { await t.cleanup(); }
 }, 15_000);
 

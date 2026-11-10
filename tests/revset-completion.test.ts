@@ -295,6 +295,6 @@ test("help lists the revset completion keys in prompt notation", async () => {
   ui.key("?");
   await ui.until("In menus and prompts");
   const frame = ui.screen.captureCharFrame();
-  expect(frame).toMatch(/Tab\/\^N \/ \^P +Next \/ previous revset suggestion/);
+  expect(frame).toMatch(/Tab\/\^P, \^N +Next \/ previous revset suggestion/);
   expect(frame).toContain("Shift-Tab and arrows also work");
 });
