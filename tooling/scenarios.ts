@@ -717,7 +717,7 @@ export const scenarios: Scenario[] = [
       ui.key("j"); ui.key("j"); ui.key("j"); ui.key("j");
       await ui.until("▶ r      Rebase");
       assert.equal(selected(), "Rebase");
-      assert(chooser.options.slice(1, chooser.getSelectedIndex()).some(option => option.name === "── History ──"));
+      assert(chooser.options.slice(1, chooser.getSelectedIndex()).some(option => option.description === "── History ──"));
       await ui.capture("Moving down skips the History header");
       ui.key("/"); await ui.type("spl");
       await ui.until("Split in diff editor");
