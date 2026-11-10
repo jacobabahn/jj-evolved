@@ -4,8 +4,11 @@ import { terminalText } from "../terminal-text";
 import type { ShortcutLine } from "./shortcut-bar";
 import { EllipsisText, fitText } from "./ellipsis-text";
 
-/** Narrower than this, an overlay spans the screen: side margins would leave slivers of the panes behind it. */
-export const FULL_WIDTH_BELOW = 100;
+/**
+ * Narrower than this, an overlay spans the screen: below 120 columns its 8% side margins leave strips of cut-off pane
+ * text beside it rather than readable panes.
+ */
+export const FULL_WIDTH_BELOW = 120;
 
 export class ActionOverlay extends BoxRenderable {
   onError?: (message: string) => void;
