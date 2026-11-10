@@ -13,6 +13,9 @@ const statuses: Record<string, { letter: string; color: keyof Theme }> = {
   copied: { letter: "C", color: "commit" },
 };
 
+/** The one-letter status the files list shows: A, M, D, R or C, or ? for a status it does not know. */
+export function statusLetter(status: string) { return statuses[status]?.letter ?? "?"; }
+
 // A revision's changed files, expanded beneath it in the graph. Rows continue the graph's lanes, and the list
 // scrolls within a height cap so a large change leaves the surrounding graph in view.
 export class FileList extends ScrollBoxRenderable {

@@ -630,11 +630,10 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     if (!original) throw new Error("Missing original");
     t.screen.mockInput.pressKey(" ");
     t.choose("Split (choose files)");
-    await t.until("Continue with 0 files");
-    await t.overlayReady("Continue with 0 files");
-    t.choose("[ ] one.txt");
-    t.screen.mockInput.pressKey("k");
-    t.choose("Continue with 1 files");
+    await t.until("Select at least one file first");
+    await t.overlayReady("Select at least one file first");
+    t.choose("[ ] A one.txt");
+    t.choose("Continue with 1 file");
     await t.until("First change description");
     await t.screen.mockInput.typeText("First group");
     t.screen.mockInput.pressEnter();
@@ -1385,11 +1384,10 @@ test("split second-description choice cancels without writes and preserves multi
     for (const cancel of [true, false]) {
       t.screen.mockInput.pressKey(" ");
       t.choose("Split (choose files)");
-      await t.until("Continue with 0 files");
-      await t.overlayReady("Continue with 0 files");
-      t.choose("[ ] one.txt");
-      t.screen.mockInput.pressKey("k");
-      t.choose("Continue with 1 files");
+      await t.until("Select at least one file first");
+      await t.overlayReady("Select at least one file first");
+      t.choose("[ ] A one.txt");
+      t.choose("Continue with 1 file");
       await t.until("First change description");
       await t.screen.mockInput.typeText("Selected files");
       t.screen.mockInput.pressEnter();
@@ -1399,7 +1397,7 @@ test("split second-description choice cancels without writes and preserves multi
         await t.until("First change description");
         expect((t.screen.renderer.root.findDescendantById("prompt-input") as InputRenderable).value).toBe("Selected files");
         t.screen.mockInput.pressEscape();
-        await t.until("Continue with 1 files");
+        await t.until("Continue with 1 file");
         t.screen.mockInput.pressEscape();
         await t.until("Esc close");
         expect(t.chooser().getSelectedOption()?.value).toBe("Split (choose files)");
