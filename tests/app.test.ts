@@ -1078,9 +1078,9 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
     t.screen.mockInput.pressKey("b");
     await t.overlayReady("Git remotes");
     expect(t.chooser().options.map(option => option.value)).toEqual(["Remotes", "Git remotes", "Bookmarks", "feature", "solo"]);
-    expect(t.chooser().options.map(option => option.name)).toContain("── Bookmarks ──");
+    // A header is drawn on the second line of its row, below the gap that separates it from the group before.
     expect(t.chooser().options.map(option => option.description)).toEqual([
-      "", "Fetch and push", "", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
+      "── Remotes ──", "Fetch and push", "── Bookmarks ──", expect.stringContaining("ahead of origin by 1"), expect.stringContaining("local only"),
     ]);
     t.choose("solo");
     await t.until("Push to origin");
@@ -1790,7 +1790,7 @@ test("action menu groups items under skipped headers, shows effective keys and f
     const chooser = t.screen.renderer.root.findDescendantById("action-choices");
     if (!(chooser instanceof SelectRenderable)) throw new Error("Missing action picker");
     const value = () => chooser.getSelectedOption()?.value;
-    expect(chooser.options[0]?.name).toBe("── Edit ──");
+    expect(chooser.options[0]).toMatchObject({ name: "", description: "── Edit ──" });
     expect(chooser.getSelectedIndex()).toBe(1);
     expect(chooser.getSelectedOption()?.name).toMatch(/^x\s+Describe$/);
     expect(chooser.options.find(option => option.value === "Split (choose files)")?.name).toMatch(/^—\s+Split \(choose files\)$/);
