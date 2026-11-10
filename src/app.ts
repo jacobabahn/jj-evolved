@@ -31,7 +31,8 @@ type ReviewOption = { key: string; hint: string; choose: () => void };
 /** What follows a review once it has been applied: it may open the next review, or return a note for the message line. */
 type ReviewStep = () => Promise<string | void>;
 /** What a review adds to apply and cancel: an extra key, a next step, and footer labels for Enter and Escape. */
-type ReviewExtras = { option?: ReviewOption; then?: ReviewStep; labels?: { apply: string; cancel: string } };
+// `cancelled` is the message when the review is closed without applying, for a review that follows work already done.
+type ReviewExtras = { option?: ReviewOption; then?: ReviewStep; labels?: { apply: string; cancel: string }; cancelled?: string };
 
 type Prompt =
   | { kind: "browse" }
@@ -312,6 +313,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let lastError = "";
   overlay.onError = text => { lastError = text; };
   let shown = "";
+  // The last report from a remote, which keeps its room in the message slot.
+  let remoteReport = "";
   let shownError = false;
   const review = new MutationReview(repository, refreshAfterMutation);
   const previews = new PreviewSession(({ target, text, title, keepScroll }) => {
@@ -336,9 +339,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let focus: "list" | "preview" = "list";
 
   function selected() { return revisions[list.getSelectedIndex()]; }
+  // An error, or what a fetch or push reported, takes the room it needs and the revset gives way, as before. Other
+  // messages, such as what a local action did, fit beside the revset and are cut with … instead.
+  function fitMessage() {
+    const used = Bun.stringWidth(filter.plainText) + (searchStatus.visible ? 2 + Bun.stringWidth(searchStatus.plainText) : 0);
+    const wide = shownError || (remoteReport !== "" && shown === remoteReport);
+    message.maxWidth = wide ? statusWidth() : Math.max(8, Math.min(statusWidth(), renderer.width - used - 2));
+  }
   function setMessage(text: string, error = false) {
     shown = text;
     shownError = error;
+    fitMessage();
     message.fg = error ? colors.conflict : colors.muted;
     message.content = terminalText(text);
   }
@@ -554,6 +565,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function updateFilter() {
     filter.content = terminalText(`revset: ${revset}  ·  ${revisions.length} revisions${returnPoint ? " · context view" : currentSnapshot.hasMore ? ` · ${actionKeys("loadMore")} load 200 more` : ""}`);
+    fitMessage();
   }
   async function loadMoreHistory() {
     if (returnPoint) { report(`Press ${actionKeys("return")} to return to history before loading more.`); return; }
@@ -686,6 +698,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const position = count ? (index < 0 ? `${count} ${count === 1 ? "match" : "matches"}` : `${index + 1} of ${count}`) : search.query ? "No matches" : "Type to search";
     // While typing, the query is in the input beside it.
     searchStatus.content = terminalText(typing ? position : `/${search.query}  ${position}`);
+    fitMessage();
     list.markNavigation(new Set(search.matches.map(item => item.commitId)), outsideFilter);
     paintShortcuts();
   }
@@ -1048,7 +1061,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     closePrompt();
     if (outcome.refreshError) throw new Error(outcome.refreshError);
     // What happened goes in the message slot, the one place status is shown; a next step's note replaces it.
-    return await then?.() ?? (outcome.report ? terminalText(outcome.report).replace(/\n/g, ", ") : completedText(outcome.action));
+    if (outcome.report) remoteReport = sentences(outcome.report);
+    return await then?.() ?? (outcome.report ? remoteReport : completedText(outcome.action));
+  }
+  // A remote's report is a few short lines ("Fetched origin" / "left@origin new"), joined into one sentence for the
+  // one-row message slot. Later lines can start with a bookmark name, so their case is kept.
+  function sentences(report: string) {
+    const text = terminalText(report).split("\n").map(line => line.trim()).filter(Boolean).join(", ");
+    return /[.!?]$/.test(text) ? text : `${text}.`;
   }
   function completedText(action: Mutation): string {
     const id = (revision: Revision) => shortChangeId(revision);
@@ -1435,7 +1455,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (plan.kind !== "rebase") return `${fetched} ${plan.reason}`;
       const prepared = await review.prepare(plan.action);
       if (!prepared) return;
-      openReview(plan.action, prepared, null, null, { labels: { apply: "apply rebase", cancel: "skip rebase" } });
+      openReview(plan.action, prepared, null, null, { labels: { apply: "apply rebase", cancel: "skip rebase" }, cancelled: `${fetched} Skipped the rebase onto trunk().` });
       overlay.context.content = terminalText(`${fetched} Rebase the stack of ${shortChangeId(current)} onto trunk()\nSkipping the rebase keeps the fetch.`);
     } catch (error) { throw new Error(`${fetched} The rebase onto trunk could not be previewed: ${errorText(error)}`); }
   }
@@ -1875,7 +1895,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function onResize(width: number) {
     if (preview.visible) listBox.width = revisionPaneWidth();
-    message.maxWidth = statusWidth();
+    fitMessage();
     fitChoices();
     updateFilesTitle(width);
     paintPanes();
@@ -2024,6 +2044,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function confirmKey(key: KeyEvent, state: Extract<Prompt, { kind: "confirm" }>) {
     if (!isBusy() && key.name === "escape" && state.back) { key.preventDefault(); state.back(); void loadPreview(); }
+    else if (!isBusy() && key.name === "escape" && state.extras.cancelled) { key.preventDefault(); goBack(); report(state.extras.cancelled); }
     else if (!isBusy() && key.name === "p") { key.preventDefault(); confirm(state.action); }
     else if (!isBusy() && state.extras.option && !key.ctrl && !key.meta && key.sequence === state.extras.option.key) { key.preventDefault(); state.extras.option.choose(); }
     else dialogKey(key);
