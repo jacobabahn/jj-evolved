@@ -2262,7 +2262,8 @@ test("the remote browser publishes a bookmark tracking another remote, and refus
     expect((await t.repo.bookmarks()).find(item => item.name === "feature" && item.remote === "up")?.tracked).toBe(true);
     await t.f.jj("bookmark", "untrack", "feature", "--remote", "origin");
     await pushFeature("origin", "Track feature@origin first");
-    await t.until("Track feature@origin first from the bookmark browser");
+    // The explanation wraps with the overlay width, so wait for words that stay on one row.
+    await t.until("jj will not push feature over it.");
   } finally {
     await t.cleanup();
     await Bun.$`rm -rf ${origin} ${up}`.quiet();

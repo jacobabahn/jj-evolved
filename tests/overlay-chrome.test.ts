@@ -2,8 +2,9 @@ import { expect, test } from "bun:test";
 import type { ScrollBoxRenderable } from "@opentui/core";
 import { withUiFixture } from "../tooling/ui";
 
-// Below 100 columns the side margins would leave slivers of the panes beside the overlay, so it spans the screen.
-for (const [width, height, left] of [[80, 24, 0], [99, 30, 0], [100, 30, 8], [120, 40, 10]] as const) {
+// Below 120 columns the side margins would leave strips of cut-off pane text beside the overlay, so it spans the screen.
+// From 120 columns up it is 84% wide, with margins of 8% of the width.
+for (const [width, height, left] of [[80, 24, 0], [100, 30, 0], [110, 30, 0], [119, 30, 0], [120, 30, 10], [160, 40, 13]] as const) {
   test(`overlays at ${width}x${height} start at column ${left}`, () => withUiFixture(`overlay-width-${width}`, async ui => {
     await ui.until("Empty change.");
     ui.key("?");

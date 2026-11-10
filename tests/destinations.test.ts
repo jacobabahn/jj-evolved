@@ -133,7 +133,8 @@ test("a destination rewritten after it was resolved is refused before applying",
   await ui.f.jj("describe", "-r", "feature", "-m", "Rewritten elsewhere");
   const rewritten = await ui.repo.operationId();
   ui.key("j"); ui.key("j"); ui.key("RETURN");
-  await ui.until("Press p to review again");
+  // The full message wraps differently with the screen width, so wait for its first words.
+  await ui.until("Repository changed since this preview.");
   expect(ui.screen.captureCharFrame()).not.toContain("Rebased ");
   ui.key("p");
   await ui.until("The selected revision has changed");
