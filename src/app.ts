@@ -18,7 +18,7 @@ import { ActionOverlay } from "./ui/action-overlay";
 import { joinKeys, keyPair, shortcutBar, type Shortcut, type ShortcutLine } from "./ui/shortcut-bar";
 import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
-import { FileList } from "./revisions/file-list";
+import { FileList, statusLetter } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { EllipsisText, fitText } from "./ui/ellipsis-text";
@@ -1309,15 +1309,18 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (stopped) return;
       const chosen = new Set<string>();
       function renderFiles(replace = false) {
+        // The files come first, so the list opens on one to select, and each shows the status letter the files list uses.
+        // Continuing comes last, once there is something to continue with.
+        const count = `${chosen.size} file${chosen.size === 1 ? "" : "s"}`;
         pick(title, [
-          { name: `Continue with ${chosen.size} files`, description: "Enter to review the selected group", choose: () => {
-            if (!chosen.size) { report("Select at least one file.", true); renderFiles(true); return; }
-            accept([...chosen]);
-          } },
-          ...files.map(file => ({ name: `${chosen.has(file.path) ? "[x]" : "[ ]"} ${file.path}`, description: file.status,
+          ...files.map(file => ({ name: `${chosen.has(file.path) ? "[x]" : "[ ]"} ${statusLetter(file.status)} ${file.path}`, description: "",
             choose: () => { const index = chooser.getSelectedIndex(); chosen.has(file.path) ? chosen.delete(file.path) : chosen.add(file.path); renderFiles(true); chooser.setSelectedIndex(index); },
             preview: (signal: AbortSignal) => repository.diff(revision, [file.path], { signal }),
           })),
+          { name: chosen.size ? `Continue with ${count}` : "Continue", description: chosen.size ? "Review the selected group" : "Select at least one file first", choose: () => {
+            if (!chosen.size) { report("Select at least one file.", true); renderFiles(true); return; }
+            accept([...chosen]);
+          } },
         ], { replace });
       }
       renderFiles();
@@ -1523,7 +1526,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const [bookmarks, remotes] = await Promise.all([repository.bookmarks(), repository.remotes()]);
       const preferred = await repository.defaultPushRemote(remotes);
       if (stopped) return;
-      const short = (bookmark: Bookmark) => bookmark.targets.map(id => id.slice(0, 12)).join(", ");
+      // Each target is named as the graph names it, by change ID and description, when it is in the loaded graph.
+      const short = (bookmark: Bookmark) => bookmark.targets.map(id => {
+        const revision = revisions.find(item => item.commitId === id);
+        return revision ? `${shortChangeId(revision)} ${revision.description.split("\n")[0] || "(no description)"}` : id.slice(0, 12);
+      }).join(", ");
       // The revisions a conflicted local bookmark points at, each of which resolves the conflict by moving it there.
       const conflictTargets = [...new Set(bookmarks.filter(item => !item.remote && item.conflict).flatMap(item => item.targets))];
       const found = await Promise.all(conflictTargets.map(id => repository.resolve(id, 1)));
@@ -1581,7 +1588,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             { name: "Move bookmark", description: "Choose a new target revision", choose: () => {
               destination("Bookmark target", null, revision => confirm({ kind: "bookmark-move", name, revision }));
             } },
-            { name: "Rename bookmark", description: "Keep its current targets", choose: () => ask("New bookmark name", name, newName => confirm({ kind: "bookmark-rename", name, newName })) },
+            { name: "Rename bookmark", description: "Give it a new name; it stays where it is", choose: () => ask("New bookmark name", name, newName => confirm({ kind: "bookmark-rename", name, newName })) },
             { name: "Delete bookmark", description: tracked.length ? `Delete the local bookmark, and optionally ${tracked.map(remote => `${name}@${remote}`).join(", ")}` : "Delete the local bookmark", choose: () => remove(false) },
             ...(local.conflict ? [] : others.filter(remote => remote.tracked && remote.ahead).map(remote => ({
               name: `Push to ${remote.remote}`, description: `Push the ${remote.ahead} ${remote.ahead === 1 ? "commit" : "commits"} ${remote.remote} lacks`,
