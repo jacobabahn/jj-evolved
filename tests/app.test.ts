@@ -1897,6 +1897,22 @@ test("g and the action menu's Git entry say there are no remotes, and Escape ret
     await t.until("Actions");
     expect(t.screen.captureCharFrame()).not.toContain("No Git remotes");
     expect(overlay().visible).toBe(true);
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    // Bookmarks lists Git remotes too; Enter dismisses the message as Escape does.
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Bookmarks");
+    t.choose("Git remotes");
+    await t.until("No Git remotes");
+    t.screen.mockInput.pressEnter();
+    await t.until("Bookmarks");
+    expect(t.screen.captureCharFrame()).not.toContain("No Git remotes");
+    t.screen.mockInput.pressEscape();
+    await t.closed();
+    // The message drops the inner box, so a picker with a Selection pane opened afterwards has its border again.
+    t.screen.mockInput.pressKey("o");
+    await t.until("Selection");
+    expect(t.screen.captureCharFrame()).toMatch(/┌─ Selection/);
   } finally {
     await t.cleanup();
   }
