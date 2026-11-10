@@ -80,7 +80,8 @@ export function sameTarget(a: Bookmark, b: Bookmark): boolean {
   return !a.conflict && !b.conflict && a.targets.length === 1 && a.targets[0] === b.targets[0] && b.targets.length === 1;
 }
 export interface ChangedFile { path: string; status: string }
-export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string> }
+/** `newConflicts` counts the changes in the trees' scope that are conflicted after the operation and were not before. */
+export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string>; newConflicts?: number }
 /** `caution` is set when an action that normally applies at once must stop for review, such as a push that deletes a remote bookmark. */
 export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null; remoteUrl?: string; caution?: string }
 
