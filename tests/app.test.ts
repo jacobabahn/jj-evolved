@@ -38,7 +38,14 @@ async function setup(kittyKeyboard = false, bindings?: Keybindings) {
     await screen.mockInput.typeText(value);
     if (screen.renderer.root.findDescendantById("description-input")?.visible) screen.mockInput.pressKey("s", { ctrl: true }); else screen.mockInput.pressEnter();
     if (review) await overlayReady("Review before applying");
-    else await until("Ready.");
+    else {
+      // The prompt closes when its work is done, and the message slot then says what happened.
+      const overlay = screen.renderer.root.findDescendantById("action-overlay");
+      for (let attempt = 0; attempt < 300 && overlay?.visible; attempt++) { await screen.renderOnce(); await Bun.sleep(10); }
+      if (overlay?.visible) throw new Error(`Expected the prompt to close:\n${screen.captureCharFrame()}`);
+      await app.settled();
+      await screen.renderOnce();
+    }
   }
   function chooser() {
     const value = screen.renderer.root.findDescendantById("action-choices");
@@ -96,7 +103,7 @@ test("absorb menu preview cancels, rejects stale state, refreshes and applies", 
     t.screen.mockInput.pressKey("p");
     await t.overlayReady("Review before applying");
     t.screen.mockInput.pressEnter();
-    await t.until("absorb completed");
+    await t.until("into its ancestors");
     expect(await t.f.jj("file", "show", "-r", "feature", "hello.txt")).toBe("absorbed through the UI\n");
     const current = (await t.repo.snapshot("@")).revisions[0];
     if (!current) throw new Error("Missing working copy");
@@ -115,7 +122,7 @@ test("absorb follows the working copy when an unnamed filtered source disappears
     t.screen.mockInput.pressKey("A");
     await t.until("Absorb from");
     t.screen.mockInput.pressEnter();
-    await t.until("absorb completed");
+    await t.until("into its ancestors");
     const current = (await t.repo.snapshot("@")).revisions[0];
     if (!current) throw new Error("Missing working copy");
     await t.until(current.changeId.slice(0, 8));
@@ -265,16 +272,16 @@ test("keyboard describe, immediate new and external refresh", async () => {
     if (!parent) throw new Error("Missing parent");
     expect(parent.description.trim()).toBe("Renamed in the TUI");
     t.screen.mockInput.pressKey("n");
-    await t.until("new completed");
+    await t.until("Created a new change");
     await t.until("4 revisions");
-    await t.until("Ready.");
+    await t.settled();
     const child = (await t.repo.snapshot("@")).revisions[0];
     if (!child) throw new Error("Missing child");
     expect((await t.repo.snapshot("all()")).revisions).toHaveLength(4);
     expect(child.description.trim()).toBe("");
     expect(child.parents).toEqual([parent.commitId]);
     const frame = t.screen.captureCharFrame();
-    expect(frame).toContain(`new completed`);
+    expect(frame).toContain("Created a new change");
     expect(frame).toContain(child.changeId.slice(0, 8));
     expect(frame).not.toContain("Create child");
     expect(frame).not.toContain("Confirm operation");
@@ -298,7 +305,7 @@ test("action menu edits the selected description and switches the working copy",
     t.choose("Edit (make working copy)");
     await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
-    await t.until("Ready.");
+    await t.until("is now the working copy");
     expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Edited parent description");
   } finally { await t.cleanup(); }
 }, 15_000);
@@ -309,7 +316,7 @@ test("e switches the working copy immediately without a confirmation prompt", as
     const target = (await t.repo.snapshot("feature")).revisions[0]?.changeId;
     t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressKey("e");
-    await t.until("edit completed");
+    await t.until("is now the working copy");
     expect((await t.repo.snapshot("@")).revisions[0]?.changeId).toBe(target);
     expect(t.screen.captureCharFrame()).not.toContain("Review before applying");
   } finally { await t.cleanup(); }
@@ -458,7 +465,7 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
     await t.until("Set bookmark ─");
     await t.screen.mockInput.typeText("keyboard-bookmark");
     t.screen.mockInput.pressEnter();
-    await t.until("Bookmark create completed");
+    await t.until("Created bookmark ");
     expect((await t.repo.bookmarks()).some(b => b.name === "keyboard-bookmark")).toBe(true);
     t.screen.mockInput.pressKey("b");
     await t.until("Bookmarks");
@@ -474,12 +481,12 @@ test("action menu creates and renames a bookmark, then undo recovers the old nam
     t.screen.mockInput.pressEnter();
     await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
-    await t.until("Ready.");
+    await t.until("Renamed bookmark ");
     expect((await t.repo.bookmarks()).some(b => b.name === "renamed-in-ui")).toBe(true);
     t.screen.mockInput.pressKey("u");
     await t.until("Undo preview");
     t.screen.mockInput.pressEnter();
-    await t.until("Ready.");
+    await t.until("Undid the last operation.");
     expect((await t.repo.bookmarks()).some(b => b.name === "keyboard-bookmark")).toBe(true);
     t.screen.mockInput.pressKey("o");
     await t.until("Operation history");
@@ -526,7 +533,7 @@ test("B types a new bookmark into the row and creates it; Tab picks an existing 
     t.screen.mockInput.pressEnter();
     await t.until("Review before applying");
     t.screen.mockInput.pressEnter();
-    await t.until("Bookmark move completed");
+    await t.until("Moved bookmark ");
     const moved = (await t.repo.bookmarks()).find(b => b.name === "stack-top" && !b.remote)?.targets;
     expect(moved).toHaveLength(1);
     expect(moved).not.toEqual([first.commitId]);
@@ -640,7 +647,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await t.until("Review before applying");
     await t.until("Second change: Second group");
     t.screen.mockInput.pressEnter();
-    await t.until("Ready.");
+    await t.until(`Split ${original.changeId.slice(0, 8)}.`);
     const first = (await t.repo.snapshot(original.changeId)).revisions[0];
     if (!first) throw new Error("Missing first split change");
     expect(first.description.trim()).toBe("First group");
@@ -659,7 +666,7 @@ test("keyboard file selection splits a change and squashes it back", async () =>
     await t.until("Preview ready");
     for (let i = 0; i < 3; i++) t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressEnter();
-    await t.until("squash completed");
+    await t.until("Squashed ");
     const combined = (await t.repo.snapshot(first.changeId)).revisions[0];
     if (!combined) throw new Error("Missing combined revision");
     expect((await t.repo.files(combined)).map(f => f.path).sort()).toEqual(["one.txt", "two.txt"]);
@@ -689,7 +696,7 @@ test("the bookmark name is typed in the selected row, and a failed name stays ed
     t.screen.mockInput.pressKey("k", { ctrl: true });
     await t.screen.mockInput.typeText("fixed-name");
     t.screen.mockInput.pressEnter();
-    await t.until("completed");
+    await t.until("Created bookmark fixed-name.");
     expect(input.parent).toBeNull();
     expect((await t.repo.bookmarks()).some(b => b.name === "fixed-name")).toBe(true);
     await t.until("[fixed-name");
@@ -728,7 +735,7 @@ test("rebase form retains fields on stale failure and requires a reviewed previe
     t.screen.mockInput.pressKey("p");
     await t.until("Preview ready");
     t.screen.mockInput.pressEnter();
-    await t.until("rebase completed");
+    await t.until("Rebased ");
     expect((await t.repo.snapshot(source.changeId)).revisions[0]?.parents).toEqual(["0".repeat(40)]);
     expect(t.screen.renderer.root.findDescendantById("history-form")).toBeUndefined();
   } finally { await t.cleanup(); }
@@ -779,7 +786,7 @@ test("inline squash reviews a graph destination before applying", async () => {
     await t.until("Current tree");
     await t.until("After squash");
     t.screen.mockInput.pressEnter();
-    await t.until("squash completed");
+    await t.until("Squashed ");
     const target = (await t.repo.snapshot("feature")).revisions[0];
     if (!target) throw new Error("Missing squash destination");
     expect(target.description.trim()).toBe("Initial feature");
@@ -927,7 +934,7 @@ test("inline rebase cancels without writes, retains a failed destination, and re
     await t.until("After rebase");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressEnter();
-    await t.until("rebase completed");
+    await t.until("Rebased ");
     const rebased = (await t.repo.snapshot("feature")).revisions[0];
     const destination = (await t.repo.snapshot(source.changeId)).revisions[0];
     if (!rebased || !destination) throw new Error("Missing rebase result");
@@ -970,7 +977,7 @@ test("dragging an individual bookmark highlights a change and moves only after c
     expect(await t.repo.bookmarks()).toEqual(before);
     expect(t.screen.captureCharFrame()).toContain("bookmark-move feature");
     t.screen.mockInput.pressEnter();
-    await t.until("Bookmark move completed");
+    await t.until("Moved bookmark ");
     const after = await t.repo.bookmarks();
     expect(after.find(bookmark => bookmark.name === "feature")?.targets).toEqual([destination.commitId]);
     expect(after.find(bookmark => bookmark.name === "aaa")?.targets).toEqual(before.find(bookmark => bookmark.name === "aaa")?.targets);
@@ -1239,7 +1246,7 @@ test("dragging a change previews a rebase and applies only after confirmation", 
     await t.overlayReady("Review before applying");
     expect(await t.repo.operationId()).toBe(before);
     t.screen.mockInput.pressEnter();
-    await t.until("rebase completed");
+    await t.until("Rebased ");
     const after = await t.repo.snapshot("all()");
     const moved = after.revisions.find(revision => revision.changeId === source.changeId);
     const parent = after.revisions.find(revision => revision.changeId === destination.changeId);
@@ -1404,7 +1411,7 @@ test("split second-description choice cancels without writes and preserves multi
         await t.until("Review before applying");
         await t.until("Original body");
         t.screen.mockInput.pressEnter();
-        await t.until("Ready.");
+        await t.until(`Split ${original.changeId.slice(0, 8)}.`);
         const first = (await t.repo.snapshot(original.changeId)).revisions[0]!;
         const second = (await t.repo.snapshot(`${first.commitId}+`)).revisions[0]!;
         expect(second.description.trim()).toBe(description);
@@ -1435,7 +1442,7 @@ for (const kitty of [false, true]) {
       expect((await t.repo.snapshot("@")).revisions[0]?.description.trim()).toBe("Next change");
       t.screen.mockInput.pressKey("BACKSPACE");
       t.screen.mockInput.pressKey("s", { ctrl: true });
-      await t.until("Ready.");
+      await t.until("Saved the description");
       expect((await t.repo.snapshot("@")).revisions[0]?.description).toBe("Title\n\nFirst paragraph\nSecond line\n");
       t.screen.mockInput.pressEnter();
       await t.until("Enter newline");
@@ -1478,7 +1485,7 @@ test("description editor scrolls long text and retains it after a failed save", 
       expect(editor.focused).toBe(true);
     } finally { prepare.mockRestore(); }
     t.screen.mockInput.pressKey("d", { ctrl: true });
-    await t.until("Ready.");
+    await t.until("Saved the description");
     expect((await t.repo.snapshot("@")).revisions[0]?.description).toBe(description + "\n");
   } finally { await t.cleanup(); }
 });
@@ -1598,7 +1605,7 @@ test("focus invalidates a reviewed operation until it is reviewed again", async 
     t.screen.mockInput.pressKey("p");
     await t.overlayReady("Review before applying");
     t.screen.mockInput.pressEnter();
-    await t.until("abandon completed");
+    await t.until("Abandoned ");
   } finally { await t.cleanup(); }
 }, 15_000);
 
@@ -2114,14 +2121,14 @@ test("g then s fetches at once, then previews a rebase of the selected stack ont
     await sync();
     await t.overlayReady("skip rebase");
     t.screen.mockInput.pressEnter();
-    await t.until("rebase completed");
+    await t.until("Rebased ");
     expect((await t.repo.snapshot("@")).revisions[0]!.parents).toEqual([trunk!.commitId]);
     await sync();
     await t.until("Fetched from origin. Already based on trunk");
     await t.closed();
     // Trunk itself has no stack, which is said before anything is fetched.
     t.screen.mockInput.pressKey("j");
-    await t.until(`Change   ${trunk!.changeId}`);
+    await t.until(`Change    ${trunk!.changeId}`);
     const operation = await t.repo.operationId();
     t.screen.mockInput.pressKey("g");
     await t.overlayReady("Sync with trunk");

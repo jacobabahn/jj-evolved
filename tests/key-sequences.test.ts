@@ -108,6 +108,6 @@ test("prompt bindings complete and save while every typed character still reache
   await ui.until("^X … then");
   expect(footer(ui)).toContain("^S saveDescription");
   ui.key("s", { ctrl: true });
-  await ui.until("Ready.");
+  await ui.until("Saved the description");
   expect((await ui.repo.snapshot(revision.changeId)).revisions[0]?.description.trim()).toBe("xs fix");
 }, { bindings: loadKeybindings({ scopes: { prompt: { nextCompletion: ["ctrl+t"], saveDescription: ["ctrl+x ctrl+s"] } } }) }), 15_000);

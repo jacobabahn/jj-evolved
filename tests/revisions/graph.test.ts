@@ -55,7 +55,7 @@ test("renderer draws the native graph and navigation selects commits rather than
     for (const [index, revision] of snapshot.revisions.entries()) {
       if (index) screen.mockInput.pressKey("j");
       await screen.renderOnce();
-      expect(screen.captureCharFrame()).toContain(`Commit   ${revision.commitId.slice(0, 12)}`);
+      expect(screen.captureCharFrame()).toContain(`Commit    ${revision.commitId.slice(0, 12)}`);
     }
     screen.resize(80, 24);
     screen.mockInput.pressKey("k");

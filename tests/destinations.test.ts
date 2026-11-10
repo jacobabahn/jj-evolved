@@ -134,7 +134,7 @@ test("a destination rewritten after it was resolved is refused before applying",
   const rewritten = await ui.repo.operationId();
   ui.key("j"); ui.key("j"); ui.key("RETURN");
   await ui.until("Press p to review again");
-  expect(ui.screen.captureCharFrame()).not.toContain("rebase completed");
+  expect(ui.screen.captureCharFrame()).not.toContain("Rebased ");
   ui.key("p");
   await ui.until("The selected revision has changed");
   // Nothing was applied after the external rewrite.
