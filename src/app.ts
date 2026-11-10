@@ -644,6 +644,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     // While a search is typed, its field starts right after the revset and takes the rest of the row.
     filter.flexGrow = typing ? 0 : 1;
     searchPrefix.visible = typing;
+    search = { ...search, matches: inScreenOrder(search.matches) };
     const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
     const count = search.matches.length;
     const position = count ? (index < 0 ? `${count} ${count === 1 ? "match" : "matches"}` : `${index + 1} of ${count}`) : search.query ? "No matches" : "Type to search";
@@ -668,10 +669,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     updateSearchStatus();
     await loadPreview();
   }
+  // Matches come in jj's --no-graph order, which can differ from the graph's rows. Stepping and the "n of N" count
+  // follow the rows on screen instead; matches outside the loaded graph keep their order after them.
+  function inScreenOrder(matches: Revision[]) {
+    const rows = new Map(revisions.map((item, index) => [item.commitId, index]));
+    return matches.map((item, order) => ({ item, order, row: rows.get(item.commitId) ?? Infinity }))
+      .sort((a, b) => a.row - b.row || a.order - b.order).map(entry => entry.item);
+  }
   async function updateSearch() {
     const request = ++searchRequest;
     const query = searchInput.value;
-    search = { query, matches: query ? matchingRevisions(searchCandidates, searchBookmarks, query) : [] };
+    search = { query, matches: query ? inScreenOrder(matchingRevisions(searchCandidates, searchBookmarks, query)) : [] };
     updateSearchStatus();
     const first = search.matches[0];
     if (first) await navigate(first, request);
