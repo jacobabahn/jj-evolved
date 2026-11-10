@@ -157,7 +157,9 @@ test("evolution pagination stays at its original operation after external rewrit
     const operation = await repo.operationId();
     const more = await repo.evolution(source, { operationId: first.operationId, limit: 100 });
     expect(more.entries).toHaveLength(53);
-    expect(more.entries.slice(0, 50)).toEqual(first.entries);
+    // An entry's time is how long ago its operation ran, worked out at each read, so it moves between the two reads.
+    const withoutTime = (entries: typeof first.entries) => entries.map(({ time: _, ...rest }) => rest);
+    expect(withoutTime(more.entries.slice(0, 50))).toEqual(withoutTime(first.entries));
     expect(more.entries.some(entry => entry.description.includes("External version"))).toBe(false);
     expect(more.hasMore).toBe(false);
     const entry = more.entries[50];
