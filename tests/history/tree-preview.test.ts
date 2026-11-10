@@ -202,6 +202,13 @@ test("a rebase that conflicts counts the changes it newly conflicts, and one tha
     const conflicting = await repo.prepare({ kind: "rebase", revision: right, destination: left, descendants: true });
     expect(conflicting.trees?.newConflicts).toBe(2);
     await repo.apply(conflicting);
+    // A conflict that is already there and stays is not counted: moving the change above Right keeps both conflicted.
+    const [above] = (await repo.snapshot("description(exact:'Above right\n')")).revisions;
+    const [movedRight] = (await repo.snapshot("description(exact:'Right edit\n')")).revisions;
+    if (!above || !movedRight) throw new Error("Missing revisions");
+    await f.jj("new", movedRight.commitId, "-m", "Sibling");
+    const [sibling] = (await repo.snapshot("description(exact:'Sibling\n')")).revisions;
+    expect((await repo.prepare({ kind: "rebase", revision: above, destination: sibling!, descendants: false })).trees?.newConflicts).toBe(0);
     // Moving Right back resolves both and creates none.
     const [moved] = (await repo.snapshot("description(exact:'Right edit\n')")).revisions;
     const [feature] = (await repo.snapshot("feature")).revisions;
@@ -228,9 +235,15 @@ test("preview trees colour moved rows, both lines, and head the trees with the c
       newConflicts: 1,
     }, "rebase");
     await screen.waitForVisualIdle();
-    expect(screen.captureCharFrame()).toContain("! Creates 1 conflict");
+    expect(screen.captureCharFrame()).toContain("! Creates conflicts in 1 change");
+    // The headline takes a row of its own, so the trees keep their last row.
+    expect(screen.captureCharFrame()).toContain("Root");
     for (const span of [...spanOf("Moved change"), ...spanOf("●")]) expect(span.fg).toEqual(RGBA.fromHex(themes.dark.accent));
     for (const span of spanOf("Stays put")) expect(span.fg).toEqual(RGBA.fromHex(themes.dark.text));
+    // A summary line also starts "● <change>", but names the commit after " / " and has no description line below.
+    const { highlightJjText } = await import("../../src/ui/jj-highlighting");
+    const summary = highlightJjText("● qwrtyuok / abcdef123456 Moved change\nTrees show up to 40 revisions", prefixes, themes.dark);
+    expect(summary.chunks.find(chunk => chunk.text.includes("Trees show"))?.fg).toEqual(RGBA.fromHex(themes.dark.text));
     trees.setTrees({ beforePrefixes: prefixes, afterPrefixes: prefixes, before: "@  qwrtyuok\n", after: "@  qwrtyuok\n", newConflicts: 0 });
     await screen.waitForVisualIdle();
     expect(screen.captureCharFrame()).not.toContain("Creates");

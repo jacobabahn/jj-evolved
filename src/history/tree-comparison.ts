@@ -43,7 +43,7 @@ export class TreeComparisonView extends BoxRenderable {
     }
     this.before.fg = this.after.fg = getTheme(this.ctx).text;
     const count = this.conflicts;
-    this.headline.content = new StyledText([bold(fg(getTheme(this.ctx).conflict)(`! Creates ${count} conflict${count === 1 ? "" : "s"}`))]);
+    this.headline.content = new StyledText([bold(fg(getTheme(this.ctx).conflict)(`! Creates conflicts in ${count} change${count === 1 ? "" : "s"}`))]);
   }
 
   setTrees(trees: TreeComparison | null, action?: "rebase" | "squash") {
