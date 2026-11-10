@@ -14,7 +14,7 @@ export async function projectedTree(root: string, action: Extract<Mutation, { ki
   const affected = `(${changes.map(change => `present(${change})`).join(" | ")} | present(${action.destination.changeId})::)`;
   const marker = rebasing.length ? `if(${JSON.stringify(" " + rebasing.map(revision => revision.changeId).join(" ") + " ")}.contains(" " ++ change_id ++ " "), "● ", "") ++ ` : "";
   const args = ["log", "--config", "ui.log-word-wrap=false", "--limit", "40", "-r", `${affected} | parents(${affected})`, "-T",
-    marker + 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ "]").join(" ") ++ if(conflict, " ! conflict") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"'];
+    marker + 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ if(b.conflict(), "!") ++ "]").join(" ") ++ if(conflict, " ! conflict") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"'];
   const prefixArgs = [...args.slice(0, -1), '"[" ++ json(change_id) ++ "," ++ json(change_id.shortest().prefix()) ++ "]" ++ "\\n"', "--no-graph"];
   // Every change the operation can rewrite, not only the trees' first 40 rows.
   const conflictArgs = ["log", "--no-graph", "-r", `conflicts() & (${affected})`, "-T", 'change_id ++ "\n"'];

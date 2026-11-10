@@ -7,6 +7,7 @@ import { ChangePreview } from "../preview/change-preview";
 import { InputRenderable, ScrollBoxRenderable, SelectRenderable, type KeyEvent, type RenderContext } from "@opentui/core";
 import { TreeComparisonView } from "./tree-comparison";
 import { ActionOverlay } from "../ui/action-overlay";
+import { fitText } from "../ui/ellipsis-text";
 import { Repository } from "../repository/repository";
 import { terminalText } from "../terminal-text";
 import { shortChangeId, rebaseScopeSummary, type ChangedFile, type Mutation, type Revision } from "../repository/model";
@@ -148,7 +149,7 @@ export class HistoryForm extends ActionOverlay {
       this.mode = { kind: "destination", revisions };
       const render = (matches: Revision[], status = `${matches.length} destinations`) => {
         this.mode = { kind: "destination", revisions: matches };
-        this.choices.options = matches.map(item => ({ name: `${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`, description: "" }));
+        this.choices.options = matches.map(item => ({ name: this.fit(`${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`), description: "" }));
         this.choices.setSelectedIndex(0);
         this.report(status, !matches.length);
       };
@@ -198,9 +199,13 @@ export class HistoryForm extends ActionOverlay {
     this.choices.options = [
       { name: "Use all files", description: "" },
       { name: `Use ${mode.selected.size} selected files`, description: "" },
-      ...mode.files.map(file => ({ name: `${mode.selected.has(file.path) ? "[x]" : "[ ]"} ${terminalText(file.path)}`, description: "" })),
+      ...mode.files.map(file => ({ name: this.fit(`${mode.selected.has(file.path) ? "[x]" : "[ ]"} ${terminalText(file.path)}`), description: "" })),
     ];
   }
+
+  // The list draws its rows itself, after a column of padding and the "▶ " indicator, so they are cut here by the
+  // same rule as other text.
+  private fit(text: string) { return fitText(text, this.innerWidth - 3); }
 
   private choose() {
     const index = this.choices.getSelectedIndex();

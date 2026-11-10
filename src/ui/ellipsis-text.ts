@@ -46,17 +46,22 @@ export class EllipsisText extends TextRenderable {
    * colours per chunk, and the renderable's own colour applies only where a chunk sets none.
    */
   private colorAt(line: number, column: number) {
-    let row = 0, start = 0;
+    let row = 0, start = 0, last = this.fg;
     for (const chunk of this.content.chunks) {
       for (const [index, part] of chunk.text.split("\n").entries()) {
         if (index > 0) { row++; start = 0; }
-        if (row > line) return this.fg;
-        const width = Bun.stringWidth(part);
-        if (row === line && column < start + width) return chunk.fg ?? this.fg;
+        if (row > line) return last;
+        // OpenTUI draws a tab two columns wide, where Bun.stringWidth counts none.
+        const width = Bun.stringWidth(part.replaceAll("\t", "  "));
+        if (row === line && width) {
+          if (column < start + width) return chunk.fg ?? this.fg;
+          last = chunk.fg ?? this.fg;
+        }
         start += width;
       }
     }
-    return this.fg;
+    // A column past the measured end of the line takes the colour of the line's last text.
+    return last;
   }
 }
 

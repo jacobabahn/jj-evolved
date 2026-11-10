@@ -55,6 +55,19 @@ test("EllipsisText draws the … in the colour of the text it replaces", async (
   }
 });
 
+test("EllipsisText counts a tab as the two columns it is drawn in when colouring the …", async () => {
+  const screen = await createTestRenderer({ width: 20, height: 1 });
+  const purple = RGBA.fromHex("#7540a0");
+  try {
+    const text = new EllipsisText(screen.renderer, { width: 10, height: 1, content: new StyledText([fg(purple)("a\tbcdefghi")]) });
+    screen.renderer.root.add(text);
+    await screen.renderOnce();
+    expect(screen.captureSpans().lines[0]?.spans.find(span => span.text.includes("…"))?.fg).toEqual(purple);
+  } finally {
+    screen.renderer.destroy();
+  }
+});
+
 test("the header writes a path inside the home directory from ~", () => {
   expect(homePath("/home/me/dev/repo", "/home/me")).toBe("~/dev/repo");
   expect(homePath("/home/me", "/home/me")).toBe("~");

@@ -4,7 +4,7 @@ import { RGBA } from "@opentui/core";
 import { fixture } from "../fixture";
 import { Repository } from "../../src/repository/repository";
 
-const template = 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ "]").join(" ") ++ if(conflict, " ! conflict") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"';
+const template = 'change_id.shortest(8) ++ " " ++ local_bookmarks.map(|b| "[" ++ b.name() ++ if(b.conflict(), "!") ++ "]").join(" ") ++ if(conflict, " ! conflict") ++ "\\n" ++ coalesce(description.first_line(), "(no description)") ++ "\\n"';
 
 
 for (const descendants of [false, true]) {
