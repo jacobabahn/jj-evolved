@@ -138,7 +138,7 @@ export function matchTint(context: RenderContext): RGBA | undefined {
 export function scrollbarColors(theme: Theme, background: ColorInput) {
   const base = parseColor(background), border = parseColor(theme.border), muted = parseColor(theme.muted);
   if (base.intent !== "rgb" || border.intent !== "rgb" || muted.intent !== "rgb") return { track: base, thumb: border };
-  return { track: blend(base, border, 0.3), thumb: blend(border, muted, 0.5) };
+  return { track: blend(base, border, 0.3), thumb: blend(border, muted, 0.6) };
 }
 
 /** Colours both scroll bars of a scroll box for the context's theme, over the pane's `background` token. */
