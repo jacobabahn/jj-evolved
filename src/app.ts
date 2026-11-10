@@ -1317,11 +1317,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             choose: () => { const index = chooser.getSelectedIndex(); chosen.has(file.path) ? chosen.delete(file.path) : chosen.add(file.path); renderFiles(true); chooser.setSelectedIndex(index); },
             preview: (signal: AbortSignal) => repository.diff(revision, [file.path], { signal }),
           })),
-          { name: chosen.size ? `Continue with ${count}` : "Continue", description: chosen.size ? "Review the selected group" : "Select at least one file first", choose: () => {
-            if (!chosen.size) { report("Select at least one file.", true); renderFiles(true); return; }
+          { key: "c", hotkey: true, name: chosen.size ? `Continue with ${count}` : "Continue", description: chosen.size ? "Review the selected group" : "Select at least one file first", choose: () => {
+            if (!chosen.size) { renderFiles(true); chooser.setSelectedIndex(files.length); overlay.report("Select at least one file.", true); return; }
             accept([...chosen]);
           } },
         ], { replace });
+        // In a long list Continue is off screen, so it has a key of its own.
+        overlay.keys = { ...overlay.keys, left: [...overlay.keys.left, ["c", "continue"]] };
       }
       renderFiles();
     }, true);
@@ -1524,12 +1526,19 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function showBookmarks() {
     void run("Loading bookmarks…", async () => {
       const [bookmarks, remotes] = await Promise.all([repository.bookmarks(), repository.remotes()]);
-      const preferred = await repository.defaultPushRemote(remotes);
+      // Targets outside the loaded graph, such as old or remote-only bookmarks, are read in one query.
+      const known = new Map(revisions.map(item => [item.commitId, item]));
+      const missing = [...new Set(bookmarks.flatMap(item => item.targets))].filter(id => !known.has(id));
+      const [preferred, outside] = await Promise.all([repository.defaultPushRemote(remotes),
+        missing.length ? repository.navigationRevisions(missing.map(id => `present(${id})`).join(" | ")).catch(() => []) : []]);
       if (stopped) return;
-      // Each target is named as the graph names it, by change ID and description, when it is in the loaded graph.
+      for (const item of outside) known.set(item.commitId, item);
+      // Targets are named as the graph names them: by change ID and description, or by change ID alone when a
+      // conflicted bookmark has several, so they all fit on the row.
       const short = (bookmark: Bookmark) => bookmark.targets.map(id => {
-        const revision = revisions.find(item => item.commitId === id);
-        return revision ? `${shortChangeId(revision)} ${revision.description.split("\n")[0] || "(no description)"}` : id.slice(0, 12);
+        const revision = known.get(id);
+        if (!revision) return `commit ${id.slice(0, 12)}`;
+        return bookmark.targets.length > 1 ? shortChangeId(revision) : `${shortChangeId(revision)} ${revision.description.split("\n")[0] || "(no description)"}`;
       }).join(", ");
       // The revisions a conflicted local bookmark points at, each of which resolves the conflict by moving it there.
       const conflictTargets = [...new Set(bookmarks.filter(item => !item.remote && item.conflict).flatMap(item => item.targets))];
