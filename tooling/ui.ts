@@ -116,7 +116,12 @@ export async function createUiFixture(options: FixtureOptions = {}) {
           key("a", { ctrl: true }); key("k", { ctrl: true });
           await screen.mockInput.typeText(value);
           if (screen.renderer.root.findDescendantById("description-input")?.visible) key("s", { ctrl: true }); else screen.mockInput.pressEnter();
-          await until("Ready.");
+          // A prompt is done when it closes and its work has settled; the message slot then says what happened.
+          const overlay = screen.renderer.root.findDescendantById("action-overlay");
+          for (let attempt = 0; attempt < 300 && overlay?.visible; attempt++) { await screen.renderOnce(); await Bun.sleep(10); }
+          if (overlay?.visible) throw new Error(`Expected the prompt to close:\n${screen.captureCharFrame()}`);
+          await app!.settled();
+          await screen.renderOnce();
         },
         async resize(width: number, height: number) {
           recording.mark(`resize ${width}x${height}`);
