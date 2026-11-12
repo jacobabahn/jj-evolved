@@ -2120,6 +2120,40 @@ test("a remote push applies at once and reports its target, but a remote deletio
   }
 }, 15_000);
 
+test("the remote browser publishes a bookmark tracking another remote, and refuses one over an untracked remote bookmark", async () => {
+  const t = await setup();
+  const origin = `${t.f.path}-origin.git`, up = `${t.f.path}-up.git`;
+  const offers = async (name: string) => {
+    for (let attempt = 0; attempt < 150 && !t.chooser().options.some(option => option.name === name); attempt++) await Bun.sleep(10);
+  };
+  const pushFeature = async (remote: string, ready: string) => {
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Git remotes");
+    t.choose("Git remotes");
+    await offers(remote);
+    t.choose(remote);
+    await t.until("Push bookmark");
+    t.choose("Push bookmark");
+    await t.until(ready);
+    t.choose("feature");
+  };
+  try {
+    for (const path of [origin, up]) expect(await Bun.spawn(["git", "init", "--bare", path], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", origin);
+    await t.f.jj("git", "remote", "add", "up", up);
+    await t.f.jj("git", "push", "--bookmark", "feature", "--remote", "origin");
+    await pushFeature("up", "Track feature@up, then publish this bookmark");
+    await t.until("Published feature to up");
+    expect((await t.repo.bookmarks()).find(item => item.name === "feature" && item.remote === "up")?.tracked).toBe(true);
+    await t.f.jj("bookmark", "untrack", "feature", "--remote", "origin");
+    await pushFeature("origin", "Track feature@origin first");
+    await t.until("Track feature@origin first from the bookmark browser");
+  } finally {
+    await t.cleanup();
+    await Bun.$`rm -rf ${origin} ${up}`.quiet();
+  }
+}, 15_000);
+
 test("a running fetch shows Esc cancel in the footer, and Escape or quitting stops jj and its git processes", async () => {
   const t = await setup();
   const saved = { count: process.env.GIT_CONFIG_COUNT, key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 };
