@@ -248,7 +248,7 @@ test("a publish or remote deletion refuses to push when another jj command write
     await f.repo.apply(await f.repo.prepare({ kind: "git-publish", remote: "origin", name: "next", revision }));
     expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
     await f.jj("bookmark", "delete", "intruder");
-    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "next", remote: "origin", push: true });
+    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "next", remotes: ["origin"], push: true });
     await withIntruder("delete", async () => { await expect(f.repo.apply(deletion)).rejects.toThrow("Another jj command changed the repository during this deletion, so nothing was pushed to origin."); });
     expect(await refs(f.remote)).toBe(`refs/heads/next ${revision.commitId}\n`);
   } finally { await f.cleanup(); }
@@ -344,10 +344,10 @@ test("deleting a tracked bookmark stays local by default and can also delete it 
   try {
     await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
     const target = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
-    const localOnly = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin" });
+    const localOnly = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin"] });
     expect(localOnly.summary).toContain("Local deletion only. feature@origin stays on the remote");
     const before = await f.repo.operationId();
-    const both = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin", push: true });
+    const both = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin"], push: true });
     expect(both.summary).toContain(`delete feature@origin, last fetched at ${target}`);
     expect(both.summary).toContain("cannot be undone locally");
     expect(both.summary).toContain("undo reverts the push, which changes nothing here");
@@ -368,10 +368,10 @@ test("deleting a tracked bookmark stays local by default and can also delete it 
     await f.jj("bookmark", "delete", "feature");
     await f.jj("bookmark", "create", "feature", "-r", target);
     await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
-    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin" }));
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin"] }));
     expect(await refs(f.remote)).toBe(`refs/heads/feature ${target}\n`);
     expect((await f.repo.bookmarks()).find(item => item.name === "feature" && item.remote === "origin")).toMatchObject({ tracked: true, targets: [target] });
-    await expect(f.repo.prepare({ kind: "bookmark-delete", name: "solo", remote: "origin", push: true })).rejects.toThrow("no longer exists");
+    await expect(f.repo.prepare({ kind: "bookmark-delete", name: "solo", remotes: ["origin"], push: true })).rejects.toThrow("no longer exists");
   } finally { await f.cleanup(); }
 });
 
@@ -379,7 +379,7 @@ test("a failed remote deletion reports that the local bookmark is gone and how t
   const f = await remoteFixture();
   try {
     await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
-    const preview = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remote: "origin", push: true });
+    const preview = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin"], push: true });
     await rm(f.remote, { recursive: true, force: true });
     const failure = f.repo.apply(preview);
     await expect(failure).rejects.toThrow("The local bookmark feature was deleted, but feature@origin still exists; only the push failed.");
@@ -507,7 +507,7 @@ test("bookmark names with revset operators act on exactly the named bookmark", a
     expect((await f.repo.bookmarks()).find(item => !item.remote && item.name === "a")?.targets).toEqual([revision.commitId]);
     await f.repo.apply(await f.repo.prepare({ kind: "bookmark-rename", name: "p(q)", newName: "c,d" }));
     await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "o'k" }));
-    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "a|b", remote: "origin", push: true }));
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "a|b", remotes: ["origin"], push: true }));
     expect(await local()).toEqual(["a", "a&b", "a@b", "b", "c,d", "feature"].sort());
     expect((await refs(f.remote)).split("\n").filter(Boolean).map(line => line.split(" ")[0]).sort()).toEqual(["refs/heads/a&b", "refs/heads/a@b"]);
   } finally { await f.cleanup(); }
@@ -644,7 +644,7 @@ test("remotes that jj quotes have one unquoted name for push, fetch, track, untr
     } finally { await publisher.cleanup(); }
     expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "my|origin" }))).toBe("Fetched my|origin · 1 bookmark changed\npublished new");
     expect((await f.repo.bookmarks()).find(item => item.remote === "my|origin" && item.name === "published")).toBeDefined();
-    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "to-0", remote: "é", push: true });
+    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "to-0", remotes: ["é"], push: true });
     expect(deletion.summary).toContain("Then push the deletion to é");
     expect(await f.repo.apply(deletion)).toStartWith("Deleted to-0 here and on é");
     expect(await refs(f.paths[0]!)).toBe("");
@@ -840,4 +840,68 @@ test("a fetch from all remotes names each changed bookmark with its remote", () 
     { remote: "upstream", output: "Nothing changed.\n" },
     { remote: "fork", output: 'bookmark: main@fork [new] untracked\nbookmark: "ü"@fork [new] untracked\nbookmark: x@fork [deleted] untracked\n' },
   ])).toBe("Fetched 3 remotes · 4 bookmarks changed\nmain@origin updated, main@fork new, ü@fork new, +1 more");
+});
+
+// Tracks feature on origin and up, both at the same commit, and returns that commit.
+async function trackedOnTwo(f: Awaited<ReturnType<typeof remoteFixture>>): Promise<string> {
+  await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+  const target = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
+  const resolved = await f.repo.resolve(target, 1);
+  if (resolved.kind !== "one") throw new Error("expected one revision");
+  await f.repo.apply(await f.repo.prepare({ kind: "git-publish", remote: "up", name: "feature", revision: resolved.revision }));
+  return target;
+}
+
+test("deleting a bookmark tracked on two remotes names both and can delete it on each in turn", async () => {
+  const f = await remoteFixture();
+  const up = await secondRemote(f, "up");
+  try {
+    const target = await trackedOnTwo(f);
+    const localOnly = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin", "up"] });
+    expect(localOnly.summary).toContain("Local deletion only. feature@origin and feature@up stay on their remotes, where a later push of this bookmark to each would delete it there.");
+    // A review chosen before up started tracking the bookmark would not mention it, so it is refused.
+    await expect(f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin"], push: true })).rejects.toThrow("feature@up now tracks this bookmark too. Reload bookmarks.");
+    const both = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin", "up"], push: true });
+    expect(both.summary).toContain("Then push the deletion to each of the 2 remotes that track it, one at a time:");
+    expect(both.summary).toContain(`  origin (${f.remote}): delete feature@origin, last fetched at ${target}`);
+    expect(both.summary).toContain(`  up (${up}): delete feature@up, last fetched at ${target}`);
+    expect(both.summary).toContain("Deleting the bookmark on origin and up cannot be undone locally.");
+    expect(await f.repo.apply(both)).toBe(`Deleted feature here and on origin, up\nwas ${target.slice(0, 8)} on origin, ${target.slice(0, 8)} on up`);
+    expect(await refs(f.remote)).toBe("");
+    expect(await refs(up)).toBe("");
+    expect((await f.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+  } finally { await f.cleanup(); await rm(up, { recursive: true, force: true }); }
+});
+
+test("a deletion pushed to two remotes reports which remote kept the deletion when the next push fails", async () => {
+  const f = await remoteFixture();
+  const up = await secondRemote(f, "up");
+  try {
+    await trackedOnTwo(f);
+    const preview = await f.repo.prepare({ kind: "bookmark-delete", name: "feature", remotes: ["origin", "up"], push: true });
+    await rm(up, { recursive: true, force: true });
+    const failure = f.repo.apply(preview);
+    await expect(failure).rejects.toThrow("The local bookmark feature was deleted, and so was feature@origin, but feature@up still exists; only the push to up failed.");
+    await expect(failure).rejects.toThrow("Push deletion");
+    expect(await refs(f.remote)).toBe("");
+    const bookmarks = (await f.repo.bookmarks()).filter(item => item.name === "feature" && item.targets.length);
+    expect(bookmarks.map(item => [item.remote, item.tracked])).toEqual([["up", true]]);
+  } finally { await f.cleanup(); await rm(up, { recursive: true, force: true }); }
+});
+
+test("untracking a bookmark deleted locally says it cancels the pending remote deletion", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    const kept = await f.repo.prepare({ kind: "bookmark-untrack", remote: "origin", name: "feature" });
+    expect(kept.summary).toContain("The local bookmark and remote target remain.");
+    await f.jj("bookmark", "delete", "feature");
+    const deleted = await f.repo.prepare({ kind: "bookmark-untrack", remote: "origin", name: "feature" });
+    expect(deleted.summary).not.toContain("The local bookmark and remote target remain.");
+    expect(deleted.summary).toContain("There is no local bookmark feature");
+    expect(deleted.summary).toContain("feature@origin stays on the remote, and a later push will no longer delete it.");
+    await f.repo.apply(deleted);
+    await expect(f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" })).rejects.toThrow("No local or tracked deleted bookmark to push.");
+    expect(await refs(f.remote)).toContain("refs/heads/feature");
+  } finally { await f.cleanup(); }
 });
