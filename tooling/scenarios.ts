@@ -533,7 +533,7 @@ export const scenarios: Scenario[] = [
       await ui.until("Set bookmark ─");
       await ui.type("bad name");
       ui.key("RETURN");
-      await ui.until("invalid value 'bad name'");
+      await ui.until('Git cannot use the bookmark name "bad name"');
       await ui.capture("Invalid bookmark name error retains the input in the row");
       assert(ui.node("bookmark-input").focused);
       ui.key("ESCAPE");

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
 import { fetchAllReport, fetchReport, pushCaution, pushChanges } from "../../src/repository/remotes";
+import { newBookmarkName } from "../../src/repository/mutation";
 import { fixture } from "../fixture";
 
 async function remoteFixture() {
@@ -509,6 +510,12 @@ test("bookmark names with revset operators act on exactly the named bookmark", a
     expect(await local()).toEqual(["a", "a&b", "a@b", "b", "c,d", "feature"].sort());
     expect((await refs(f.remote)).split("\n").filter(Boolean).map(line => line.split(" ")[0]).sort()).toEqual(["refs/heads/a&b", "refs/heads/a@b"]);
   } finally { await f.cleanup(); }
+});
+
+test("a new bookmark name is refused when Git could not store it", () => {
+  for (const name of ["a|b", "a&b", "a@b", "p(q)", "o'k", "c,d", "é", "team/feature"]) expect(newBookmarkName(name)).toBe(JSON.stringify(name));
+  for (const name of ["", "bad name", "a..b", "x~y", "a:b", "a^b", "a?b", "a*b", "a[b", "a\\b", "@", "a@{1}", "-x", ".hid", "a/.b", "a//b", "a/", "x.lock", "a."])
+    expect(() => newBookmarkName(name)).toThrow("Git cannot use the bookmark name");
 });
 
 test("a push that matches no bookmark fails instead of reporting it up to date", () => {
