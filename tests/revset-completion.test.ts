@@ -8,8 +8,9 @@ import { fileRevsetHistory, recordRevset, revsetHistoryLimit, type RevsetHistory
 import { Repository } from "../src/repository/repository";
 import { fixture } from "./fixture";
 import { createUiFixture } from "../tooling/ui";
-const list = ["main", "map", "release-", "feature/topic"].map(name => ({ name, remote: "", targets: [], conflict: false }));
-list.push({ name: "main", remote: "origin", targets: [], conflict: false });
+const target = "c".repeat(40);
+const list = ["main", "map", "release-", "feature/topic"].map(name => ({ name, remote: "", targets: [target], conflict: false }));
+list.push({ name: "main", remote: "origin", targets: [target], conflict: false });
 const bookmarks = { bookmarks: list };
 
 test("completion replaces only the cursor token and preserves surrounding expression", () => {
@@ -50,8 +51,16 @@ test("quoted bookmarks, remote symbols, existing calls, and escaped quotes", () 
   const quoted = 'parents("feature/to") | @';
   expect(applyCompletion(quoted, revsetCompletions(quoted, 19, bookmarks)[0]!).value).toBe('parents("feature/topic") | @');
   expect(applyCompletion("anc(@)", revsetCompletions("anc(@)", 3, {})[0]!).value).toBe("ancestors(@)");
-  const weird = [{ name: 'odd"name', remote: "remote-", targets: [], conflict: false }];
+  const weird = [{ name: 'odd"name', remote: "remote-", targets: [target], conflict: false }];
   expect(revsetCompletions('"odd\\"', 6, { bookmarks: weird })[0]?.text).toBe('"odd\\"name"@"remote-"');
+});
+
+test("a bookmark deleted locally but still tracked remotely is not offered", () => {
+  const deleted = [
+    { name: "feature", remote: "", targets: [], conflict: false },
+    { name: "feature", remote: "origin", targets: [target], conflict: false },
+  ];
+  expect(revsetCompletions("feat", 4, { bookmarks: deleted }).map(item => item.label)).toEqual(["feature@origin"]);
 });
 
 test("functions show signatures and place the cursor between parentheses that take arguments", () => {
