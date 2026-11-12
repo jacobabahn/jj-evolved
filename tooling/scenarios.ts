@@ -271,6 +271,53 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "bookmark-conflict", title: "A fetch that conflicts a bookmark, and resolving it to the remote's target",
+    async run(ui) {
+      const remote = `${ui.f.path}/.jj/demo-remote.git`;
+      const git = (...args: string[]) => Bun.spawn(["git", ...args], { stdout: "ignore", stderr: "pipe" }).exited;
+      assert.equal(await git("init", "--bare", remote), 0);
+      await ui.f.jj("git", "remote", "add", "origin", remote);
+      await ui.f.jj("git", "push", "--remote", "origin", "--bookmark", "exact:feature");
+      // The remote's feature moves to "Upstream work", reaching it through a temporary bookmark, and the local one to
+      // "Local work", so the next fetch leaves feature conflicted.
+      await ui.f.jj("new", "feature", "-m", "Upstream work");
+      await ui.f.jj("bookmark", "create", "upstream", "-r", "@");
+      await ui.f.jj("git", "push", "--remote", "origin", "--bookmark", "exact:upstream");
+      const upstream = (await ui.f.jj("log", "--no-graph", "-r", "upstream", "-T", "commit_id")).trim();
+      assert.equal(await git("--git-dir", remote, "update-ref", "refs/heads/feature", upstream), 0);
+      assert.equal(await git("--git-dir", remote, "update-ref", "-d", "refs/heads/upstream"), 0);
+      await ui.f.jj("bookmark", "forget", "--include-remotes", "upstream");
+      await ui.f.jj("new", "feature", "-m", "Local work");
+      await ui.f.jj("bookmark", "set", "feature", "-r", "@");
+      ui.key("r", { ctrl: true });
+      await ui.until("[feature ↑1]");
+      await ui.settled();
+      ui.key("g");
+      await ui.until("Fetch origin");
+      ui.key("f");
+      await ui.until("now conflicted: feature");
+      await ui.until("[feature!]");
+      assert(!ui.screen.captureCharFrame().includes("feature@git"));
+      await ui.capture("The fetch report names the bookmark it left conflicted");
+      ui.key("b");
+      await ui.until("conflicted with origin");
+      assert(!ui.screen.captureCharFrame().includes("behind origin"));
+      await ui.capture("The bookmark browser shows the conflict without ahead or behind counts");
+      ui.choose("feature !");
+      await ui.until("Set to feature@origin");
+      await ui.capture("Resolve by keeping the local target or taking origin's");
+      ui.choose("Set to feature@origin");
+      await ui.until("New target:");
+      await ui.capture("Review moving the bookmark to origin's target");
+      ui.key("RETURN");
+      await ui.until("Bookmark move completed");
+      const feature = (await ui.repo.bookmarks()).find(item => item.name === "feature" && !item.remote);
+      assert.deepEqual([feature?.conflict, feature?.targets], [false, [upstream]]);
+      await ui.until("[feature]");
+      await ui.capture("feature is in sync with origin again");
+    },
+  },
+  {
     name: "completion", title: "Revset completion, signatures and recent revsets",
     async run(ui) {
       await ui.resize(80, 24);

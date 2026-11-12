@@ -154,6 +154,8 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
 /** How a local bookmark stands against one remote bookmark of the same name, for the bookmark browser. */
 function syncState(local: Bookmark, remote: Bookmark) {
   if (!remote.tracked) return `untracked on ${remote.remote}`;
+  // jj counts against one of a conflicted bookmark's targets, so its counts would mislead.
+  if (local.conflict) return `conflicted with ${remote.remote}`;
   if (sameTarget(local, remote)) return `in sync with ${remote.remote}`;
   const { ahead = 0, behind = 0 } = remote;
   return ahead && behind ? `diverged from ${remote.remote} (ahead ${ahead}, behind ${behind})`
@@ -1047,7 +1049,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (outcome.kind !== "applied" || stopped) return;
     closePrompt();
     if (outcome.refreshError) throw new Error(outcome.refreshError);
-    result.content = outcome.report ?? `${outcome.action.kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
+    const text = outcome.report ?? `${outcome.action.kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ")} completed\n${selected()?.changeId.slice(0, 8) || "Repository updated"}`;
+    result.content = text;
+    // Two rows, or three for a fetch that also names the bookmarks it left conflicted.
+    result.height = Math.max(2, text.split("\n").length);
     result.visible = true;
     clearTimeout(resultTimer);
     resultTimer = setTimeout(() => { if (!stopped) result.visible = false; }, 4000);
@@ -1485,6 +1490,27 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const preferred = await repository.defaultPushRemote(remotes);
       if (stopped) return;
       const short = (bookmark: Bookmark) => bookmark.targets.map(id => id.slice(0, 12)).join(", ");
+      // The revisions a conflicted local bookmark points at, each of which resolves the conflict by moving it there.
+      const conflictTargets = [...new Set(bookmarks.filter(item => !item.remote && item.conflict).flatMap(item => item.targets))];
+      const found = await Promise.all(conflictTargets.map(id => repository.resolve(id, 1)));
+      if (stopped) return;
+      const targets = new Map(found.flatMap(item => item.kind === "one" ? [[item.revision.commitId, item.revision] as const] : []));
+      // Names each target by the tracked remote bookmarks on it; one target no remote has is the local side.
+      const resolveChoices = (name: string, local: Bookmark, named: Bookmark[]): Choice[] => {
+        if (!local.conflict) return [];
+        const remotesAt = (id: string) => named.filter(item => isRealRemote(item) && item.tracked && item.targets.length === 1 && item.targets[0] === id).map(item => `${name}@${item.remote}`);
+        const unnamed = local.targets.filter(id => !remotesAt(id).length).length;
+        return local.targets.flatMap((id): Choice[] => {
+          const revision = targets.get(id);
+          if (!revision) return [];
+          const there = remotesAt(id);
+          return [{
+            name: there.length ? `Set to ${there.join(", ")}` : unnamed === 1 ? "Keep local" : `Set to ${id.slice(0, 12)}`,
+            description: `Resolve the conflict: move ${name} to ${shortChangeId(revision)} ${revision.description.split("\n")[0] || "(no description)"}`,
+            choose: () => confirm({ kind: "bookmark-move", name, revision }),
+          }];
+        });
+      };
       const rows = [...new Set(bookmarks.map(item => item.name))].map((name): Choice => {
         const named = bookmarks.filter(item => item.name === name);
         const local = named.find(item => !item.remote && item.targets.length);
@@ -1514,8 +1540,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           tracked.length ? { option: { key: "r", hint: push ? `keep it on ${where}` : `also delete on ${where}`, choose: () => remove(!push) } } : {});
         return {
           name: `${name}${local.conflict ? " !" : ""}`,
-          description: `${local.conflict ? "conflicted · " : ""}${others.map(remote => syncState(local, remote)).join(" · ") || (local.localOnly ? "local only" : "local")} · ${short(local)}`,
+          // A tracked remote's state already says "conflicted with" it.
+          description: `${local.conflict && !tracked.length ? "conflicted · " : ""}${others.map(remote => syncState(local, remote)).join(" · ") || (local.localOnly ? "local only" : "local")} · ${short(local)}`,
           choose: () => pick(name, [
+            ...resolveChoices(name, local, named),
             { name: "Move bookmark", description: "Choose a new target revision", choose: () => {
               destination("Bookmark target", null, revision => confirm({ kind: "bookmark-move", name, revision }));
             } },

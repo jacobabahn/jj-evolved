@@ -17,11 +17,14 @@ const changedIds = (before: ReadonlySet<string>, after: ReadonlySet<string>) =>
 
 // A local badge carries its sync state: * when it is on no remote, ↑ and ↓ for commits ahead of and behind its tracked
 // remotes. A remote in step with its local bookmark, and the @git mirror of it, add nothing and get no badge of their own.
+// Git cannot store a conflicted bookmark, so its @git mirror stays on one of the local targets, where the local badge
+// already is; that mirror is folded too.
 function badgeText(bookmark: Bookmark, bookmarks: Bookmark[]): string | null {
   const others = bookmarks.filter(item => item.name === bookmark.name && item !== bookmark);
   if (bookmark.remote) {
     const local = others.find(item => !item.remote);
-    const folded = local && (bookmark.tracked || !isRealRemote(bookmark)) && sameTarget(local, bookmark);
+    const mirrored = local?.conflict && !isRealRemote(bookmark) && bookmark.targets.every(id => local.targets.includes(id));
+    const folded = local && (mirrored || (bookmark.tracked || !isRealRemote(bookmark)) && sameTarget(local, bookmark));
     return folded ? null : `[${bookmark.name}@${bookmark.remote}${bookmark.conflict ? "!" : ""}]`;
   }
   const tracked = others.filter(item => isRealRemote(item) && item.tracked && item.targets.length);
