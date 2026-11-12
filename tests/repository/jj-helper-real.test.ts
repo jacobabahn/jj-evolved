@@ -34,6 +34,9 @@ async function history() {
   await f.jj("tag", "set", "v1", "-r", "feature");
   await f.jj("tag", "set", "ünï-tag", "-r", "@-");
   await f.jj("git", "remote", "add", "origin", "https://example.com/origin.git");
+  // jj prints these quoted, and the helper must too; remoteList unquotes both.
+  await f.jj("git", "remote", "add", "é", "https://example.com/e.git");
+  await f.jj("git", "remote", "add", "my|origin", "https://example.com/mine.git");
   return f;
 }
 
