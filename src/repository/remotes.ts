@@ -2,7 +2,7 @@ import { label, type Bookmark, type Mutation, type PreparedMutation, type Publis
 import { CancelledError, NETWORK_TIMEOUT_MS, run } from "./jj-process";
 import { read } from "./jj-helper";
 import { logRevisions } from "./log-snapshot";
-import { exactName, literalName, mutationArgs } from "./mutation";
+import { exactName, mutationArgs, newBookmarkName } from "./mutation";
 
 // jj prints a bookmark or remote name bare, or as a quoted string literal when it is not a plain symbol, such as `"é"`,
 // `"a b"` or `"my|origin"`.
@@ -69,6 +69,7 @@ async function publishCaution(root: string, action: PublishAction, previous: str
 
 async function preparePublish(root: string, action: PublishAction, bookmarks: Bookmark[], operationId: string): Promise<{ summary: string; caution?: string }> {
   if (!action.name) throw new Error("Enter a bookmark name.");
+  newBookmarkName(action.name);
   const { local, remote, placed } = publishState(action, bookmarks);
   const target = action.revision.commitId;
   const commits = await logRevisions(root, `(::${target} ~ ::remote_bookmarks(remote=${exactName(action.remote)})) ~ root()`, operationId);
@@ -97,7 +98,7 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
   const { local, remote, placed } = publishState(action, bookmarks);
   const interrupted = `Another jj command changed the repository during this publish, so nothing was pushed to ${action.remote}. Check the bookmark ${action.name}, then publish again.`;
   let pinned = operationId;
-  if (!placed) pinned = await localStep(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", literalName(action.name)], pinned, interrupted);
+  if (!placed) pinned = await localStep(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", newBookmarkName(action.name)], pinned, interrupted);
   if (!remote) pinned = await localStep(root, mutationArgs({ kind: "bookmark-track", remote: action.remote, name: action.name }), pinned, interrupted);
   try { return pushReport("Published", action, await network(root, ["--at-op", pinned, ...mutationArgs(action)], signal)); }
   catch (error) {

@@ -682,7 +682,7 @@ test("the bookmark name is typed in the selected row, and a failed name stays ed
     expect(input.focused).toBe(true);
     await t.screen.mockInput.typeText("bad name");
     t.screen.mockInput.pressEnter();
-    await t.until("invalid value 'bad name'");
+    await t.until('Git cannot use the bookmark name "bad name"');
     expect(input.parent).toBe(row);
     expect(input.value).toBe("bad name");
     t.screen.mockInput.pressKey("a", { ctrl: true });
