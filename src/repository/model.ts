@@ -79,6 +79,23 @@ export function isRealRemote(bookmark: Bookmark): boolean { return bookmark.remo
 export function sameTarget(a: Bookmark, b: Bookmark): boolean {
   return !a.conflict && !b.conflict && a.targets.length === 1 && a.targets[0] === b.targets[0] && b.targets.length === 1;
 }
+/**
+ * How a push of one bookmark to one remote can go, decided before jj's dry run so jj never refuses it there:
+ * - push: `jj git push --bookmark` as it is, which also covers a deletion and a conflict that prepare refuses.
+ * - publish: jj would refuse to create the remote bookmark because the local one already tracks another remote, so the
+ *   push goes through a publish, which tracks it first.
+ * - refuse: an untracked remote bookmark of the same name exists, which jj will not overwrite; it must be tracked first.
+ */
+export type PushRoute = { kind: "push" } | { kind: "publish"; commitId: string; tracking: string[] } | { kind: "refuse"; reason: string };
+export function pushRoute(name: string, remote: string, bookmarks: Bookmark[]): PushRoute {
+  const local = bookmarks.find(item => !item.remote && item.name === name);
+  const there = bookmarks.find(item => item.remote === remote && item.name === name);
+  if (!local?.targets.length || local.conflict || there?.conflict) return { kind: "push" };
+  if (there && !there.tracked) return { kind: "refuse", reason: `${name}@${remote} exists and is not tracked, so jj will not push ${name} over it. Track ${name}@${remote} first from the bookmark browser, then push.` };
+  const tracking = bookmarks.filter(item => item.name === name && isRealRemote(item) && item.remote !== remote && item.tracked).map(item => item.remote);
+  if (!there && tracking.length && local.targets.length === 1) return { kind: "publish", commitId: local.targets[0]!, tracking };
+  return { kind: "push" };
+}
 export interface ChangedFile { path: string; status: string }
 /** `newConflicts` counts the changes in the trees' scope that are conflicted after the operation and were not before. */
 export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string>; newConflicts?: number }

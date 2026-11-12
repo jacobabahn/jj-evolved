@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
-import { fetchAllReport, fetchReport, pushCaution, pushChanges } from "../../src/repository/remotes";
+import { fetchAllReport, fetchReport, pushCaution, pushChanges, remoteFailureHint } from "../../src/repository/remotes";
+import { pushRoute } from "../../src/repository/model";
 import { newBookmarkName } from "../../src/repository/mutation";
 import { fixture } from "../fixture";
 
@@ -516,6 +517,76 @@ test("a new bookmark name is refused when Git could not store it", () => {
   for (const name of ["a|b", "a&b", "a@b", "p(q)", "o'k", "c,d", "é", "team/feature"]) expect(newBookmarkName(name)).toBe(JSON.stringify(name));
   for (const name of ["", "bad name", "a..b", "x~y", "a:b", "a^b", "a?b", "a*b", "a[b", "a\\b", "@", "a@{1}", "-x", ".hid", "a/.b", "a//b", "a/", "x.lock", "a."])
     expect(() => newBookmarkName(name)).toThrow("Git cannot use the bookmark name");
+});
+
+async function secondRemote(f: { jj: (...args: string[]) => Promise<string> }, name: string) {
+  const path = await mkdtemp(join(tmpdir(), "jj-remote-test-"));
+  const proc = Bun.spawn(["git", "init", "--bare", path], { stdout: "ignore", stderr: "pipe" });
+  if (await proc.exited !== 0) throw new Error(await new Response(proc.stderr).text());
+  await f.jj("git", "remote", "add", name, path);
+  return path;
+}
+
+test("a bookmark tracking another remote is pushed through a publish that tracks it first", async () => {
+  const f = await remoteFixture();
+  const up = await secondRemote(f, "up");
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    const target = (await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
+    expect(pushRoute("feature", "up", await f.repo.bookmarks())).toEqual({ kind: "publish", commitId: target, tracking: ["origin"] });
+    expect(pushRoute("feature", "origin", await f.repo.bookmarks())).toEqual({ kind: "push" });
+    // jj itself would refuse at the dry run with "Refusing to create new remote bookmark feature@up".
+    const refused = f.repo.prepare({ kind: "git-push", remote: "up", name: "feature" });
+    await expect(refused).rejects.toThrow("feature tracks origin, so jj will not create feature@up until it is tracked.");
+    await expect(refused).rejects.not.toThrow("configure Git credentials");
+    const resolved = await f.repo.resolve(target, 1);
+    if (resolved.kind !== "one") throw new Error("expected one revision");
+    const preview = await f.repo.prepare({ kind: "git-publish", remote: "up", name: "feature", revision: resolved.revision });
+    expect(preview.summary).toContain("Tracking: start tracking feature@up");
+    await f.repo.apply(preview);
+    expect(await refs(up)).toBe(`refs/heads/feature ${target}\n`);
+    expect((await f.repo.bookmarks()).find(item => item.name === "feature" && item.remote === "up")?.tracked).toBe(true);
+  } finally { await f.cleanup(); await rm(up, { recursive: true, force: true }); }
+});
+
+test("a push over an untracked remote bookmark of the same name is refused with the step to take", async () => {
+  const f = await remoteFixture();
+  try {
+    await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await f.jj("bookmark", "untrack", "feature", "--remote", "origin");
+    expect(pushRoute("feature", "origin", await f.repo.bookmarks())).toMatchObject({ kind: "refuse" });
+    const before = await f.repo.operationId();
+    // jj itself would refuse at the dry run with "Non-tracking remote bookmark feature@origin exists".
+    const refused = f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" });
+    await expect(refused).rejects.toThrow("feature@origin exists and is not tracked, so jj will not push feature over it. Track feature@origin first");
+    await expect(refused).rejects.not.toThrow("configure Git credentials");
+    expect(await f.repo.operationId()).toBe(before);
+  } finally { await f.cleanup(); }
+});
+
+test("only failures that may come from the remote get the network hint", async () => {
+  for (const local of [
+    "Error: Refusing to create new remote bookmark feature@up\nHint: Run `jj bookmark track feature@up` and try again.",
+    "Error: Non-tracking remote bookmark feature@origin exists\nHint: Run `jj bookmark track feature@origin` to import the remote bookmark.",
+    "Changes to push to nope:\n  bookmark: feature [add to 7c86ef673563]\nError: No git remote named 'nope'",
+    "Warning: No matching remotes for names: nope\nError: No git remotes to fetch from",
+    "Error: Won't push commit 4ec02cf8a8ff since it has no description\nHint: Rejected commit: rxlmqosw 4ec02cf8 g",
+  ]) expect(remoteFailureHint(local)).toBe("");
+  for (const remote of [
+    "Error: Could not find repository at '/nonexistent/x.git'",
+    "Error: Git process failed: External git program failed:\nfatal: unable to access 'https://nohost.invalid/x.git/': Could not resolve host: nohost.invalid",
+    "Error: Failed to push some bookmarks\nHint: The following references unexpectedly moved on the remote:\n  refs/heads/feature",
+    "jj timed out after 600 seconds.",
+  ]) expect(remoteFailureHint(remote)).toContain("configure Git credentials or SSH");
+  // A real local refusal from jj's dry run: a commit without a description.
+  const f = await remoteFixture();
+  try {
+    await f.jj("new");
+    await f.jj("bookmark", "create", "wip", "-r", "@");
+    const refused = f.repo.prepare({ kind: "git-push", remote: "origin", name: "wip" });
+    await expect(refused).rejects.toThrow("since it has no description");
+    await expect(refused).rejects.not.toThrow("configure Git credentials");
+  } finally { await f.cleanup(); }
 });
 
 test("a push that matches no bookmark fails instead of reporting it up to date", () => {
