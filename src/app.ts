@@ -1079,7 +1079,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (action.kind === "git-fetch") return `Fetching from ${action.remote}…`;
     if (action.kind === "git-fetch-all") return `Fetching from ${action.remotes.map(item => item.name).join(", ")}…`;
     if (action.kind === "git-push" || action.kind === "git-publish") return `Pushing ${action.name} to ${action.remote}…`;
-    if (action.kind === "bookmark-delete" && action.push && action.remote) return `Deleting ${action.name} here and on ${action.remote}…`;
+    if (action.kind === "bookmark-delete" && action.push && action.remotes?.length) return `Deleting ${action.name} here and on ${action.remotes.join(", ")}…`;
     return null;
   }
   function confirm(action: Mutation, extras: ReviewExtras = {}) {
@@ -1491,7 +1491,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         const others = named.filter(item => isRealRemote(item) && item.targets.length);
         const tracking = (remote: Bookmark): Choice => ({
           name: `${remote.tracked ? "Untrack" : "Track"} ${name}@${remote.remote}`,
-          description: remote.tracked ? "Keep the local bookmark; stop following remote updates" : "Create or merge a local bookmark and follow future updates",
+          description: !remote.tracked ? "Create or merge a local bookmark and follow future updates"
+            : local ? "Keep the local bookmark; stop following remote updates"
+            : `Keep ${name}@${remote.remote} on the remote; a later push will no longer delete it`,
           choose: () => confirm({ kind: remote.tracked ? "bookmark-untrack" : "bookmark-track", name, remote: remote.remote }),
         });
         if (!local) return {
@@ -1505,10 +1507,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
             ]));
           },
         };
-        const tracked = others.find(remote => remote.tracked);
-        // A local-only delete is the default; r adds or drops the remote deletion in the same review.
-        const remove = (push: boolean): void => confirm({ kind: "bookmark-delete", name, ...(tracked ? { remote: tracked.remote, push } : {}) },
-          tracked ? { option: { key: "r", hint: push ? `keep it on ${tracked.remote}` : `also delete on ${tracked.remote}`, choose: () => remove(!push) } } : {});
+        const tracked = others.filter(remote => remote.tracked).map(remote => remote.remote);
+        const where = tracked.join(", ");
+        // A local-only delete is the default; r adds or drops the remote deletion, on every tracking remote, in the same review.
+        const remove = (push: boolean): void => confirm({ kind: "bookmark-delete", name, ...(tracked.length ? { remotes: tracked, push } : {}) },
+          tracked.length ? { option: { key: "r", hint: push ? `keep it on ${where}` : `also delete on ${where}`, choose: () => remove(!push) } } : {});
         return {
           name: `${name}${local.conflict ? " !" : ""}`,
           description: `${local.conflict ? "conflicted · " : ""}${others.map(remote => syncState(local, remote)).join(" · ") || (local.localOnly ? "local only" : "local")} · ${short(local)}`,
@@ -1517,7 +1520,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
               destination("Bookmark target", null, revision => confirm({ kind: "bookmark-move", name, revision }));
             } },
             { name: "Rename bookmark", description: "Keep its current targets", choose: () => ask("New bookmark name", name, newName => confirm({ kind: "bookmark-rename", name, newName })) },
-            { name: "Delete bookmark", description: tracked ? `Delete the local bookmark, and optionally ${name}@${tracked.remote}` : "Delete the local bookmark", choose: () => remove(false) },
+            { name: "Delete bookmark", description: tracked.length ? `Delete the local bookmark, and optionally ${tracked.map(remote => `${name}@${remote}`).join(", ")}` : "Delete the local bookmark", choose: () => remove(false) },
             ...(local.conflict ? [] : others.filter(remote => remote.tracked && remote.ahead).map(remote => ({
               name: `Push to ${remote.remote}`, description: `Push the ${remote.ahead} ${remote.ahead === 1 ? "commit" : "commits"} ${remote.remote} lacks`,
               choose: () => applyNow({ kind: "git-push", remote: remote.remote, name }),

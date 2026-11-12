@@ -1,4 +1,4 @@
-import { label, pushRoute, type Bookmark, type Mutation, type PreparedMutation, type PublishBookmarks, type Remote, type RemoteMutation, type Revision } from "./model";
+import { isRealRemote, label, pushRoute, type Bookmark, type Mutation, type PreparedMutation, type PublishBookmarks, type Remote, type RemoteMutation, type Revision } from "./model";
 import { CancelledError, NETWORK_TIMEOUT_MS, run } from "./jj-process";
 import { read } from "./jj-helper";
 import { logRevisions } from "./log-snapshot";
@@ -110,33 +110,80 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
 }
 
 type DeleteAction = Extract<Mutation, { kind: "bookmark-delete" }>;
-// A dry run cannot show the push of a deletion that has not happened yet, so the review is computed from bookmark state.
-export async function prepareDeletion(root: string, action: DeleteAction, bookmarks: Bookmark[]): Promise<{ summary: string; remoteUrl?: string }> {
-  const tracked = bookmarks.find(item => item.remote === action.remote && item.name === action.name && item.tracked && item.targets.length);
-  const there = `${action.name}@${action.remote}`;
-  if (!action.push) return { summary: tracked ? `Local deletion only. ${there} stays on the remote, where a later push of this bookmark would delete it.` : "Local deletion only. Remote bookmarks are not pushed." };
-  if (!tracked) throw new Error(`${there} is no longer a tracked remote bookmark. Reload bookmarks.`);
-  const remote = (await remoteList(root)).find(item => item.name === action.remote);
-  if (!remote) throw new Error("This Git remote no longer exists. Reload remotes.");
-  return { remoteUrl: remote.url, summary: `Then push the deletion to ${remote.name} (${remote.url}):\n  delete ${there}, last fetched at ${tracked.targets.join(", ")}\n\nDeleting the bookmark on ${remote.name} cannot be undone locally. Undo does not bring back the local bookmark either: the deletion and the push are two operations, and undo reverts the push, which changes nothing here. To get the local bookmark back, restore the operation before the deletion from operation history. JJ rejects the push if the remote changed since the last fetch.` };
+const plural = (count: number, one: string, many: string) => count === 1 ? one : many;
+const listed = (items: string[]) => items.length < 3 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+/** The remotes that track a bookmark: those a later push of its deletion would delete it on. */
+function trackingRemotes(name: string, bookmarks: Bookmark[]): Bookmark[] {
+  return bookmarks.filter(item => item.name === name && isRealRemote(item) && item.tracked && item.targets.length);
+}
+// Identifies the remotes a reviewed deletion pushes to, so apply refuses if any of them was removed or repointed.
+const deletionKey = (remotes: Remote[]) => remotes.map(item => `${item.name} ${item.url}`).join("\n");
+async function deletionRemotes(root: string, action: DeleteAction): Promise<Remote[]> {
+  const configured = await remoteList(root);
+  return (action.remotes ?? []).map(name => {
+    const remote = configured.find(item => item.name === name);
+    if (!remote) throw new Error("This Git remote no longer exists. Reload remotes.");
+    return remote;
+  });
 }
 
-// Like a publish, the whole deletion is cancellable: Escape during the local deletion stops the push before it starts.
-async function applyDeletion(root: string, action: DeleteAction & { remote: string }, operationId: string, signal: AbortSignal): Promise<string> {
-  const pinned = await localStep(root, mutationArgs(action), operationId,
-    `Another jj command changed the repository during this deletion, so nothing was pushed to ${action.remote}. The local bookmark ${action.name} was deleted; to delete it on ${action.remote} too, choose ${action.name} in the bookmark browser, then Push deletion.`);
-  try {
-    const output = await network(root, ["--at-op", pinned, ...mutationArgs({ kind: "git-push", remote: action.remote, name: action.name })], signal);
-    assertMatched(action.name, action.remote, output);
-    const change = pushChanges(output).find(item => item.name === action.name);
-    return `Deleted ${action.name} here and on ${action.remote}${change?.kind === "delete" ? `\nwas ${short(change.from)}` : ""}`;
+// A dry run cannot show the push of a deletion that has not happened yet, so the review is computed from bookmark state.
+// The review names every remote that tracks the bookmark, since a later push to any of them would delete it there.
+export async function prepareDeletion(root: string, action: DeleteAction, bookmarks: Bookmark[]): Promise<{ summary: string; remoteUrl?: string }> {
+  const tracked = trackingRemotes(action.name, bookmarks);
+  const there = tracked.map(item => `${action.name}@${item.remote}`);
+  if (!action.push) return { summary: tracked.length ? `Local deletion only. ${listed(there)} ${plural(tracked.length, "stays on the remote, where a later push of this bookmark would delete it", "stay on their remotes, where a later push of this bookmark to each would delete it there")}.` : "Local deletion only. Remote bookmarks are not pushed." };
+  const chosen = action.remotes ?? [];
+  const missing = chosen.find(remote => !tracked.some(item => item.remote === remote));
+  if (missing !== undefined || !chosen.length) throw new Error(`${action.name}@${missing ?? "a remote"} is no longer a tracked remote bookmark. Reload bookmarks.`);
+  const added = tracked.filter(item => !chosen.includes(item.remote));
+  if (added.length) throw new Error(`${listed(added.map(item => `${action.name}@${item.remote}`))} now ${plural(added.length, "tracks", "track")} this bookmark too. Reload bookmarks.`);
+  const remotes = await deletionRemotes(root, action);
+  const line = (remote: Remote) => `delete ${action.name}@${remote.name}, last fetched at ${tracked.find(item => item.remote === remote.name)!.targets.join(", ")}`;
+  const where = remotes.length === 1
+    ? `Then push the deletion to ${remotes[0]!.name} (${remotes[0]!.url}):\n  ${line(remotes[0]!)}`
+    : `Then push the deletion to each of the ${remotes.length} remotes that track it, one at a time:\n${remotes.map(remote => `  ${remote.name} (${remote.url}): ${line(remote)}`).join("\n")}\n\nIf a push fails, the remotes before it keep the deletion and the ones after it are not pushed.`;
+  const names = listed(remotes.map(item => item.name));
+  return { remoteUrl: deletionKey(remotes), summary: `${where}\n\nDeleting the bookmark on ${names} cannot be undone locally. Undo does not bring back the local bookmark either: the deletion and the ${plural(remotes.length, "push", "pushes")} are separate operations, and undo reverts the ${plural(remotes.length, "push", "last push")}, which changes nothing here. To get the local bookmark back, restore the operation before the deletion from operation history. JJ rejects a push if the remote changed since the last fetch.` };
+}
+
+/**
+ * Deletes the bookmark locally, then pushes the deletion to each remote in turn, under one cancellable scope. Each push
+ * is pinned to the operation before it, starting from the local deletion, so a concurrent jj command stops the rest
+ * instead of being pushed with them. Like fetch-all, a failure or cancel says exactly which remotes were pushed.
+ */
+async function applyDeletion(root: string, action: DeleteAction, remotes: string[], operationId: string, signal: AbortSignal): Promise<string> {
+  const name = action.name;
+  const retry = `To retry, open the bookmark browser and choose ${name}, then Push deletion. To keep the bookmark instead, restore the operation before the deletion from operation history.`;
+  const done: string[] = [];
+  const was: string[] = [];
+  const left = () => remotes.slice(done.length);
+  // A push cancelled after it started may or may not have deleted its remote bookmark, so that one is left out.
+  const kept = (uncertain = false) => {
+    const rest = left().slice(uncertain ? 1 : 0).map(remote => `${name}@${remote}`);
+    const gone = `The local bookmark ${name} was deleted${done.length ? `, and so was ${listed(done.map(remote => `${name}@${remote}`))}` : ""}`;
+    return rest.length ? `${gone}, but ${listed(rest)} still ${plural(rest.length, "exists", "exist")}` : gone;
+  };
+  const interrupted = () => `Another jj command changed the repository during this deletion, so nothing was pushed to ${listed(left())}. ${kept()}. ${retry}`;
+  let pinned = await localStep(root, mutationArgs(action), operationId, interrupted());
+  for (const remote of remotes) {
+    const others = remotes.length > 1 && left().length > 1 ? ` Not pushed: ${left().slice(1).join(", ")}.` : "";
+    try {
+      const output = await network(root, ["--at-op", pinned, ...mutationArgs({ kind: "git-push", remote, name })], signal);
+      assertMatched(name, remote, output);
+      done.push(remote);
+      const change = pushChanges(output).find(item => item.name === name);
+      if (change?.kind === "delete") was.push(remotes.length === 1 ? short(change.from) : `${short(change.from)} on ${remote}`);
+      if (left().length) pinned = await nextOperation(root, pinned, interrupted());
+    }
+    catch (error) {
+      if (done.includes(remote)) throw error;
+      if (error instanceof CancelledError && !error.started) throw new Error(`Deletion cancelled before the push to ${remote} started; nothing was sent to ${remote}.${others}\n${kept()}. ${retry}`);
+      if (error instanceof CancelledError) throw new Error(`Push cancelled. ${name}@${remote} may already be deleted; fetch to check.${others}\n${kept(true)}. ${retry}`);
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\n${kept()}; only the push${remotes.length > 1 ? ` to ${remote}` : ""} failed.${others} ${retry}`);
+    }
   }
-  catch (error) {
-    const retry = `To retry, open the bookmark browser and choose ${action.name}, then Push deletion. To keep the bookmark instead, undo the deletion.`;
-    if (error instanceof CancelledError && !error.started) throw new Error(`Deletion cancelled before the push started; nothing was sent to ${action.remote}.\nThe local bookmark ${action.name} was deleted, but ${action.name}@${action.remote} still exists. ${retry}`);
-    if (error instanceof CancelledError) throw new Error(`Push cancelled. ${action.name}@${action.remote} may already be deleted; fetch to check.\nThe local bookmark ${action.name} was deleted. ${retry}`);
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nThe local bookmark ${action.name} was deleted, but ${action.name}@${action.remote} still exists; only the push failed. ${retry}`);
-  }
+  return `Deleted ${name} here and on ${remotes.join(", ")}${was.length ? `\nwas ${was.join(", ")}` : ""}`;
 }
 
 /**
@@ -147,6 +194,11 @@ async function applyDeletion(root: string, action: DeleteAction & { remote: stri
  */
 async function localStep(root: string, args: string[], parent: string, interrupted: string): Promise<string> {
   await run(root, ["--ignore-working-copy", ...args]);
+  return await nextOperation(root, parent, interrupted);
+}
+
+/** The operation the last command created, which must directly follow `parent`, or `interrupted` is thrown. */
+async function nextOperation(root: string, parent: string, interrupted: string): Promise<string> {
   const output = await run(root, ["--ignore-working-copy", "op", "log", "--no-graph", "--limit", "1", "-T", 'id ++ " " ++ parents.map(|p| p.id()).join(",")']);
   const [id = "", parents = ""] = output.trim().split(" ");
   if (parents !== parent) throw new Error(interrupted);
@@ -333,9 +385,12 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
     const bookmark = bookmarks.find(item => item.remote === remote.name && item.name === action.name);
     if (!bookmark) throw new Error("This remote bookmark no longer exists. Fetch and reload bookmarks.");
     summary += `${action.kind === "bookmark-track" ? "Track" : "Untrack"} ${action.name}@${remote.name}\nTargets: ${bookmark.targets.join(", ")}\n\n`;
+    const local = bookmarks.some(item => !item.remote && item.name === action.name && item.targets.length);
     summary += action.kind === "bookmark-track"
       ? "Import this remote bookmark as a local bookmark. Future fetches update it; a differing local bookmark may become conflicted."
-      : "Stop propagating future remote updates to the local bookmark. The local bookmark and remote target remain.";
+      : local ? "Stop propagating future remote updates to the local bookmark. The local bookmark and remote target remain."
+      // Untracking is what drops a pending deletion: jj only pushes the deletion of a bookmark it still tracks.
+      : `There is no local bookmark ${action.name}: it was deleted here, and a push would delete ${action.name}@${remote.name} on the remote too. Untracking cancels that: ${action.name}@${remote.name} stays on the remote, and a later push will no longer delete it.`;
   }
   return { summary, remoteUrl: remote.url, ...(caution ? { caution } : {}) };
 }
@@ -343,11 +398,15 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
 /** Applies a reviewed remote action and returns a short report of what changed, or null for tracking changes. */
 export async function applyRemote(root: string, prepared: PreparedMutation, bookmarks: Bookmark[], scope = uncancellable): Promise<string | null> {
   const action = prepared.action;
+  if (action.kind === "bookmark-delete") {
+    const remotes = await deletionRemotes(root, action);
+    if (!remotes.length || deletionKey(remotes) !== prepared.remoteUrl) throw new Error("Remote configuration changed since this preview. Review the action again.");
+    return await scope(signal => applyDeletion(root, action, remotes.map(item => item.name), prepared.operationId, signal));
+  }
   if (!("remote" in action)) throw new Error("Expected a remote action.");
   const remote = (await remoteList(root)).find(item => item.name === action.remote);
   if (!remote || remote.url !== prepared.remoteUrl) throw new Error("Remote configuration changed since this preview. Review the action again.");
   if (action.kind === "git-publish") return await scope(signal => applyPublish(root, action, bookmarks, prepared.operationId, signal));
-  if (action.kind === "bookmark-delete") return await scope(signal => applyDeletion(root, { ...action, remote: remote.name }, prepared.operationId, signal));
   // Pin the operation so concurrent local edits cannot change the reviewed push targets.
   const args = ["--at-op", prepared.operationId, ...mutationArgs(action)];
   if (action.kind === "git-fetch") {

@@ -1111,6 +1111,66 @@ test("bookmark badges and the bookmark browser show sync state, and delete can a
   } finally { await t.cleanup(); await Bun.$`rm -rf ${remote}`.quiet(); }
 }, 15_000);
 
+test("the bookmark browser deletes on every tracking remote and says what untracking a deleted bookmark cancels", async () => {
+  const t = await setup();
+  const remotes = [`${t.f.path}-origin.git`, `${t.f.path}-up.git`];
+  const pushed = async (remote: string) => {
+    const proc = Bun.spawn(["git", "--git-dir", remote, "for-each-ref", "--format=%(refname)"], { stdout: "pipe" });
+    return (await new Response(proc.stdout).text()).trim();
+  };
+  try {
+    t.screen.resize(140, 30);
+    for (const [index, name] of ["origin", "up"].entries()) {
+      expect(await Bun.spawn(["git", "init", "--bare", remotes[index]!], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+      await t.f.jj("git", "remote", "add", name, remotes[index]!);
+    }
+    await t.f.jj("bookmark", "create", "solo", "-r", "@");
+    for (const name of ["feature", "solo"]) await t.repo.apply(await t.repo.prepare({ kind: "git-push", remote: "origin", name }));
+    const target = (await t.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!.targets[0]!;
+    const resolved = await t.repo.resolve(target, 1);
+    if (resolved.kind !== "one") throw new Error("expected one revision");
+    await t.repo.apply(await t.repo.prepare({ kind: "git-publish", remote: "up", name: "feature", revision: resolved.revision }));
+    await t.f.jj("bookmark", "delete", "solo");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("[solo@origin]");
+    // Keys are ignored while the refresh that follows the pushes is still running.
+    for (let attempt = 0; attempt < 100 && !t.screen.captureCharFrame().includes("Git remotes"); attempt++) {
+      t.screen.mockInput.pressKey("b");
+      await Bun.sleep(20);
+      await t.screen.renderOnce();
+    }
+    await t.overlayReady("Git remotes");
+    t.choose("solo");
+    await t.until("Untrack solo@origin");
+    expect(t.chooser().options.map(option => option.value)).toEqual(["Push deletion to origin", "Untrack solo@origin"]);
+    expect(t.chooser().options[1]!.description).toBe("Keep solo@origin on the remote; a later push will no longer delete it");
+    t.choose("Untrack solo@origin");
+    await t.overlayReady("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain("a later push will no longer delete it");
+    expect(t.screen.captureCharFrame()).not.toContain("The local bookmark and remote target remain");
+    t.screen.mockInput.pressEscape();
+    await t.until("Push deletion to origin");
+    t.screen.mockInput.pressEscape();
+    await t.overlayReady("Git remotes");
+    // The list comes back with solo selected, and feature is above it.
+    t.screen.mockInput.pressKey("k");
+    t.choose("feature");
+    await t.until("optionally feature@origin, feature@up");
+    t.choose("Delete bookmark");
+    await t.overlayReady("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain("feature@origin and feature@up stay on their remotes");
+    expect(t.screen.captureCharFrame()).toContain("r also delete on origin, up");
+    t.screen.mockInput.pressKey("r");
+    await t.until("one at a time");
+    expect(t.screen.captureCharFrame()).toContain("r keep it on origin, up");
+    t.screen.mockInput.pressEnter();
+    await t.until("Deleted feature here and on origin, up");
+    expect(await pushed(remotes[0]!)).toBe("refs/heads/solo");
+    expect(await pushed(remotes[1]!)).toBe("");
+    expect((await t.repo.bookmarks()).some(item => item.name === "feature")).toBe(false);
+  } finally { await t.cleanup(); for (const remote of remotes) await Bun.$`rm -rf ${remote}`.quiet(); }
+}, 15_000);
+
 test("dragging a change previews a rebase and applies only after confirmation", async () => {
   const t = await setup();
   try {

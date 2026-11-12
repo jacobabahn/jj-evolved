@@ -50,8 +50,8 @@ export type Mutation =
   | { kind: "split"; revision: Revision; files: string[]; description: string; secondDescription: string }
   | { kind: "bookmark-create" | "bookmark-move"; name: string; revision: Revision }
   | { kind: "bookmark-rename"; name: string; newName: string }
-  // remote names a remote that tracks the bookmark; push also deletes the bookmark there.
-  | { kind: "bookmark-delete"; name: string; remote?: string; push?: boolean }
+  // remotes are every remote that tracks the bookmark; push also deletes the bookmark on each of them, one at a time.
+  | { kind: "bookmark-delete"; name: string; remotes?: string[]; push?: boolean }
   | { kind: "undo" | "restore"; operation: Operation };
 
 /**
@@ -99,7 +99,10 @@ export function pushRoute(name: string, remote: string, bookmarks: Bookmark[]): 
 export interface ChangedFile { path: string; status: string }
 /** `newConflicts` counts the changes in the trees' scope that are conflicted after the operation and were not before. */
 export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string>; newConflicts?: number }
-/** `caution` is set when an action that normally applies at once must stop for review, such as a push that deletes a remote bookmark. */
+/**
+ * `remoteUrl` is set for an action that contacts a remote: the URL it was reviewed against, or for a deletion pushed to
+ * remotes, each of those remotes' name and URL, one per line.
+ * `caution` is set when an action that normally applies at once must stop for review, such as a push that deletes a remote bookmark. */
 export interface PreparedMutation { action: Mutation; operationId: string; summary: string; trees: TreeComparison | null; remoteUrl?: string; caution?: string }
 
 export function shortChangeId(revision: Pick<Revision, "changeId" | "changePrefix">): string {
