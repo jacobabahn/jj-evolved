@@ -79,7 +79,8 @@ export function revsetCompletions(value: string, cursor: number, symbols: Revset
     if (single !== undefined) return single;
     try { return JSON.parse(`"${double}"`); } catch { return double; }
   });
-  const candidates: Candidate[] = (symbols.bookmarks ?? []).map(bookmark => ({
+  // A bookmark deleted locally but still tracked remotely has no targets and no longer resolves.
+  const candidates: Candidate[] = (symbols.bookmarks ?? []).filter(bookmark => bookmark.targets.length).map(bookmark => ({
     kind: "bookmark",
     label: bookmark.name + (bookmark.remote ? `@${bookmark.remote}` : ""),
     detail: bookmark.remote ? "remote bookmark" : "bookmark",
