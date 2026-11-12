@@ -297,6 +297,22 @@ function changedReport(fetched: string, changes: string[]): string {
   return `Fetched ${fetched} · ${changes.length} bookmark${changes.length === 1 ? "" : "s"} changed\n${shown}${changes.length > 3 ? `, +${changes.length - 3} more` : ""}`;
 }
 
+/** The local bookmarks conflicted after a fetch that were not before it, which the fetch report names. */
+export function newConflicts(before: Bookmark[], after: Bookmark[]): string[] {
+  const was = new Set(before.filter(item => !item.remote && item.conflict).map(item => item.name));
+  return after.filter(item => !item.remote && item.conflict && !was.has(item.name)).map(item => item.name);
+}
+
+/**
+ * Adds a line naming the bookmarks a fetch left conflicted to its report. jj's own fetch output says only that the
+ * remote bookmark was updated, so without this a conflict reads as an ordinary update. It is a line of its own so the
+ * first line still fits on one row of the revision panel.
+ */
+export function withConflicts(report: string, conflicted: string[]): string {
+  if (!conflicted.length) return report;
+  return `${report}\nnow conflicted: ${conflicted.slice(0, 3).join(", ")}${conflicted.length > 3 ? `, +${conflicted.length - 3} more` : ""}`;
+}
+
 /** Summarizes what one fetch changed. */
 export function fetchReport(remote: string, output: string): string {
   return changedReport(remote, fetchedBookmarks(output).map(item => `${item.name} ${item.state}`));

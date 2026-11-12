@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Repository } from "../../src/repository/repository";
-import { fetchAllReport, fetchReport, pushCaution, pushChanges, remoteFailureHint } from "../../src/repository/remotes";
+import { fetchAllReport, fetchReport, newConflicts, pushCaution, pushChanges, remoteFailureHint, withConflicts } from "../../src/repository/remotes";
 import { pushRoute } from "../../src/repository/model";
 import { newBookmarkName } from "../../src/repository/mutation";
 import { fixture } from "../fixture";
@@ -219,6 +219,50 @@ test("publish never infers a conflicted bookmark, which the push would refuse", 
     await f.jj("new", "-m", "On top");
     expect(await f.repo.publishBookmarks((await f.repo.snapshot("@")).revisions[0]!, await f.repo.bookmarks())).toEqual({ names: [], advance: true });
   } finally { await f.cleanup(); await publisher.cleanup(); }
+});
+
+// The remote's feature moves to "Upstream work" and the local one to "Local work", both from "Initial feature", so the
+// next fetch leaves feature conflicted. The upstream commit reaches the remote through a temporary bookmark.
+async function divergeFeature(f: Awaited<ReturnType<typeof remoteFixture>>) {
+  await f.repo.apply(await f.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+  await f.jj("new", "feature", "-m", "Upstream work");
+  await f.jj("bookmark", "create", "upstream", "-r", "@");
+  await f.jj("git", "push", "--remote", "origin", "--bookmark", "exact:upstream");
+  const upstream = (await f.jj("log", "--no-graph", "-r", "upstream", "-T", "commit_id")).trim();
+  for (const args of [["update-ref", "refs/heads/feature", upstream], ["update-ref", "-d", "refs/heads/upstream"]]) {
+    expect(await Bun.spawn(["git", "--git-dir", f.remote, ...args]).exited).toBe(0);
+  }
+  await f.jj("bookmark", "forget", "--include-remotes", "upstream");
+  await f.jj("new", "feature", "-m", "Local work");
+  await f.jj("bookmark", "set", "feature", "-r", "@");
+  return upstream;
+}
+
+test("a fetch that leaves a local bookmark conflicted says so, and only that once", async () => {
+  const f = await remoteFixture();
+  try {
+    await divergeFeature(f);
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "origin" }))).toBe("Fetched origin · 1 bookmark changed\nfeature updated\nnow conflicted: feature");
+    expect((await f.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)?.conflict).toBe(true);
+    // The conflict is not new on the next fetch, so it is not reported again.
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "origin" }))).toBe("Fetched origin\nalready up to date");
+  } finally { await f.cleanup(); }
+});
+
+test("a fetch from every remote names the bookmarks it left conflicted", async () => {
+  const f = await remoteFixture();
+  try {
+    await divergeFeature(f);
+    const remotes = await f.repo.remotes();
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch-all", remotes }))).toBe("Fetched 1 remote · 1 bookmark changed\nfeature@origin updated\nnow conflicted: feature");
+  } finally { await f.cleanup(); }
+});
+
+test("new conflicts are only the local bookmarks that became conflicted", () => {
+  const bookmark = (name: string, conflict: boolean, remote = "") => ({ name, remote, targets: ["a"], conflict });
+  expect(newConflicts([bookmark("old", true), bookmark("b", false)], [bookmark("old", true), bookmark("b", true), bookmark("c", true, "origin"), bookmark("d", true)])).toEqual(["b", "d"]);
+  expect(withConflicts("Fetched origin\nalready up to date", [])).toBe("Fetched origin\nalready up to date");
+  expect(withConflicts("Fetched origin · 4 bookmarks changed\na updated", ["a", "b", "c", "d"])).toBe("Fetched origin · 4 bookmarks changed\na updated\nnow conflicted: a, b, c, +1 more");
 });
 
 // Puts a jj on PATH that runs the real one, then writes a bookmark from "another process" right after any command whose

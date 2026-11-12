@@ -1171,6 +1171,56 @@ test("the bookmark browser deletes on every tracking remote and says what untrac
   } finally { await t.cleanup(); for (const remote of remotes) await Bun.$`rm -rf ${remote}`.quiet(); }
 }, 15_000);
 
+test("a fetch that conflicts a bookmark says so, and the bookmark browser shows it without counts and resolves it", async () => {
+  const t = await setup();
+  const remote = `${t.f.path}-remote.git`;
+  try {
+    t.screen.resize(140, 30);
+    expect(await Bun.spawn(["git", "init", "--bare", remote], { stdout: "ignore", stderr: "ignore" }).exited).toBe(0);
+    await t.f.jj("git", "remote", "add", "origin", remote);
+    // The remote's feature moves to "Upstream work" and the local one to "Local work", so the fetch conflicts it.
+    await t.repo.apply(await t.repo.prepare({ kind: "git-push", remote: "origin", name: "feature" }));
+    await t.f.jj("new", "feature", "-m", "Upstream work");
+    await t.f.jj("bookmark", "create", "upstream", "-r", "@");
+    await t.f.jj("git", "push", "--remote", "origin", "--bookmark", "exact:upstream");
+    const upstream = (await t.f.jj("log", "--no-graph", "-r", "upstream", "-T", "commit_id")).trim();
+    for (const args of [["update-ref", "refs/heads/feature", upstream], ["update-ref", "-d", "refs/heads/upstream"]]) {
+      expect(await Bun.spawn(["git", "--git-dir", remote, ...args]).exited).toBe(0);
+    }
+    await t.f.jj("bookmark", "forget", "--include-remotes", "upstream");
+    await t.f.jj("new", "feature", "-m", "Local work");
+    await t.f.jj("bookmark", "set", "feature", "-r", "@");
+    t.screen.mockInput.pressKey("r", { ctrl: true });
+    await t.until("[feature ↑1]");
+    await t.settled();
+    t.screen.mockInput.pressKey("g");
+    await t.overlayReady("Fetch origin");
+    t.screen.mockInput.pressKey("f");
+    await t.until("now conflicted: feature");
+    await t.until("[feature!]");
+    // The log shows the local badge on each target and origin's on its own; the @git mirror adds nothing.
+    expect(t.screen.captureCharFrame()).toContain("[feature@origin]");
+    expect(t.screen.captureCharFrame()).not.toContain("feature@git");
+    t.screen.mockInput.pressKey("b");
+    await t.overlayReady("Git remotes");
+    const row = t.chooser().options.find(option => option.value === "feature !")!;
+    expect(row.description).toStartWith("conflicted with origin · ");
+    expect(row.description).not.toContain("behind");
+    t.choose("feature !");
+    await t.until("Keep local");
+    expect(t.chooser().options.map(option => option.value)).toEqual(["Keep local", "Set to feature@origin", "Move bookmark", "Rename bookmark", "Delete bookmark", "Untrack feature@origin"]);
+    expect(t.chooser().options[0]!.description).toContain("Local work");
+    expect(t.chooser().options[1]!.description).toContain("Upstream work");
+    t.choose("Set to feature@origin");
+    await t.overlayReady("Review before applying");
+    expect(t.screen.captureCharFrame()).toContain(`New target:`);
+    t.screen.mockInput.pressEnter();
+    await t.until("[feature]");
+    const feature = (await t.repo.bookmarks()).find(item => item.name === "feature" && !item.remote)!;
+    expect(feature).toMatchObject({ conflict: false, targets: [upstream] });
+  } finally { await t.cleanup(); await Bun.$`rm -rf ${remote}`.quiet(); }
+}, 15_000);
+
 test("dragging a change previews a rebase and applies only after confirmation", async () => {
   const t = await setup();
   try {

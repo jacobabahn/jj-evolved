@@ -1,5 +1,5 @@
 import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type Resolution, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
-import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, prepareFetchAll, applyFetchAll, type NetworkScope } from "./remotes";
+import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, prepareFetchAll, applyFetchAll, newConflicts, withConflicts, type NetworkScope } from "./remotes";
 import { read } from "./jj-helper";
 import { CancelledError, run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
@@ -387,7 +387,15 @@ export class Repository {
   async apply(prepared: PreparedMutation): Promise<string | null> {
     await this.status();
     if (await this.operationId() !== prepared.operationId) throw new Error("Repository changed since this preview. Review the action again before applying.");
-    if (prepared.action.kind === "git-fetch-all") return await applyFetchAll(this.root, prepared.action, prepared.operationId, this.withNetwork);
+    if (prepared.action.kind === "git-fetch-all" || prepared.action.kind === "git-fetch") {
+      const before = await this.bookmarks();
+      const report = prepared.action.kind === "git-fetch-all"
+        ? await applyFetchAll(this.root, prepared.action, prepared.operationId, this.withNetwork)
+        : await applyRemote(this.root, prepared, before, this.withNetwork);
+      // The fetch already happened, so failing to read the bookmarks again only leaves its conflicts unreported.
+      const after = await this.bookmarks().catch(() => before);
+      return report === null ? null : withConflicts(report, newConflicts(before, after));
+    }
     if (prepared.remoteUrl !== undefined) return await applyRemote(this.root, prepared, await this.bookmarks(), this.withNetwork);
     if (prepared.action.kind === "split") await runSplit(this.root, prepared.action);
     else await run(this.root, mutationArgs(prepared.action));
