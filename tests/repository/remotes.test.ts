@@ -480,6 +480,99 @@ test("a non-ASCII bookmark, which jj quotes in push output, still stops for revi
   } finally { await f.cleanup(); }
 });
 
+test("bookmark names with revset operators act on exactly the named bookmark", async () => {
+  const f = await remoteFixture();
+  try {
+    const revision = (await f.repo.snapshot("feature")).revisions[0]!;
+    // `a` and `b` exist too, so an unquoted `a|b` or `a&b` would reach them instead.
+    for (const name of ["a", "b", "a|b", "a&b", "a@b", "p(q)", "o'k"]) await f.repo.apply(await f.repo.prepare({ kind: "bookmark-create", name, revision }));
+    const local = async () => (await f.repo.bookmarks()).filter(item => !item.remote).map(item => item.name).sort();
+    expect(await local()).toEqual(["a", "a&b", "a@b", "a|b", "b", "feature", "o'k", "p(q)"].sort());
+    for (const name of ["a|b", "a&b", "a@b"]) {
+      const preview = await f.repo.prepare({ kind: "git-push", remote: "origin", name });
+      expect(preview.caution).toBeUndefined();
+      expect(await f.repo.apply(preview)).toMatch(new RegExp(`^Pushed ${name.replace(/[|&]/g, "\\$&")} to origin\nadded at [0-9a-f]{8}$`));
+    }
+    expect((await refs(f.remote)).split("\n").filter(Boolean).map(line => line.split(" ")[0]).sort()).toEqual(["refs/heads/a&b", "refs/heads/a@b", "refs/heads/a|b"]);
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-untrack", remote: "origin", name: "a|b" }));
+    expect((await f.repo.bookmarks()).find(item => item.remote === "origin" && item.name === "a|b")?.tracked).toBe(false);
+    expect((await f.repo.bookmarks()).find(item => item.remote === "origin" && item.name === "a&b")?.tracked).toBe(true);
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-track", remote: "origin", name: "a|b" }));
+    expect((await f.repo.bookmarks()).find(item => item.remote === "origin" && item.name === "a|b")?.tracked).toBe(true);
+    const next = (await f.repo.snapshot("@")).revisions[0]!;
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-move", name: "a&b", revision: next }));
+    expect((await f.repo.bookmarks()).find(item => !item.remote && item.name === "a&b")?.targets).toEqual([next.commitId]);
+    expect((await f.repo.bookmarks()).find(item => !item.remote && item.name === "a")?.targets).toEqual([revision.commitId]);
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-rename", name: "p(q)", newName: "c,d" }));
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "o'k" }));
+    await f.repo.apply(await f.repo.prepare({ kind: "bookmark-delete", name: "a|b", remote: "origin", push: true }));
+    expect(await local()).toEqual(["a", "a&b", "a@b", "b", "c,d", "feature"].sort());
+    expect((await refs(f.remote)).split("\n").filter(Boolean).map(line => line.split(" ")[0]).sort()).toEqual(["refs/heads/a&b", "refs/heads/a@b"]);
+  } finally { await f.cleanup(); }
+});
+
+test("a push that matches no bookmark fails instead of reporting it up to date", () => {
+  const output = "Warning: No matching bookmarks for names: a, b\nNothing changed.\n";
+  expect(() => pushCaution("a&b", "origin", output)).toThrow("jj found no bookmark named a&b to push to origin, so nothing was pushed.");
+});
+
+// Remote names jj prints quoted in `jj git remote list`, such as `"é"`, `"x@y"` and `"my|origin"`.
+async function quotedRemoteFixture() {
+  const f = await remoteFixture();
+  const names = ["é", "x@y", "my|origin"];
+  const paths: string[] = [];
+  for (const name of names) {
+    const path = await mkdtemp(join(tmpdir(), "jj-remote-test-"));
+    const proc = Bun.spawn(["git", "init", "--bare", path], { stdout: "ignore", stderr: "pipe" });
+    if (await proc.exited !== 0) throw new Error(await new Response(proc.stderr).text());
+    await f.jj("git", "remote", "add", name, path);
+    paths.push(path);
+  }
+  return { ...f, names, paths, cleanup: async () => { await f.cleanup(); await Promise.all(paths.map(path => rm(path, { recursive: true, force: true }))); } };
+}
+
+test("remotes that jj quotes have one unquoted name for push, fetch, track, untrack and deletion", async () => {
+  const f = await quotedRemoteFixture();
+  try {
+    expect(await f.repo.remotes()).toEqual([{ name: "origin", url: f.remote }, ...f.names.map((name, index) => ({ name, url: f.paths[index]! }))]
+      .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+    await f.jj("config", "set", "--repo", "git.push", JSON.stringify("my|origin"));
+    expect((await f.repo.defaultPushRemote(await f.repo.remotes()))?.name).toBe("my|origin");
+    const target = (await f.repo.bookmarks()).find(item => item.name === "feature")!.targets[0]!;
+    // jj refuses to push one new bookmark to a second remote, so each remote gets its own bookmark.
+    const pushed = f.names.map((_, index) => `to-${index}`);
+    for (const [index, remote] of f.names.entries()) {
+      const name = pushed[index]!;
+      await f.jj("bookmark", "create", name, "-r", "feature");
+      const preview = await f.repo.prepare({ kind: "git-push", remote, name });
+      expect(preview.summary).toContain(`Remote: ${remote}\n`);
+      expect(await f.repo.apply(preview)).toMatch(new RegExp(`^Pushed ${name} to ${remote.replace(/[|]/g, "\\|")}\nadded at`));
+      expect(await refs(f.paths[index]!)).toBe(`refs/heads/${name} ${target}\n`);
+    }
+    expect(await refs(f.remote)).toBe("");
+    for (const [index, remote] of f.names.entries()) {
+      const name = pushed[index]!;
+      await f.repo.apply(await f.repo.prepare({ kind: "bookmark-untrack", remote, name }));
+      expect((await f.repo.bookmarks()).find(item => item.remote === remote && item.name === name)?.tracked).toBe(false);
+      await f.repo.apply(await f.repo.prepare({ kind: "bookmark-track", remote, name }));
+      expect((await f.repo.bookmarks()).find(item => item.remote === remote && item.name === name)?.tracked).toBe(true);
+    }
+    // A publisher adds a bookmark on `my|origin` only; fetching `my|origin` must reach it, not `origin`.
+    const publisher = await fixture();
+    try {
+      await publisher.jj("git", "remote", "add", "my|origin", f.paths[2]!);
+      await publisher.jj("bookmark", "create", "-r", "@", "--", "published");
+      await publisher.jj("git", "push", "--remote", "my|origin", "--bookmark", "exact:published");
+    } finally { await publisher.cleanup(); }
+    expect(await f.repo.apply(await f.repo.prepare({ kind: "git-fetch", remote: "my|origin" }))).toBe("Fetched my|origin · 1 bookmark changed\npublished new");
+    expect((await f.repo.bookmarks()).find(item => item.remote === "my|origin" && item.name === "published")).toBeDefined();
+    const deletion = await f.repo.prepare({ kind: "bookmark-delete", name: "to-0", remote: "é", push: true });
+    expect(deletion.summary).toContain("Then push the deletion to é");
+    expect(await f.repo.apply(deletion)).toStartWith("Deleted to-0 here and on é");
+    expect(await refs(f.paths[0]!)).toBe("");
+  } finally { await f.cleanup(); }
+});
+
 test("fetch and push report when there was nothing to do", async () => {
   const f = await remoteFixture();
   try {

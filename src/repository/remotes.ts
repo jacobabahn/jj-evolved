@@ -2,14 +2,26 @@ import { label, type Bookmark, type Mutation, type PreparedMutation, type Publis
 import { CancelledError, NETWORK_TIMEOUT_MS, run } from "./jj-process";
 import { read } from "./jj-helper";
 import { logRevisions } from "./log-snapshot";
-import { mutationArgs } from "./mutation";
+import { exactName, literalName, mutationArgs } from "./mutation";
 
+// jj prints a bookmark or remote name bare, or as a quoted string literal when it is not a plain symbol, such as `"é"`,
+// `"a b"` or `"my|origin"`.
+const quotedName = String.raw`"(?:[^"\\]|\\.)*"`;
+const quotedOrBare = String.raw`${quotedName}|\S+`;
+const bookmarkName = String.raw`(${quotedName}|\S+?)`;
+function unquote(name: string): string {
+  if (!name.startsWith('"')) return name;
+  try { return String(JSON.parse(name)); } catch { return name.slice(1, -1); }
+}
+
+// jj quotes a remote name that is not a plain symbol, such as `"é"` or `"my|origin"`. The app keeps names unquoted, as
+// bookmark remotes are, and mutationArgs quotes each argument for the syntax that argument takes.
 export async function remoteList(root: string): Promise<Remote[]> {
   const output = await read(root, { kind: "remotes" }, () => run(root, ["--ignore-working-copy", "git", "remote", "list"]));
   return output.trim().split("\n").filter(Boolean).map(line => {
-    const match = /^(\S+)\s+(.+)$/.exec(line);
+    const match = new RegExp(String.raw`^(${quotedOrBare})\s+(.+)$`).exec(line);
     if (!match?.[1] || !match[2]) throw new Error("Unexpected jj remote list output.");
-    return { name: match[1], url: match[2] };
+    return { name: unquote(match[1]), url: match[2] };
   });
 }
 
@@ -59,7 +71,7 @@ async function preparePublish(root: string, action: PublishAction, bookmarks: Bo
   if (!action.name) throw new Error("Enter a bookmark name.");
   const { local, remote, placed } = publishState(action, bookmarks);
   const target = action.revision.commitId;
-  const commits = await logRevisions(root, `(::${target} ~ ::remote_bookmarks(remote=exact:${JSON.stringify(action.remote)})) ~ root()`, operationId);
+  const commits = await logRevisions(root, `(::${target} ~ ::remote_bookmarks(remote=${exactName(action.remote)})) ~ root()`, operationId);
   // JJ rejects these at push time, after the bookmark would already have been created.
   const blocked = commits.find(item => item.conflict || !item.description.trim());
   if (blocked) throw new Error(`JJ will not push ${label(blocked)} because it ${blocked.conflict ? "has conflicts. Resolve them" : "has no description. Describe it"} first.`);
@@ -85,7 +97,7 @@ async function applyPublish(root: string, action: PublishAction, bookmarks: Book
   const { local, remote, placed } = publishState(action, bookmarks);
   const interrupted = `Another jj command changed the repository during this publish, so nothing was pushed to ${action.remote}. Check the bookmark ${action.name}, then publish again.`;
   let pinned = operationId;
-  if (!placed) pinned = await localStep(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", action.name], pinned, interrupted);
+  if (!placed) pinned = await localStep(root, ["bookmark", ...(local ? ["set", "--allow-backwards"] : ["create"]), "--revision", action.revision.commitId, "--", literalName(action.name)], pinned, interrupted);
   if (!remote) pinned = await localStep(root, mutationArgs({ kind: "bookmark-track", remote: action.remote, name: action.name }), pinned, interrupted);
   try { return pushReport("Published", action, await network(root, ["--at-op", pinned, ...mutationArgs(action)], signal)); }
   catch (error) {
@@ -114,6 +126,7 @@ async function applyDeletion(root: string, action: DeleteAction & { remote: stri
     `Another jj command changed the repository during this deletion, so nothing was pushed to ${action.remote}. The local bookmark ${action.name} was deleted; to delete it on ${action.remote} too, choose ${action.name} in the bookmark browser, then Push deletion.`);
   try {
     const output = await network(root, ["--at-op", pinned, ...mutationArgs({ kind: "git-push", remote: action.remote, name: action.name })], signal);
+    assertMatched(action.name, action.remote, output);
     const change = pushChanges(output).find(item => item.name === action.name);
     return `Deleted ${action.name} here and on ${action.remote}${change?.kind === "delete" ? `\nwas ${short(change.from)}` : ""}`;
   }
@@ -154,12 +167,6 @@ async function network(root: string, args: string[], signal?: AbortSignal): Prom
 
 export interface PushChange { name: string; kind: "add" | "forward" | "backward" | "sideways" | "delete"; from?: string; to?: string }
 
-// jj prints a bookmark name bare, or as a quoted string literal when it is not plain ASCII, such as `"é"` or `"a b"`.
-const bookmarkName = String.raw`("(?:[^"\\]|\\.)*"|\S+?)`;
-function unquote(name: string): string {
-  if (!name.startsWith('"')) return name;
-  try { return String(JSON.parse(name)); } catch { return name.slice(1, -1); }
-}
 
 /** Reads the bookmark lines `jj git push` prints, with or without --dry-run. */
 export function pushChanges(output: string): PushChange[] {
@@ -189,11 +196,19 @@ function describeChange(change: PushChange): string {
 // jj prints this, and no bookmark line, when the remote already has the pushed target.
 const unchanged = (output: string) => /^Nothing changed\.$/m.test(output);
 
+// jj also prints "Nothing changed." when --bookmark matched no bookmark at all, after this warning. That push did
+// nothing, so it is a failure, never "already up to date".
+function assertMatched(name: string, remote: string, output: string): void {
+  if (/^Warning: No matching bookmarks/m.test(output)) throw new Error(`jj found no bookmark named ${name} to push to ${remote}, so nothing was pushed. Reload bookmarks.\n${output.trim()}`);
+}
+
 /**
  * Why a push should stop for review: it deletes the remote bookmark or drops commits from it.
- * A dry run whose effect on the bookmark cannot be read also stops, so an unexpected output format fails safe.
+ * A dry run whose effect on the bookmark cannot be read also stops, so an unexpected output format fails safe. A dry
+ * run that matched no bookmark throws.
  */
 export function pushCaution(name: string, remote: string, dryRun: string): string | undefined {
+  assertMatched(name, remote, dryRun);
   const change = pushChanges(dryRun).find(item => item.name === name);
   if (!change) return unchanged(dryRun) ? undefined : `jj's dry run does not say how this push changes ${name}@${remote}; check its output below.`;
   if (change.kind === "delete") return `This deletes ${change.name} on ${remote}.`;
@@ -202,6 +217,7 @@ export function pushCaution(name: string, remote: string, dryRun: string): strin
 }
 
 function pushReport(verb: string, action: { remote: string; name: string }, output: string): string {
+  assertMatched(action.name, action.remote, output);
   const change = pushChanges(output).find(item => item.name === action.name);
   if (change) return `${verb} ${action.name} to ${action.remote}\n${describeChange(change)}`;
   return unchanged(output) ? `${action.name} is already up to date on ${action.remote}` : `${verb} ${action.name} to ${action.remote}`;
@@ -209,7 +225,7 @@ function pushReport(verb: string, action: { remote: string; name: string }, outp
 
 /** Reads the bookmark lines `jj git fetch` prints, such as `bookmark: main@origin [updated] tracked`. */
 function fetchedBookmarks(output: string): { name: string; state: string }[] {
-  return [...output.matchAll(new RegExp(String.raw`^bookmark: ${bookmarkName}@\S+ \[(\w+)\]`, "gm"))].map(match => ({ name: unquote(match[1] ?? ""), state: match[2] ?? "" }));
+  return [...output.matchAll(new RegExp(String.raw`^bookmark: ${bookmarkName}@(?:${quotedOrBare}) \[(\w+)\]`, "gm"))].map(match => ({ name: unquote(match[1] ?? ""), state: match[2] ?? "" }));
 }
 
 function changedReport(fetched: string, changes: string[]): string {
