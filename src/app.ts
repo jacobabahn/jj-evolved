@@ -23,7 +23,7 @@ import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { EllipsisText, fitText } from "./ui/ellipsis-text";
 import { homedir } from "node:os";
-import { isRealRemote, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
+import { isRealRemote, pushRoute, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: (signal: AbortSignal) => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
 /** One extra key a review offers besides apply, such as also deleting a bookmark on its remote. */
@@ -1355,10 +1355,22 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
               if (stopped) return;
               const names = [...new Set(bookmarks.filter(item => !item.remote || item.remote === remote.name && item.tracked).map(item => item.name))];
               if (!names.length) { notice("Push bookmark", "No local or tracked deleted bookmarks to push."); return; }
-              pick(`Push to ${remote.name}`, names.map(name => ({ name,
-                description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Publish this bookmark" : "Delete the remote bookmark after a review",
-                choose: () => applyNow({ kind: "git-push", remote: remote.name, name }),
-              })));
+              // jj will not create a remote bookmark while the local one tracks another remote, so those go through a
+              // publish, which tracks it first; the publish needs the revision the bookmark is on.
+              const routes = await Promise.all(names.map(async name => {
+                const route = pushRoute(name, remote.name, bookmarks);
+                if (route.kind !== "publish") return route;
+                const found = await repository.resolve(route.commitId, 1);
+                return found.kind === "one" ? { ...route, revision: found.revision } : { kind: "push" as const };
+              }));
+              if (stopped) return;
+              pick(`Push to ${remote.name}`, names.map((name, index): Choice => {
+                const route = routes[index]!;
+                if (route.kind === "refuse") return { name, description: `Track ${name}@${remote.name} first`, choose: () => notice("Push bookmark", route.reason) };
+                if (route.kind === "publish") return { name, description: `Track ${name}@${remote.name}, then publish this bookmark`, choose: () => applyNow({ kind: "git-publish", remote: remote.name, name, revision: route.revision }) };
+                return { name, description: bookmarks.some(item => item.name === name && !item.remote && item.targets.length) ? "Publish this bookmark" : "Delete the remote bookmark after a review",
+                  choose: () => applyNow({ kind: "git-push", remote: remote.name, name }) };
+              }));
             }, true);
           } },
         ]),

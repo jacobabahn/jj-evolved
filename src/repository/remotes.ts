@@ -1,4 +1,4 @@
-import { label, type Bookmark, type Mutation, type PreparedMutation, type PublishBookmarks, type Remote, type RemoteMutation, type Revision } from "./model";
+import { label, pushRoute, type Bookmark, type Mutation, type PreparedMutation, type PublishBookmarks, type Remote, type RemoteMutation, type Revision } from "./model";
 import { CancelledError, NETWORK_TIMEOUT_MS, run } from "./jj-process";
 import { read } from "./jj-helper";
 import { logRevisions } from "./log-snapshot";
@@ -157,12 +157,22 @@ async function localStep(root: string, args: string[], parent: string, interrupt
 export type NetworkScope = <T>(work: (signal: AbortSignal) => Promise<T>) => Promise<T>;
 const uncancellable: NetworkScope = work => work(new AbortController().signal);
 
+// jj refuses these before it contacts the remote, and its own hint says what to do, so they get no network hint.
+const localRefusal = /^Error: (?:Refusing to create new remote bookmark|Non-tracking remote bookmark|No git remote named|No git remotes to fetch from|Won't push commit|Bookmark .+ is conflicted)/m;
+
+/** The hint for a failed fetch or push, or "" when jj refused it locally and the failure did not come from the remote. */
+export function remoteFailureHint(message: string): string {
+  return localRefusal.test(message) ? "" : "Remote operation failed. For authentication, configure Git credentials or SSH in your terminal. After a rejected push, fetch and push again. If the connection was interrupted, fetch to check the remote before retrying.";
+}
+
 // A large fetch can take minutes, so network commands get a long backstop timeout and the caller cancels them through the signal.
 async function network(root: string, args: string[], signal?: AbortSignal): Promise<string> {
   try { return await run(root, args, true, {}, { timeoutMs: NETWORK_TIMEOUT_MS, signal }); }
   catch (error) {
     if (error instanceof CancelledError) throw error;
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRemote operation failed. For authentication, configure Git credentials or SSH in your terminal. After a rejected push, fetch and push again. If the connection was interrupted, fetch to check the remote before retrying.`);
+    const message = error instanceof Error ? error.message : String(error);
+    const hint = remoteFailureHint(message);
+    throw new Error(hint ? `${message}\n${hint}` : message);
   }
 }
 
@@ -310,6 +320,9 @@ export async function prepareRemote(root: string, action: RemoteMutation, bookma
     const previous = bookmarks.find(item => item.remote === remote.name && item.name === action.name);
     if (!local && !previous?.tracked) throw new Error("No local or tracked deleted bookmark to push.");
     if (local?.conflict || previous?.conflict) throw new Error("Resolve this bookmark's conflict before pushing.");
+    const route = pushRoute(action.name, remote.name, bookmarks);
+    if (route.kind === "refuse") throw new Error(route.reason);
+    if (route.kind === "publish") throw new Error(`${action.name} tracks ${route.tracking.join(", ")}, so jj will not create ${action.name}@${remote.name} until it is tracked. Push it from Git remotes › ${remote.name} › Push bookmark, which tracks it first.`);
     summary += `Push only bookmark: ${action.name}\nLast fetched target: ${previous?.targets.join(", ") || "(absent)"}\nNew target: ${local?.targets.join(", ") || "(delete remote bookmark)"}\n\n`;
     const dryRun = await scope(signal => network(root, ["--at-op", operationId, ...mutationArgs(action), "--dry-run"], signal));
     caution = pushCaution(action.name, remote.name, dryRun);
