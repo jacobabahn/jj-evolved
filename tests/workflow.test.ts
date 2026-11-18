@@ -83,7 +83,7 @@ test("destination search reaches old revisions in bookmark, history form and inl
       expect(t.node<SelectRenderable>("history-choices").options).toHaveLength(1);
       t.screen.mockInput.pressEnter();
       await t.text("Preview ready");
-      expect(t.node<SelectRenderable>("history-fields").options[0]?.name).toContain(target.changeId.slice(0, 8));
+      expect(t.node<SelectRenderable>("history-fields").options.find(option => option.name.startsWith("Destination:"))?.name).toContain(target.changeId.slice(0, 8));
       await t.escape();
     }
     t.screen.mockInput.pressKey("r");
