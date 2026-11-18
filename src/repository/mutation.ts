@@ -1,4 +1,4 @@
-import type { Mutation } from "./model";
+import type { Mutation, RebaseMutation } from "./model";
 
 export function literalPath(path: string): string { return `root-file:${JSON.stringify(path)}`; }
 
@@ -23,6 +23,17 @@ export function newBookmarkName(name: string): string {
   return literalName(name);
 }
 
+function rebaseTargetArgs(action: RebaseMutation): string[] {
+  switch (action.target ?? "onto") {
+    case "onto": return ["--onto", action.destination.commitId];
+    case "before": return ["--insert-before", action.destination.commitId];
+    case "after": return ["--insert-after", action.destination.commitId];
+    case "between":
+      if (!action.insertBefore) throw new Error("Choose the revision to insert before.");
+      return ["--insert-after", action.destination.commitId, "--insert-before", action.insertBefore.commitId];
+  }
+}
+
 export function mutationArgs(action: Mutation): string[] {
   let args: string[];
   switch (action.kind) {
@@ -41,7 +52,7 @@ export function mutationArgs(action: Mutation): string[] {
     case "abandon": args = ["abandon", action.revision.commitId]; break;
     case "rebase":
     case "squash": args = action.kind === "rebase"
-      ? ["rebase", action.descendants ? "--source" : "--revisions", action.revision.commitId, "--onto", action.destination.commitId]
+      ? ["rebase", action.descendants ? "--source" : "--revisions", action.revision.commitId, ...rebaseTargetArgs(action)]
       : ["squash", "--from", action.revision.commitId, "--into", action.destination.commitId, "--message", action.description, "--", ...action.files.map(literalPath)]; break;
     case "split": args = ["split", "--revision", action.revision.commitId, "--message", action.description, "--", ...action.files.map(literalPath)]; break;
     case "bookmark-create": args = ["bookmark", "create", "--revision", action.revision.commitId, "--", newBookmarkName(action.name)]; break;

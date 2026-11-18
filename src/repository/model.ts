@@ -38,6 +38,28 @@ export type RemoteMutation =
   | { kind: "git-publish"; remote: string; name: string; revision: Revision }
   | { kind: "bookmark-track" | "bookmark-untrack"; remote: string; name: string };
 
+/**
+ * Where a rebase puts its changes: onto the destination (jj's --onto, the default), before it (--insert-before, which
+ * also moves the destination and its descendants onto them), after it (--insert-after, which also moves the
+ * destination's children and their descendants onto them), or between two revisions: after the destination and
+ * before insertBefore (both flags together).
+ */
+export type RebaseTarget = "onto" | "before" | "after" | "between";
+export const rebaseTargets: readonly RebaseTarget[] = ["onto", "before", "after", "between"];
+export type RebaseMutation = { kind: "rebase"; revision: Revision; destination: Revision; descendants: boolean; target?: RebaseTarget; insertBefore?: Revision };
+
+/** The rebase's target in words, such as "onto abc" or "between abc and def", naming revisions with `name`. */
+export function rebaseTargetText(action: RebaseMutation, name: (revision: Revision) => string): string {
+  const target = action.target ?? "onto";
+  if (target === "between") return `between ${name(action.destination)} and ${action.insertBefore ? name(action.insertBefore) : "…"}`;
+  return `${target} ${name(action.destination)}`;
+}
+
+/** A target's name for controls and hints, such as "Insert before". */
+export function rebaseTargetName(target: RebaseTarget): string {
+  return { onto: "Onto", before: "Insert before", after: "Insert after", between: "Between two revisions" }[target];
+}
+
 export type Mutation =
   | RemoteMutation
   // Fetches each listed remote in turn; the names and URLs are the ones the user chose from, checked again before fetching.
@@ -45,7 +67,7 @@ export type Mutation =
   | { kind: "describe"; revision: Revision; description: string }
   | { kind: "new"; parent: Revision }
   | { kind: "edit" | "abandon" | "absorb"; revision: Revision }
-  | { kind: "rebase"; revision: Revision; destination: Revision; descendants: boolean }
+  | RebaseMutation
   | { kind: "squash"; revision: Revision; destination: Revision; description: string; files: string[] }
   | { kind: "split"; revision: Revision; files: string[]; description: string; secondDescription: string }
   | { kind: "bookmark-create" | "bookmark-move"; name: string; revision: Revision }
@@ -59,7 +81,7 @@ export type Mutation =
  * already current, that there is no trunk bookmark (which a fetch may bring), or why it cannot be rebased.
  */
 export type TrunkRebase =
-  | { kind: "rebase"; action: Extract<Mutation, { kind: "rebase" }> }
+  | { kind: "rebase"; action: RebaseMutation }
   | { kind: "current" | "no-trunk" | "blocked"; reason: string };
 
 export type InteractiveAction =
@@ -114,6 +136,16 @@ export interface EvolutionPage { operationId: string; entries: EvolutionEntry[];
 
 export function label(revision: Revision): string {
   return `${shortChangeId(revision)} / ${revision.commitId.slice(0, 12)} ${revision.description.trim() || "(no description)"}`;
+}
+
+/** The review's line for where a rebase puts its changes, naming every boundary in full. */
+export function rebaseTargetSummary(action: RebaseMutation): string {
+  switch (action.target ?? "onto") {
+    case "onto": return `Onto ${label(action.destination)}`;
+    case "before": return `Target: insert before ${label(action.destination)}`;
+    case "after": return `Target: insert after ${label(action.destination)}`;
+    case "between": return `Target: between two revisions\nAfter  ${label(action.destination)}\nBefore ${action.insertBefore ? label(action.insertBefore) : "(not chosen)"}`;
+  }
 }
 
 export function rebaseScopeSummary(revisions: Revision[]): string {
