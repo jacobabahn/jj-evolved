@@ -52,13 +52,13 @@ test("inline between rebase keeps its target and scope in view and corrects eith
   // Switching the target keeps the scope.
   expect(hint(ui)).toContain("[x] include descendants");
   expect(hint(ui)).toContain("target: between two revisions");
-  expect(footer(ui)).toContain("Enter next boundary");
+  expect(footer(ui)).toContain("Enter next");
   // The first boundary is picked wrong, then corrected from the second.
   await cursorTo(ui, d);
   ui.key("RETURN");
   await ui.until("Rebase between: before");
   expect(hint(ui)).toContain(`after ${id(d)}, before`);
-  expect(footer(ui)).toContain("Esc back to after");
+  expect(footer(ui)).toContain("Esc back");
   ui.key("ESCAPE");
   await ui.until("Rebase between: after");
   await cursorTo(ui, b);

@@ -484,6 +484,65 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "rebase-targets", title: "Rebase insert after and between, inline and in the form, at 80x24",
+    async run(ui) {
+      // Initial feature has children B and X; B is a branch point with children C and D. X, the working copy, moves.
+      await ui.f.jj("describe", "-m", "B");
+      await ui.f.jj("new", "-m", "C");
+      await ui.f.jj("new", "-m", "D", "description(exact:'B\n')");
+      await ui.f.jj("new", "-m", "X", "feature");
+      ui.key("r", { ctrl: true });
+      await ui.until("6 revisions");
+      await ui.resize(80, 24);
+      await ui.settled();
+      const before = await ui.repo.operationId();
+      const revision = async (name: string) => (await ui.repo.snapshot(`description(exact:${JSON.stringify(name + "\n")})`)).revisions[0]!;
+      const [b, c, x] = [await revision("B"), await revision("C"), await revision("X")];
+      const cursorTo = async (target: { commitId: string }) => {
+        const log = ui.node("revisions") as unknown as { revisions: { commitId: string }[]; getSelectedIndex(): number };
+        const index = log.revisions.findIndex(item => item.commitId === target.commitId);
+        for (let at = log.getSelectedIndex(); at !== index; at += at < index ? 1 : -1) ui.key(at < index ? "j" : "k");
+        await ui.settled();
+      };
+      await cursorTo(x);
+      ui.key("r");
+      await ui.until("Rebase: choose destination");
+      ui.key("m"); ui.key("m");
+      await ui.until("Rebase: insert after");
+      await cursorTo(b);
+      await ui.capture("Inline rebase with the insert after target on a branch point");
+      ui.key("RETURN");
+      await ui.until("Rebase preview · insert after");
+      await ui.until("After rebase");
+      await ui.capture("Insert after review marks the destination's children that move along");
+      ui.key("ESCAPE");
+      await ui.until("Rebase: insert after");
+      ui.key("m");
+      await ui.until("Rebase between: after");
+      ui.key("RETURN");
+      await ui.until("Rebase between: before");
+      await cursorTo(c);
+      await ui.capture("Between: the first boundary is kept while the second is chosen");
+      ui.key("RETURN");
+      await ui.until("Rebase preview · between two revisions");
+      await ui.until("After rebase");
+      await ui.capture("Between review names both boundaries");
+      ui.key("ESCAPE"); await ui.until("Rebase between: before");
+      ui.key("ESCAPE"); await ui.until("Rebase between: after");
+      ui.key("ESCAPE"); await ui.until("Cancelled.");
+      assert.equal(await ui.repo.operationId(), before);
+      await cursorTo(x);
+      ui.key(" ");
+      ui.choose("Rebase");
+      await ui.until("Destination: Choose a revision");
+      ui.key("m"); ui.key("m"); ui.key("m");
+      await ui.until("Target: Between two revisions");
+      await ui.until("Choose the revision to insert after first.");
+      await ui.capture("The form's target row; between asks for both boundaries");
+      assert.equal(await ui.repo.operationId(), before);
+    },
+  },
+  {
     name: "readme", title: "README rebase preview: move a login stack onto main",
     async run(ui) {
       const commit = async (file: string, message: string) => {

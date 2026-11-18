@@ -480,10 +480,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), "collapse"]], right: quit },
       ];
       case "inline": return [{
+        // Short labels, so Enter and the target still fit at 80 columns.
         left: [[move, "destination"], ...(prompt.action.kind === "rebase" ? [[key("rebaseScope"), "descendants"], [key("rebaseTarget"), `target: ${prompt.action.target}`]] as Shortcut[] : []),
-          ["Enter", prompt.action.kind === "rebase" && prompt.action.target === "between" && prompt.action.picking === "after" ? "next boundary" : "preview"],
+          ["Enter", prompt.action.kind === "rebase" && prompt.action.target === "between" && prompt.action.picking === "after" ? "next" : "preview"],
           [key("search"), "search"], [key("loadMore"), "load more"], [page, "scroll preview"], togglePreview],
-        right: [["Esc", prompt.action.kind === "rebase" && prompt.action.picking === "before" ? "back to after" : "cancel"]],
+        right: [["Esc", prompt.action.kind === "rebase" && prompt.action.picking === "before" ? "back" : "cancel"]],
       }];
       case "search": return [{ left: [["Enter", "keep"]], right: [["Esc", "cancel"]] }];
       case "bookmark": return [{ left: [["Enter", "set"], [bothKeys(key("nextCompletion"), "Shift-Tab"), "complete"]], right: [["Esc", "cancel"]] }];
