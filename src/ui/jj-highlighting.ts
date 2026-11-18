@@ -25,10 +25,11 @@ export function highlightJjText(text: string, prefixes: ReadonlyMap<string, stri
   };
   const lines = terminalText(text).split("\n");
   // A revision that moves in a pending rebase or squash is marked ● in preview trees; its row, both lines, takes the
-  // accent so the moved changes stand out from the rest of the tree.
+  // accent so the moved changes stand out from the rest of the tree. An existing change an insert moves along is
+  // marked ↳, in the accent, while its row keeps the ordinary text colour.
   let moving = false;
   return new StyledText(lines.flatMap((line, index) => {
-    const graph = /^([│─┬┴├┤┼┌┐└┘╭╮╰╯╷╵╲╱\\/| @○◆●×~]*)\b([k-z]{8,})\b(.*)$/.exec(line);
+    const graph = /^([│─┬┴├┤┼┌┐└┘╭╮╰╯╷╵╲╱\\/| @○◆●×~↳]*)\b([k-z]{8,})\b(.*)$/.exec(line);
     const revision = /^(Source |Squash from |Rebase from |Into |Change\s+)([k-z]+)(.*)$/.exec(line);
     const commit = /^(Commit\s+|Parents\s+)([0-9a-f ,]+)$/.exec(line);
     const bookmarks = /^(Bookmarks\s+)(.*)$/.exec(line);
@@ -39,7 +40,7 @@ export function highlightJjText(text: string, prefixes: ReadonlyMap<string, stri
       const prefix = graph[1] ?? "", tail = graph[3] ?? "";
       // Summary lines also start "● <change> / <commit>"; only tree rows carry their description on the next line.
       moving = prefix.includes("●") && !tail.startsWith(" / ");
-      chunks.push(...graphChunks(prefix, colors).map(chunk => chunk.text === "●" ? bold(fg(colors.accent)("●")) : chunk), ...idChunks(graph[2] ?? ""));
+      chunks.push(...graphChunks(prefix, colors).map(chunk => chunk.text === "●" ? bold(fg(colors.accent)("●")) : chunk.text === "↳" ? fg(colors.accent)("↳") : chunk), ...idChunks(graph[2] ?? ""));
       // The graph's own conflict marker, so a conflict reads the same in the graph and in preview trees.
       const conflict = tail.endsWith(" ! conflict");
       const body = conflict ? tail.slice(0, -11) : tail;

@@ -171,6 +171,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       ["@", "Working copy"],
       ["!", "Conflict"],
       ["●", "Change that will move in the pending rebase or squash"],
+      ["↳", "Existing change a rebase before, after or between moves onto the rebased changes"],
       ["*", "Search match"],
       ["+", "Revision outside the active revset in a temporary view"],
       ["~", "Omitted history in the ancestry lines"],

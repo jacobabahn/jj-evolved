@@ -307,7 +307,7 @@ export class Repository {
    * The existing revisions an insert moves besides the rebased ones: before moves the destination and its
    * descendants, after the destination's descendants, between the second boundary and its descendants.
    */
-  private async targetMoves(action: RebaseMutation, rebasing: Revision[], operationId: string): Promise<string> {
+  private async targetMoves(action: RebaseMutation, rebasing: Revision[], operationId: string): Promise<{ text: string; moves: Revision[] }> {
     const target = action.target ?? "onto";
     const anchor = target === "between" ? action.insertBefore! : action.destination;
     const moving = rebasing.map(revision => revision.commitId).join(" | ");
@@ -315,9 +315,9 @@ export class Repository {
     const limit = 200;
     const moves = await logRevisions(this.root, revset, operationId, limit + 1);
     const heading = target === "after" ? `Descendants of ${shortChangeId(anchor)}` : `${shortChangeId(anchor)} and its descendants`;
-    if (!moves.length) return `${heading}: none move.`;
+    if (!moves.length) return { text: `${heading}: none move.`, moves };
     const shown = moves.slice(0, limit);
-    return `${heading} also move onto the rebased changes (${moves.length > limit ? `more than ${limit}` : moves.length}):\n${shown.map(revision => "↳ " + label(revision)).join("\n")}`;
+    return { text: `${heading} also move onto the rebased changes (${moves.length > limit ? `more than ${limit}` : moves.length}):\n${shown.map(revision => "↳ " + label(revision)).join("\n")}`, moves: shown };
   }
 
   async prepare(action: Mutation): Promise<PreparedMutation> {
@@ -331,6 +331,8 @@ export class Repository {
     let remoteUrl: string | undefined;
     let caution: string | undefined;
     let rebasing: Revision[] = [];
+    // Existing revisions an insert moves onto the rebased ones; the trees mark them ↳.
+    let following: Revision[] = [];
     switch (action.kind) {
       case "git-fetch":
       case "git-push":
@@ -359,7 +361,11 @@ export class Repository {
           const affected = await logRevisions(this.root, `${action.revision.commitId}::`, operationId, 200);
           summary += `\nAffected revision/descendant context (up to 200):\n${affected.map(label).join("\n")}`;
         }
-        if (action.kind === "rebase" && (action.target ?? "onto") !== "onto") summary += `\n\n${await this.targetMoves(action, rebasing, operationId)}`;
+        if (action.kind === "rebase" && (action.target ?? "onto") !== "onto") {
+          const moved = await this.targetMoves(action, rebasing, operationId);
+          summary += `\n\n${moved.text}`;
+          following = moved.moves;
+        }
         summary += "\n\nDescendants may be rewritten and conflicts may result.";
         break;
       }
@@ -397,7 +403,7 @@ export class Repository {
       default: { const exhaustive: never = action; throw new Error(`Unknown action ${exhaustive}`); }
     }
     const trees = action.kind === "rebase" || action.kind === "squash"
-      ? await projectedTree(this.root, action, operationId, rebasing) : null;
+      ? await projectedTree(this.root, action, operationId, rebasing, following) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
     return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(caution ? { caution } : {}) };
   }
