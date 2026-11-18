@@ -50,6 +50,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `n` | Create an empty child of the selected revision immediately; `u` previews an undo |
 | `r` / `S` | Start inline rebase / squash; choose a destination in the graph and Enter previews |
 | Tab (during inline rebase) | Toggle whether descendants move with the change |
+| `m` (during inline rebase) | Switch the target: onto, insert before, insert after, or between two revisions |
 | `s` | Split selected files into a first change |
 | `a` | Preview abandoning the selected change |
 | `A` | Preview absorbing the selected change's edits into mutable ancestors |
@@ -92,9 +93,18 @@ Press `v`, or choose **Change evolution** from the Space menu, to browse previou
 
 For inline rebase or squash, press `r` or `S` on the source, then use `j`/`k` or arrows to choose a destination. Enter opens a preview; Enter again applies. Escape returns from the preview to destination selection, or cancels from the graph. The source stays marked with `●`. For rebase, the hint shows a checkbox such as `[ ] include descendants (3 changes) · Tab toggle`; Tab (the `rebaseScope` binding) checks or clears it. With descendants included, every moving change is marked `●`, and the hint shows the total count and how many are outside the loaded graph. Turning the option off clears the descendant markers. Inline squash moves all files and keeps the destination description. Errors keep the mode active so you can adjust the destination or scope.
 
+Rebase has four targets, which `m` (the `rebaseTarget` binding) cycles through while choosing; the hint, the pane title and the footer always show the current one, and switching keeps the scope:
+
+- **Onto** (`jj rebase --onto`): the change goes on top of the destination; the destination's children stay where they are.
+- **Insert before** (`--insert-before`): the change goes onto the destination's parents, and the destination and its descendants move onto it.
+- **Insert after** (`--insert-after`): the change goes onto the destination, and the destination's children and their descendants move onto it.
+- **Between two revisions** (both flags): Enter picks the revision to go after, then the revision to go before; only the second and its descendants move onto the change, so other children of the first stay put. While picking the second, Escape goes back to the first and keeps the second for when you get there again; Escape from the preview returns to the second.
+
+The preview names the target and both boundaries, lists the existing changes the insert moves along, and marks them `↳` in the trees. A combination jj refuses, such as inserting after a change but before its own ancestor, shows jj's error and keeps every choice.
+
 Rebase and squash previews show the current tree on the left and the proposed tree on the right with native graph lines, local bookmarks, and conflict markers. Both columns scroll together; long labels are clipped to preserve tree alignment. The view includes relevant descendants and parents, up to 40 revisions. Previewing does not change the working copy or live operation log.
 
-The rebase and squash menu forms show the source, destination, options, and preview in one form. Enter edits the selected field. Choose **Apply** after reviewing the preview. You can change a field without restarting the action. Press `p` to refresh a stale preview. With descendant scope enabled, the rebase form shows the number of moving changes and their full list before you choose a destination. Rebase previews mark moving changes in both trees and include the full list below them, even when the graph limits omit some descendants.
+The rebase and squash menu forms show the source, destination, options, and preview in one form. Enter edits the selected field. Choose **Apply** after reviewing the preview. You can change a field without restarting the action. The rebase form's **Target** row, above the destination, picks onto, insert before, insert after or between (Enter on it or `m` anywhere in the form); between adds **After** and **Before** rows, each chosen with the searchable picker and changeable on its own. Changing the target keeps the scope and the chosen revisions, and asks for a fresh preview before Apply. Press `p` to refresh a stale preview. With descendant scope enabled, the rebase form shows the number of moving changes and their full list before you choose a destination. Rebase previews mark moving changes in both trees and include the full list below them, even when the graph limits omit some descendants.
 
 ## External diff editors and Hunk
 
@@ -206,7 +216,7 @@ change an action in one place only:
 | --- | --- | --- |
 | `revisions` | Browsing the revision list and the preview beside it | every browse action in the table below |
 | `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `help`, `quit` |
-| `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `loadMore`, `togglePreview` |
+| `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `rebaseTarget`, `loadMore`, `togglePreview` |
 | `menu` | Action menus, pickers, the theme chooser, help, and the rebase and squash form | `down`, `up`, `back`, `help` |
 | `prompt` | The revset prompt, bookmark names, the description editor and quick inputs | `nextCompletion`, `previousCompletion`, `saveDescription` |
 
@@ -239,6 +249,7 @@ Available actions and defaults:
 | `describe`, `describeExternal`, `edit`, `new` | `return`, `D`, `e`, `n` | `d`, unbound, `e`, `n` |
 | `rebase`, `squash`, `split`, `abandon` | `r`, `S`, `s`, `a` | `R`, `S`, unbound, unbound |
 | `rebaseScope` (inline rebase only) | `tab` | same |
+| `rebaseTarget` (inline rebase only) | `m` | same |
 | `absorb`, `evolution` | `A`, `v` | `a`, `v` |
 | `actions`, `bookmarks`, `git`, `operations` | `space`, `b`, `g`, `o` | `space`, `b`, unbound, `o` |
 | `setBookmark` | `B` | `B` |
@@ -250,10 +261,10 @@ Available actions and defaults:
 
 Unbound actions stay reachable from the Space menu, which shows the effective
 key for every item and `—` for unbound ones. `rebaseScope` toggles
-descendants while choosing an inline rebase destination. Because it is only live
-there, it may share a key with a browse action that is not: the default Tab is
+descendants and `rebaseTarget` switches the target while choosing an inline rebase destination. Because they are only live
+there, they may share a key with a browse action that is not: the default Tab is
 also `focus`. It cannot share a key with `loadMore` or `togglePreview`, which stay
-active during destination choice. Fixed inline controls (`j`/`k`, arrows up/down, Page Up/Down, `/`, Enter, and Escape) are reserved for destination navigation and cannot be assigned to these three actions.
+active during destination choice. Fixed inline controls (`j`/`k`, arrows up/down, Page Up/Down, `/`, Enter, and Escape) are reserved for destination navigation and cannot be assigned to these actions.
 
 Text inputs retain normal editing keys; typing a custom browse shortcut inserts
 text. Ctrl-C remains available everywhere.
