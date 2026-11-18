@@ -722,14 +722,14 @@ test("rebase form retains fields on stale failure and requires a reviewed previe
     await t.until("Preview ready");
     const fields = t.screen.renderer.root.findDescendantById("history-fields");
     if (!(fields instanceof SelectRenderable)) throw new Error("Missing form fields");
-    expect(fields.options[0]?.name).toContain("zzzzzzzz");
-    expect(fields.options[1]?.name).toContain("Change and descendants");
+    expect(fields.options[1]?.name).toContain("zzzzzzzz");
+    expect(fields.options[2]?.name).toContain("Change and descendants");
     await t.f.jj("bookmark", "create", "external-operation");
     t.screen.mockInput.pressKey("j");
     t.screen.mockInput.pressEnter();
     await t.until("Repository changed");
-    expect(fields.options[0]?.name).toContain("zzzzzzzz");
-    expect(fields.options[1]?.name).toContain("Change and descendants");
+    expect(fields.options[1]?.name).toContain("zzzzzzzz");
+    expect(fields.options[2]?.name).toContain("Change and descendants");
     expect((await t.repo.snapshot(source.changeId)).revisions[0]?.parents).toEqual(source.parents);
     t.screen.mockInput.pressKey("p");
     await t.until("Preview ready");
