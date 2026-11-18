@@ -114,3 +114,16 @@ test("an insert previewed before another operation must be reviewed again", asyn
     expect(await t.parents()).toMatchObject({ X: initial, B: initial });
   } finally { await t.cleanup(); }
 });
+
+test("the trees mark the source ● and the existing changes an insert moves along ↳", async () => {
+  const t = await setup();
+  try {
+    const [x, c, d] = [await t.revision("X"), await t.revision("C"), await t.revision("D")];
+    const prepared = await t.repo.prepare({ kind: "rebase", revision: x, destination: await t.revision("B"), descendants: false, target: "after" });
+    for (const tree of [prepared.trees!.before, prepared.trees!.after]) {
+      expect(tree).toContain(`● ${x.changeId.slice(0, 8)}`);
+      expect(tree).toMatch(new RegExp(`↳ ${c.changeId.slice(0, 4)}`));
+      expect(tree).toMatch(new RegExp(`↳ ${d.changeId.slice(0, 4)}`));
+    }
+  } finally { await t.cleanup(); }
+});
