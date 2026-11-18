@@ -1,4 +1,4 @@
-import { label, rebaseScopeSummary, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type Resolution, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
+import { label, rebaseScopeSummary, rebaseTargetSummary, type RebaseMutation, isRealRemote, shortChangeId, type TrunkRebase, type Remote, type PublishBookmarks, type EvolutionEntry, type EvolutionPage, type Revision, type Snapshot, type Mutation, type InteractiveAction, type Operation, type Bookmark, type Resolution, type RevsetAlias, type ChangedFile, type PreparedMutation } from "./model";
 import { remoteList, defaultPushRemote, publishBookmarks, generatedBookmarkName, prepareRemote, prepareDeletion, applyRemote, prepareFetchAll, applyFetchAll, newConflicts, withConflicts, type NetworkScope } from "./remotes";
 import { read } from "./jj-helper";
 import { CancelledError, run } from "./jj-process";
@@ -303,11 +303,29 @@ export class Repository {
     await openHunk(this.root, revision);
   }
 
+  /**
+   * The existing revisions an insert moves besides the rebased ones: before moves the destination and its
+   * descendants, after the destination's descendants, between the second boundary and its descendants.
+   */
+  private async targetMoves(action: RebaseMutation, rebasing: Revision[], operationId: string): Promise<string> {
+    const target = action.target ?? "onto";
+    const anchor = target === "between" ? action.insertBefore! : action.destination;
+    const moving = rebasing.map(revision => revision.commitId).join(" | ");
+    const revset = `(${target === "after" ? `${anchor.commitId}+::` : `${anchor.commitId}::`}) ~ (${moving})`;
+    const limit = 200;
+    const moves = await logRevisions(this.root, revset, operationId, limit + 1);
+    const heading = target === "after" ? `Descendants of ${shortChangeId(anchor)}` : `${shortChangeId(anchor)} and its descendants`;
+    if (!moves.length) return `${heading}: none move.`;
+    const shown = moves.slice(0, limit);
+    return `${heading} also move onto the rebased changes (${moves.length > limit ? `more than ${limit}` : moves.length}):\n${shown.map(revision => "↳ " + label(revision)).join("\n")}`;
+  }
+
   async prepare(action: Mutation): Promise<PreparedMutation> {
     await this.status();
     const operationId = await this.operationId();
     const targets = "revision" in action ? [action.revision] : action.kind === "new" ? [action.parent] : [];
     if ("destination" in action) targets.push(action.destination);
+    if (action.kind === "rebase" && action.insertBefore) targets.push(action.insertBefore);
     await this.assertCurrent(targets, operationId);
     let summary: string;
     let remoteUrl: string | undefined;
@@ -331,7 +349,7 @@ export class Repository {
       case "abandon":
       case "rebase": {
         summary = `${action.kind === "abandon" ? "Abandon" : "Rebase"} ${label(action.revision)}\n`;
-        if (action.kind === "rebase") summary += `Onto ${label(action.destination)}\nMode: ${action.descendants ? "selected revision and descendants" : "selected revision only; descendants fill the gap"}\n`;
+        if (action.kind === "rebase") summary += `${rebaseTargetSummary(action)}\nScope: ${action.descendants ? "selected revision and descendants" : "selected revision only; descendants fill the gap"}\n`;
         if (action.kind === "rebase" && action.descendants) {
           rebasing = await this.rebaseScope(action.revision, operationId);
           summary += `\n${rebaseScopeSummary(rebasing)}\n\nTrees show up to 40 revisions; the list above includes the full rebase scope.`;
@@ -341,6 +359,7 @@ export class Repository {
           const affected = await logRevisions(this.root, `${action.revision.commitId}::`, operationId, 200);
           summary += `\nAffected revision/descendant context (up to 200):\n${affected.map(label).join("\n")}`;
         }
+        if (action.kind === "rebase" && (action.target ?? "onto") !== "onto") summary += `\n\n${await this.targetMoves(action, rebasing, operationId)}`;
         summary += "\n\nDescendants may be rewritten and conflicts may result.";
         break;
       }
