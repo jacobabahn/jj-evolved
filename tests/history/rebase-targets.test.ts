@@ -104,3 +104,13 @@ test("a combination jj rejects shows jj's error and changes nothing", async () =
     expect(await t.parents()).toMatchObject({ X: initial, B: initial, C: "B", D: "B" });
   } finally { await t.cleanup(); }
 });
+
+test("an insert previewed before another operation must be reviewed again", async () => {
+  const t = await setup();
+  try {
+    const prepared = await t.repo.prepare({ kind: "rebase", revision: await t.revision("X"), destination: await t.revision("B"), descendants: false, target: "before" });
+    await t.jj("describe", "-r", 'description(exact:"D\n")', "-m", "D elsewhere");
+    await expect(t.repo.apply(prepared)).rejects.toThrow("Review the action again before applying.");
+    expect(await t.parents()).toMatchObject({ X: initial, B: initial });
+  } finally { await t.cleanup(); }
+});

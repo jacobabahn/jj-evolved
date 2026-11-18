@@ -117,7 +117,7 @@ test("the rebase form resolves a typed tag or revset, keeps the scope, and rejec
   // parents(@) matches no text, so an Enter right after typing must wait for jj to resolve it.
   ui.key("/"); await ui.type("parents(@)"); ui.key("RETURN");
   await ui.until("Preview ready");
-  expect((ui.node("history-fields") as SelectRenderable).options[0]?.name).toBe(`Destination: ${feature.changeId.slice(0, 8)} Initial feature`);
+  expect((ui.node("history-fields") as SelectRenderable).options[1]?.name).toBe(`Destination: ${feature.changeId.slice(0, 8)} Initial feature`);
   await ui.until("Scope: Change and descendants");
 }, { prepare: async f => { await f.jj("tag", "set", "release-1", "-r", "feature"); } }), 15_000);
 

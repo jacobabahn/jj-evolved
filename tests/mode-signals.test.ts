@@ -86,7 +86,7 @@ test("prompts and overlays put their own keys in the footer instead of the brows
   await ui.until("Tab focus preview");
   ui.key("r");
   await ui.until("Rebase: choose destination");
-  expect(footer(ui)).toContain("j/k destination  Tab descendants  Enter preview");
+  expect(footer(ui)).toContain("j/k destination  Tab descendants  m target: onto  Enter preview");
   expect(footer(ui)).toMatch(/Esc cancel\s*$/);
   expect(ui.screen.captureCharFrame()).not.toContain("will move");
   ui.key("ESCAPE");
