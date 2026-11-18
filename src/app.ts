@@ -23,7 +23,7 @@ import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { EllipsisText, fitText } from "./ui/ellipsis-text";
 import { homedir } from "node:os";
-import { isRealRemote, pushRoute, sameTarget, shortChangeId, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
+import { isRealRemote, pushRoute, sameTarget, shortChangeId, rebaseTargets, rebaseTargetName, rebaseTargetText, type RebaseTarget, type InteractiveAction, type Mutation, type PreparedMutation, type Revision, type Snapshot, type Bookmark, type ChangedFile, type Remote, type RevsetAlias } from "./repository/model";
 
 type Choice = { name: string; description: string; choose: () => void; preview?: (signal: AbortSignal) => Promise<string>; key?: string; hotkey?: boolean; header?: boolean };
 /** One extra key a review offers besides apply, such as also deleting a bookmark on its remote. */
@@ -34,10 +34,16 @@ type ReviewStep = () => Promise<string | void>;
 // `cancelled` is the message when the review is closed without applying, for a review that follows work already done.
 type ReviewExtras = { option?: ReviewOption; then?: ReviewStep; labels?: { apply: string; cancel: string }; cancelled?: string };
 
+/**
+ * Choosing a rebase destination in the graph. A between rebase picks two boundaries in turn: `after` first, then the
+ * revision to insert before; each one chosen stays while the other is picked again.
+ */
+type InlineRebase = { kind: "rebase"; descendants: boolean; scope: Revision[]; target: RebaseTarget; picking: "after" | "before"; after: Revision | null; before: Revision | null };
+
 type Prompt =
   | { kind: "browse" }
   | { kind: "theme"; original: Theme }
-  | { kind: "inline"; source: Revision; action: { kind: "rebase"; descendants: boolean; scope: Revision[] } | { kind: "squash" } }
+  | { kind: "inline"; source: Revision; action: InlineRebase | { kind: "squash" } }
   | { kind: "form"; form: HistoryForm }
   | { kind: "search"; view: NavigationView; previous: Search; returnPoint: NavigationView | null }
   | { kind: "revset" }
@@ -142,6 +148,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["edit"]), "Make the selection the working copy immediately"],
       [keys(["rebase"]), "Choose a rebase destination in the graph"],
       [keys(["rebaseScope"]), `While choosing a rebase destination, include descendants; ${keyLabel(bindings, "loadMore")} and ${keyLabel(bindings, "togglePreview")} also apply`],
+      [keys(["rebaseTarget"]), "While choosing a rebase destination, switch the target: onto it, insert before it, insert after it, or between two revisions (Enter picks the one to go after, then the one to go before; Esc goes back to the first)"],
       [keys(["squash"]), "Choose a squash destination in the graph"],
       ["Drag change", "Drop a change onto another change to preview a rebase"],
       [keys(["split"]), "Split selected files into a new first change"],
@@ -472,9 +479,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), "collapse"]], right: quit },
       ];
       case "inline": return [{
-        left: [[move, "destination"], ...(prompt.action.kind === "rebase" ? [[key("rebaseScope"), "descendants"] as Shortcut] : []), ["Enter", "preview"],
+        left: [[move, "destination"], ...(prompt.action.kind === "rebase" ? [[key("rebaseScope"), "descendants"], [key("rebaseTarget"), `target: ${prompt.action.target}`]] as Shortcut[] : []),
+          ["Enter", prompt.action.kind === "rebase" && prompt.action.target === "between" && prompt.action.picking === "after" ? "next boundary" : "preview"],
           [key("search"), "search"], [key("loadMore"), "load more"], [page, "scroll preview"], togglePreview],
-        right: [["Esc", "cancel"]],
+        right: [["Esc", prompt.action.kind === "rebase" && prompt.action.picking === "before" ? "back to after" : "cancel"]],
       }];
       case "search": return [{ left: [["Enter", "keep"]], right: [["Esc", "cancel"]] }];
       case "bookmark": return [{ left: [["Enter", "set"], [bothKeys(key("nextCompletion"), "Shift-Tab"), "complete"]], right: [["Esc", "cancel"]] }];
@@ -1132,7 +1140,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       case "describe": return `Saved the description of ${id(action.revision)}.`;
       case "abandon": return `Abandoned ${id(action.revision)}.`;
       case "absorb": return `Absorbed ${id(action.revision)} into its ancestors.`;
-      case "rebase": return `Rebased ${id(action.revision)}${action.descendants ? " and its descendants" : ""} onto ${id(action.destination)}.`;
+      case "rebase": return `Rebased ${id(action.revision)}${action.descendants ? " and its descendants" : ""} ${rebaseTargetText(action, id)}.`;
       case "squash": return `Squashed ${id(action.revision)} into ${id(action.destination)}.`;
       case "split": return `Split ${id(action.revision)}.`;
       case "bookmark-create": return `Created bookmark ${action.name}.`;
@@ -1150,9 +1158,11 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     return kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ").replace(/^[a-z]/, letter => letter.toUpperCase());
   }
   function openReview(action: Mutation, prepared: PreparedMutation, edit: (() => void) | null, back: (() => void) | null, extras: ReviewExtras = {}) {
-    showOverlay(prepared.summary, `${operationLabel(action.kind)} preview`);
+    // A rebase names its target in the title, so the review says how the changes will be placed before any scrolling.
+    const title = `${operationLabel(action.kind)} preview${action.kind === "rebase" && action.target && action.target !== "onto" ? ` · ${rebaseTargetName(action.target).toLowerCase()}` : ""}`;
+    showOverlay(prepared.summary, title);
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
-    openPrompt({ kind: "confirm", action, edit, back, extras }, `Review before applying · ${operationLabel(action.kind)} preview`);
+    openPrompt({ kind: "confirm", action, edit, back, extras }, `Review before applying · ${title}`);
     // The overlay's title names the preview, so the preview needs no box of its own inside it; a blank row keeps it
     // apart from the source lines above.
     overlayPreview.border = false;
@@ -1911,7 +1921,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     void followFiles(true).catch(error => report(errorText(error), true));
     scheduleFocusRefresh();
   }
-  // A change cannot move onto itself, nor, with its descendants, onto one of them.
+  // A change cannot move onto itself, nor, with its descendants, onto one of them; the same holds for every boundary.
   function movesItself(state: Extract<Prompt, { kind: "inline" }>, destination: Revision) {
     const moving = state.action.kind === "rebase" && state.action.descendants ? state.action.scope : [state.source];
     return moving.some(revision => revision.commitId === destination.commitId);
@@ -1928,14 +1938,30 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       ? `${prompt.action.descendants ? "[x]" : "[ ]"} include descendants (${prompt.action.scope.length} changes)${outside ? ` · ${outside} outside view` : ""}`
       : "All files · Keep destination description";
     // The cursor starts on the source, which cannot be its own destination, so the hint asks for one until it moves.
-    const target = destination && !movesItself(prompt, destination) ? destination.changeId.slice(0, 8) : "choose a destination";
-    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${source.changeId.slice(0, 8)} → ${target}\n${scope}`);
+    const cursor = destination && !movesItself(prompt, destination) ? destination.changeId.slice(0, 8) : null;
+    const rebase = prompt.action.kind === "rebase" ? prompt.action : null;
+    const target = !rebase || rebase.target === "onto" ? cursor ?? "choose a destination"
+      : rebase.target !== "between" ? `insert ${rebase.target} ${cursor ?? "(choose a revision)"}`
+      : rebase.picking === "after" ? `after ${cursor ?? "(choose a revision)"}, then choose one to go before`
+      : `after ${rebase.after ? rebase.after.changeId.slice(0, 8) : "?"}, before ${cursor ?? "(choose a revision)"}`;
+    const mode = rebase ? ` · target: ${rebaseTargetName(rebase.target).toLowerCase()}` : "";
+    inlineHint.content = terminalText(`${prompt.action.kind === "rebase" ? "Rebase" : "Squash"} from ● ${source.changeId.slice(0, 8)} → ${target}\n${scope}${mode}`);
+    listBox.title = ` ${fitTitle(inlineTitle(prompt), paneWidth())} `;
+  }
+  function inlineTitle(state: Extract<Prompt, { kind: "inline" }>) {
+    if (state.action.kind !== "rebase") return "Squash: choose destination";
+    switch (state.action.target) {
+      case "onto": return "Rebase: choose destination";
+      case "before": case "after": return `Rebase: insert ${state.action.target}`;
+      // The hint above the graph says which boundary this is, in full.
+      case "between": return `Rebase between: ${state.action.picking}`;
+    }
   }
   function startInline(source: Revision, kind: "rebase" | "squash") {
     if (kind === "squash") { resumeInline({ kind: "inline", source, action: { kind } }); return; }
     void run("Loading rebase scope…", async () => {
       const scope = await repository.rebaseScope(source);
-      if (!stopped) resumeInline({ kind: "inline", source, action: { kind, descendants: false, scope } });
+      if (!stopped) resumeInline({ kind: "inline", source, action: { kind, descendants: false, scope, target: "onto", picking: "after", after: null, before: null } });
     }, true);
   }
   function resumeInline(state: Extract<Prompt, { kind: "inline" }>) {
@@ -1944,7 +1970,6 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     list.markSource(revisions.findIndex(revision => revision.commitId === state.source.commitId));
     inlineHint.visible = true;
     setMessage("");
-    listBox.title = ` ${state.action.kind === "rebase" ? "Rebase" : "Squash"}: choose destination `;
     setFocus("list");
     updateInlineHint();
   }
@@ -2077,7 +2102,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const action = keyAction;
     if (action === "togglePreview") { setPreviewVisible(!preview.visible); return; }
     if (isBusy()) return;
-    if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
+    if (key.name === "escape" && state.action.kind === "rebase" && state.action.picking === "before") {
+      // Back to the first boundary of a between rebase, keeping the second for when it is picked again.
+      const rebase = state.action;
+      rebase.picking = "after";
+      updateInlineHint();
+      if (rebase.after) { const after = rebase.after; void run("Loading destination…", async () => { await navigate(after); updateInlineHint(); }, true); }
+    }
+    else if (key.name === "escape") { closePrompt(); report("Cancelled."); void loadPreview(); }
     else if (action === "loadMore") void run("Loading more history…", loadMoreHistory);
     else if (action === "search") {
       destination("Choose destination", state.source, target => {
@@ -2091,13 +2123,31 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (action === "rebaseScope" && state.action.kind === "rebase") {
       state.action.descendants = !state.action.descendants;
       updateInlineHint();
+    } else if (action === "rebaseTarget" && state.action.kind === "rebase") {
+      // The scope and any boundary already chosen stay; a between rebase starts again from its first boundary.
+      state.action.target = rebaseTargets[(rebaseTargets.indexOf(state.action.target) + 1) % rebaseTargets.length]!;
+      state.action.picking = "after";
+      updateInlineHint();
     } else if (key.name === "return") {
       const destination = selected();
       if (!destination || movesItself(state, destination)) { report("Choose another destination.", true); return; }
-      const action: Mutation = state.action.kind === "rebase"
-        ? { kind: "rebase", revision: state.source, destination, descendants: state.action.descendants }
-        : { kind: "squash", revision: state.source, destination, files: [], description: destination.description };
-      confirm(action);
+      if (state.action.kind === "squash") { confirm({ kind: "squash", revision: state.source, destination, files: [], description: destination.description }); return; }
+      const rebase = state.action;
+      if (rebase.target !== "between") {
+        confirm({ kind: "rebase", revision: state.source, destination, descendants: rebase.descendants, ...(rebase.target === "onto" ? {} : { target: rebase.target }) });
+        return;
+      }
+      if (rebase.picking === "after") {
+        rebase.after = destination;
+        rebase.picking = "before";
+        setMessage("");
+        updateInlineHint();
+        // A second boundary chosen before stays chosen, so correcting the first goes straight back to it.
+        if (rebase.before) { const before = rebase.before; void run("Loading destination…", async () => { await navigate(before); updateInlineHint(); }, true); }
+        return;
+      }
+      rebase.before = destination;
+      confirm({ kind: "rebase", revision: state.source, destination: rebase.after!, insertBefore: destination, descendants: rebase.descendants, target: "between" });
     }
   }
   /** Keys shared by the overlay dialogs: Esc goes back, PgDn/PgUp scroll the preview, Enter submits. */

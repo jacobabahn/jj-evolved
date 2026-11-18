@@ -12,7 +12,7 @@ export const jjuiBindings = {
   status: ["w"], refresh: ["ctrl+r"], loadMore: ["ctrl+l"],
   filter: ["L"], search: ["/"], nextMatch: ["'"], previousMatch: ['"'],
   workingCopy: ["@"], parent: ["["], child: ["]"], return: ["ctrl+o"], clearSearch: ["escape"],
-  describe: ["return"], describeExternal: ["D"], edit: ["e"], rebase: ["r"], squash: ["S"], rebaseScope: ["tab"],
+  describe: ["return"], describeExternal: ["D"], edit: ["e"], rebase: ["r"], squash: ["S"], rebaseScope: ["tab"], rebaseTarget: ["m"],
   abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
   new: ["n"], actions: ["space"], bookmarks: ["b"], setBookmark: ["B"], git: ["g"], publish: [], operations: ["o"], undo: ["u"], files: ["l", "right"],
   diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], lastError: ["ctrl+e"], quit: ["q"],
@@ -33,7 +33,7 @@ export const scopeActions = {
     "help", "lastError", "quit"],
   files: ["down", "up", "focus", "pageUp", "pageDown", "previewUp", "previewDown", "previewHalfUp", "previewHalfDown", "togglePreview", "files", "back", "help", "quit"],
   // Choosing an inline rebase or squash destination in the graph.
-  destination: ["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "loadMore", "togglePreview"],
+  destination: ["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "rebaseTarget", "loadMore", "togglePreview"],
   // Action menus, pickers, the theme chooser, the keyboard reference, and the rebase and squash form.
   menu: ["down", "up", "back", "help"],
   // Text prompts: the revset filter, bookmark names, the description editor and quick inputs.

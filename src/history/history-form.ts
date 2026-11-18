@@ -10,14 +10,17 @@ import { ActionOverlay } from "../ui/action-overlay";
 import { fitText } from "../ui/ellipsis-text";
 import { Repository } from "../repository/repository";
 import { terminalText } from "../terminal-text";
-import { shortChangeId, rebaseScopeSummary, type ChangedFile, type Mutation, type Revision } from "../repository/model";
+import { shortChangeId, rebaseScopeSummary, rebaseTargets, rebaseTargetName, type ChangedFile, type Mutation, type RebaseTarget, type Revision } from "../repository/model";
 
 type Draft =
-  | { kind: "rebase"; descendants: boolean }
+  | { kind: "rebase"; descendants: boolean; target?: RebaseTarget }
   | { kind: "squash"; files: string[]; description: string; keepDescription: boolean };
+/** A row of the form. A between rebase has two boundaries: destination, which it goes after, and insertBefore. */
+type Field = "target" | "destination" | "insertBefore" | "scope" | "files" | "description" | "apply";
+type Boundary = "destination" | "insertBefore";
 type Mode =
   | { kind: "fields" }
-  | { kind: "destination"; revisions: Revision[] }
+  | { kind: "destination"; revisions: Revision[]; boundary: Boundary }
   | { kind: "files"; files: ChangedFile[]; selected: Set<string> }
   | { kind: "description" };
 
@@ -30,6 +33,8 @@ export class HistoryForm extends ActionOverlay {
   private readonly comparison: TreeComparisonView;
   private destinationSearch: RevisionSearch | null = null;
   private destination: Revision | null = null;
+  // Kept while another target is chosen, so switching back to between restores it.
+  private secondBoundary: Revision | null = null;
   private mode: Mode = { kind: "fields" };
   private disposed = false;
   private loadingField = false;
@@ -44,7 +49,7 @@ export class HistoryForm extends ActionOverlay {
     super(ctx, "history-form");
     this.title = draft.kind === "rebase" ? " Rebase change " : " Squash changes ";
     this.context.content = highlightJjText(`Source ${shortChangeId(source)} / ${source.commitId.slice(0, 12)}\n${source.description.split("\n")[0] || "(no description)"}`, revisionPrefixes([source]), getTheme(this.ctx));
-    this.controls = new SelectRenderable(ctx, { id: "history-fields", height: draft.kind === "rebase" ? 3 : 4, flexShrink: 0, showDescription: false, wrapSelection: true, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, selectedBackgroundColor: getTheme(this.ctx).selected, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
+    this.controls = new SelectRenderable(ctx, { id: "history-fields", height: this.fieldList().length, flexShrink: 0, showDescription: false, wrapSelection: true, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, selectedBackgroundColor: getTheme(this.ctx).selected, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
     this.choices = new SelectRenderable(ctx, { id: "history-choices", height: 0, minHeight: 1, flexGrow: 1, width: "100%", visible: false, showDescription: false, backgroundColor: getTheme(this.ctx).panel, focusedBackgroundColor: getTheme(this.ctx).panel, textColor: getTheme(this.ctx).text, focusedTextColor: getTheme(this.ctx).text, selectedBackgroundColor: getTheme(this.ctx).selected, selectedTextColor: getTheme(this.ctx).selectedText, selectedDescriptionColor: getTheme(this.ctx).selectedText });
     this.input = new InputRenderable(ctx, { id: "history-description", visible: false, textColor: getTheme(this.ctx).text, backgroundColor: getTheme(this.ctx).selected, focusedBackgroundColor: getTheme(this.ctx).panel, focusedTextColor: getTheme(this.ctx).text, placeholderColor: getTheme(this.ctx).muted });
     this.preview = new ScrollBoxRenderable(ctx, { id: "history-preview", flexGrow: 1, minHeight: 1, wrapperOptions: { flexBasis: 0 }, contentOptions: { width: "100%", minHeight: 0 }, marginTop: 1, border: false });
@@ -58,6 +63,8 @@ export class HistoryForm extends ActionOverlay {
     this.body.add(this.choices);
     this.body.add(this.preview);
     this.renderFields();
+    // The list opens on the destination; the rebase target sits above it.
+    this.controls.setSelectedIndex(this.fieldList().indexOf("destination"));
     if (draft.kind === "rebase") void this.loadScope().catch(error => {
       if (!this.disposed) this.report(error instanceof Error ? error.message : String(error), true);
     });
@@ -80,24 +87,65 @@ export class HistoryForm extends ActionOverlay {
     if (!this.destination) this.text.content = this.scopeText();
   }
 
+  private get target(): RebaseTarget { return this.draft.kind === "rebase" ? this.draft.target ?? "onto" : "onto"; }
+
+  private fieldList(): Field[] {
+    if (this.draft.kind === "squash") return ["destination", "files", "description", "apply"];
+    return ["target", "destination", ...(this.target === "between" ? ["insertBefore" as const] : []), "scope", "apply"];
+  }
+
+  /** What the form calls a boundary: Destination for onto, the insert for before and after, After and Before for between. */
+  private boundaryName(boundary: Boundary) {
+    if (boundary === "insertBefore") return "Before";
+    return { onto: "Destination", before: "Insert before", after: "Insert after", between: "After" }[this.target];
+  }
+
   private renderFields() {
     if (this.disposed) return;
+    const fields = this.fieldList();
     const index = this.controls.getSelectedIndex();
-    const destination = this.destination ? `${this.destination.changeId.slice(0, 8)} ${this.destination.description.split("\n")[0] || "(no description)"}` : "Choose a revision";
-    const labels = [`Destination: ${destination}`];
-    if (this.draft.kind === "rebase") labels.push(`Scope: ${this.draft.descendants ? `Change and descendants (${this.scope ? this.scope.length + " changes" : "loading…"})` : "Only this change"}`);
-    else labels.push(`Files: ${this.draft.files.length ? `${this.draft.files.length} selected` : "All changed files"}`, `Description: ${this.draft.keepDescription ? "Keep destination description" : this.draft.description || "(empty)"}`);
-    labels.push(`Apply ${this.draft.kind}`);
+    const name = (revision: Revision | null) => revision ? `${revision.changeId.slice(0, 8)} ${revision.description.split("\n")[0] || "(no description)"}` : "Choose a revision";
+    const labels = fields.map(field => {
+      switch (field) {
+        case "target": return `Target: ${rebaseTargetName(this.target)}`;
+        case "destination": return `${this.boundaryName("destination")}: ${name(this.destination)}`;
+        case "insertBefore": return `${this.boundaryName("insertBefore")}: ${name(this.secondBoundary)}`;
+        case "scope": return `Scope: ${this.draft.kind === "rebase" && this.draft.descendants ? `Change and descendants (${this.scope ? this.scope.length + " changes" : "loading…"})` : "Only this change"}`;
+        case "files": return `Files: ${this.draft.kind === "squash" && this.draft.files.length ? `${this.draft.files.length} selected` : "All changed files"}`;
+        case "description": return `Description: ${this.draft.kind === "squash" && !this.draft.keepDescription ? this.draft.description || "(empty)" : "Keep destination description"}`;
+        case "apply": return `Apply ${this.draft.kind}`;
+      }
+    });
+    this.controls.height = labels.length;
     this.controls.options = labels.map(name => ({ name: terminalText(name), description: "" }));
-    this.controls.setSelectedIndex(Math.max(0, index));
-    this.keys = { left: [["j/k", "move"], ["Enter", "edit/apply"], ["p", "preview"], ["PgDn/PgUp", "scroll preview"]], right: [["Esc", "close"]] };
+    this.controls.setSelectedIndex(Math.min(Math.max(0, index), labels.length - 1));
+    this.keys = { left: [["j/k", "move"], ["Enter", "edit/apply"], ...(this.draft.kind === "rebase" ? [["m", `target: ${this.target}`] as [string, string]] : []), ["p", "preview"], ["PgDn/PgUp", "scroll preview"]], right: [["Esc", "close"]] };
     this.controls.focus();
   }
 
+  /** Moves to the next rebase target, keeping the scope, both boundaries and the rest of the draft. */
+  private async cycleTarget() {
+    if (this.draft.kind !== "rebase") return;
+    const selected = this.fieldList()[this.controls.getSelectedIndex()];
+    this.draft.target = rebaseTargets[(rebaseTargets.indexOf(this.target) + 1) % rebaseTargets.length];
+    this.renderFields();
+    // The cursor stays on the same row, even when the second boundary appears or goes above it.
+    const index = selected ? this.fieldList().indexOf(selected) : -1;
+    if (index >= 0) this.controls.setSelectedIndex(index);
+    await this.updatePreview();
+  }
+
+  private missing(): string | null {
+    if (!this.destination) return this.target === "between" ? "Choose the revision to insert after first." : "Choose a destination first.";
+    if (this.target === "between" && !this.secondBoundary) return "Choose the revision to insert before.";
+    return null;
+  }
+
   private mutation(): Mutation | null {
-    if (!this.destination) return null;
+    if (!this.destination || this.missing()) return null;
     return this.draft.kind === "rebase"
-      ? { kind: "rebase", revision: this.source, destination: this.destination, descendants: this.draft.descendants }
+      ? { kind: "rebase", revision: this.source, destination: this.destination, descendants: this.draft.descendants,
+        ...(this.target === "onto" ? {} : { target: this.target }), ...(this.target === "between" && this.secondBoundary ? { insertBefore: this.secondBoundary } : {}) }
       : { kind: "squash", revision: this.source, destination: this.destination, files: this.draft.files, description: this.draft.keepDescription ? this.destination.description : this.draft.description };
   }
 
@@ -111,12 +159,12 @@ export class HistoryForm extends ActionOverlay {
       await this.loadScope();
       if (this.disposed || request !== this.previewRequest) return;
       const action = this.mutation();
-      if (!action) { this.review.cancel(); this.text.content = this.scopeText(); this.report("Choose a destination first."); return; }
+      if (!action) { this.review.cancel(); this.text.content = this.scopeText(); this.report(this.missing() ?? "Choose a destination first."); return; }
       this.text.content = "Preparing tree comparison…";
       const prepared = await this.review.prepare(action);
       if (!prepared) return;
       this.comparison.setTrees(prepared.trees, this.draft.kind);
-      this.text.prefixes = revisionPrefixes([this.source, ...(this.destination ? [this.destination] : [])]);
+      this.text.prefixes = revisionPrefixes([this.source, ...[this.destination, this.target === "between" ? this.secondBoundary : null].filter(item => item !== null)]);
       this.text.content = prepared.summary;
       this.preview.scrollTo(0);
       this.report("Preview ready. Review it, then select Apply.");
@@ -139,16 +187,19 @@ export class HistoryForm extends ActionOverlay {
 
   private async editField() {
     const request = ++this.fieldRequest;
-    const index = this.controls.getSelectedIndex();
-    if (index === this.controls.options.length - 1) { await this.submit(); return; }
-    if (index === 0) {
+    const field = this.fieldList()[this.controls.getSelectedIndex()];
+    if (field === "apply") { await this.submit(); return; }
+    if (field === "target") { await this.cycleTarget(); return; }
+    if (field === "destination" || field === "insertBefore") {
+      const boundary = field;
       this.report("Loading destinations…");
       const [candidates, bookmarks] = await Promise.all([this.repository.navigationRevisions("all()"), this.repository.bookmarks()]);
       if (this.disposed || request !== this.fieldRequest) return;
       const revisions = candidates.filter(item => item.commitId !== this.source.commitId);
-      this.mode = { kind: "destination", revisions };
-      const render = (matches: Revision[], status = `${matches.length} destinations`) => {
-        this.mode = { kind: "destination", revisions: matches };
+      this.mode = { kind: "destination", revisions, boundary };
+      const choosing = this.draft.kind === "rebase" && this.target !== "onto" ? ` for ${this.boundaryName(boundary).toLowerCase()}` : "";
+      const render = (matches: Revision[], status = `${matches.length} destinations${choosing}`) => {
+        this.mode = { kind: "destination", revisions: matches, boundary };
         this.choices.options = matches.map(item => ({ name: this.fit(`${item.changeId.slice(0, 8)} ${terminalText(item.description.split("\n")[0] || "(no description)")}`), description: "" }));
         this.choices.setSelectedIndex(0);
         this.report(status, !matches.length);
@@ -160,11 +211,12 @@ export class HistoryForm extends ActionOverlay {
       this.destinationSearch.onActiveChange = () => this.showChoiceKeys();
       this.fields.add(this.destinationSearch.field);
     } else if (this.draft.kind === "rebase") {
+      // The scope is the only other rebase field.
       this.draft.descendants = !this.draft.descendants;
       this.renderFields();
       await this.updatePreview();
       return;
-    } else if (index === 1) {
+    } else if (field === "files") {
       const files = await this.repository.files(this.source);
       if (this.disposed || request !== this.fieldRequest) return;
       this.mode = { kind: "files", files, selected: new Set(this.draft.files) };
@@ -212,7 +264,8 @@ export class HistoryForm extends ActionOverlay {
     if (this.mode.kind === "destination") {
       const destination = this.mode.revisions[index];
       if (!destination) return;
-      this.destination = destination;
+      if (this.mode.boundary === "insertBefore") this.secondBoundary = destination;
+      else this.destination = destination;
     } else if (this.mode.kind === "files" && this.draft.kind === "squash") {
       if (index > 1) {
         const file = this.mode.files[index - 2];
@@ -273,6 +326,7 @@ export class HistoryForm extends ActionOverlay {
     if (action === "down" || key.name === "down" || key.name === "tab") list.moveDown();
     else if (action === "up" || key.name === "up") list.moveUp();
     else if (key.name === "p" && this.mode.kind === "fields") void this.updatePreview();
+    else if (key.name === "m" && this.mode.kind === "fields" && this.draft.kind === "rebase") void this.cycleTarget();
     else if (key.name === "return") {
       if (this.mode.kind === "fields") {
         this.loadingField = true;

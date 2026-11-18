@@ -34,7 +34,7 @@ test("presets select jjui or legacy defaults and accept overrides on top", () =>
 });
 
 test("rebaseScope shares keys with browse-only actions but not with actions live during destination choice", () => {
-  expect(inlineActions).toEqual(["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "loadMore", "togglePreview"]);
+  expect(inlineActions).toEqual(["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "rebaseTarget", "loadMore", "togglePreview"]);
   const shared = parseKeybindings({ bindings: { rebaseScope: ["s"] } });
   const key = { name: "s", sequence: "s", ctrl: false, shift: false, meta: false, option: false };
   expect(actionForKey(shared, key)).toBe("split");
