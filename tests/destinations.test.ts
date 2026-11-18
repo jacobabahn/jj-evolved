@@ -161,3 +161,39 @@ test("the bookmark move picker resolves a revset to a revision beyond the first 
   for (let i = 0; i < 202; i++) await f.jj("new", "-m", `Filler ${i}`);
   await f.jj("bookmark", "create", "work");
 } }), 30_000);
+
+test("the squash form keeps its file selection when the destination picker is cancelled or used", () => withUiFixture("destination-squash-files", async ui => {
+  const fields = () => ui.node("history-fields") as SelectRenderable;
+  const choices = () => ui.node("history-choices") as SelectRenderable;
+  ui.key(" "); ui.choose("Squash");
+  await ui.until("Destination: Choose a revision");
+  // Select one of the two changed files first: the picker must not reset the choice.
+  ui.choose("Files: All changed files", "history-fields");
+  await ui.until("[ ] first.txt");
+  ui.choose("[ ] first.txt", "history-choices");
+  await ui.until("[x] first.txt");
+  ui.choose("Use 1 selected files", "history-choices");
+  await ui.until("Files: 1 selected");
+  // Open the picker, search, and cancel both the search and the picker.
+  ui.choose("Destination: Choose a revision", "history-fields");
+  await ui.until("/ search all destinations");
+  ui.key("/"); await ui.type("Initial");
+  await ui.until("1 destination");
+  ui.key("ESCAPE"); await Bun.sleep(60);
+  ui.key("ESCAPE"); await Bun.sleep(60);
+  await ui.until("Files: 1 selected");
+  expect(fields().options[0]?.name).toBe("Destination: Choose a revision");
+  // Choose a destination this time; the selection is still the same file.
+  ui.choose("Destination: Choose a revision", "history-fields");
+  await ui.until("/ search all destinations");
+  ui.key("/"); await ui.type("Initial"); ui.key("RETURN");
+  await ui.until("Preview ready");
+  expect(fields().options[0]?.name).toContain("Initial feature");
+  expect(fields().options[1]?.name).toBe("Files: 1 selected");
+  ui.choose("Files: 1 selected", "history-fields");
+  await ui.until("[x] first.txt");
+  expect(choices().options.map(option => option.name)).toEqual(["Use all files", "Use 1 selected files", "[x] first.txt", "[ ] second.txt"]);
+}, { prepare: async f => {
+  await Bun.write(`${f.path}/first.txt`, "first\n");
+  await Bun.write(`${f.path}/second.txt`, "second\n");
+} }), 15_000);
