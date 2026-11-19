@@ -417,7 +417,9 @@ export class Repository {
       case "restore": summary = `Restore repository state and local bookmarks to:\n${action.operation.description}\n${action.operation.id.slice(0, 12)} · ${action.operation.time}\n\nLater changes leave the current view but remain in operation history. Remote-tracking state is preserved.`; break;
       default: { const exhaustive: never = action; throw new Error(`Unknown action ${exhaustive}`); }
     }
-    // The preview and the command move a renamed file's old path with its new one.
+    // The preview and the command move a renamed file's old path with its new one. Absorb is left out on purpose: jj
+    // never absorbs a rename's new path, but given the old path too it moves the old path's deletion into the ancestor
+    // and leaves the new file added in the source, splitting the rename. With only the new path the rename stays whole.
     const prepared: Mutation = (action.kind === "split" || action.kind === "squash") && action.files.length
       ? { ...action, files: await this.withRenameSources(action.revision, action.files) } : action;
     const trees = prepared.kind === "rebase" || prepared.kind === "squash"
