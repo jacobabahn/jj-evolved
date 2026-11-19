@@ -54,13 +54,14 @@ test("marks survive filtering by literal text, and leaving clears the filter bef
   // With nothing marked, actions target the highlighted file.
   expect(files(ui).targets()).toEqual({ paths: ["[x].txt"], label: "highlighted file" });
   expect(footer(ui)).toContain("Space select");
+  expect(footer(ui)).toContain("m actions · highlighted file");
 
   // Mark a renamed file, a deleted one, and paths with a space and a wildcard, out of list order.
   for (const path of ["star*.txt", "a b.txt", "moved [v1].txt", "gone.txt"]) { await highlight(ui, path); ui.key(" "); await ui.settled(); }
   const marked = ["a b.txt", "gone.txt", "moved [v1].txt", "star*.txt"];
   expect(files(ui).markedPaths).toEqual(marked);
   expect(files(ui).targets()).toEqual({ paths: marked, label: "4 selected" });
-  expect(footer(ui)).toContain("select · 4 selected");
+  expect(footer(ui)).toContain("m actions · 4 selected");
   expect(footer(ui)).toContain("c clear");
   for (const path of marked) expect(visibleRows(ui).find(row => row.endsWith(` ${path}`))).toContain(`${markGlyph} `);
   expect(visibleRows(ui).find(row => row.endsWith(" q?.txt"))).not.toContain(markGlyph);

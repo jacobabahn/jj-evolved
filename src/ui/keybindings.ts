@@ -16,7 +16,7 @@ export const jjuiBindings = {
   abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
   new: ["n"], actions: ["space"], bookmarks: ["b"], setBookmark: ["B"], git: ["g"], publish: [], operations: ["o"], undo: ["u"], files: ["l", "right"],
   diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], lastError: ["ctrl+e"], quit: ["q"],
-  back: ["h", "left"], selectFile: ["space"], clearSelection: ["c"], filterFiles: ["/"],
+  back: ["h", "left"], selectFile: ["space"], clearSelection: ["c"], filterFiles: ["/"], fileActions: ["m"],
   nextCompletion: ["tab", "ctrl+n"], previousCompletion: ["ctrl+p"], saveDescription: ["ctrl+s", "ctrl+d"],
 } satisfies Record<string, string[]>;
 export type Action = keyof typeof jjuiBindings;
@@ -33,7 +33,7 @@ export const scopeActions = {
     "actions", "bookmarks", "setBookmark", "git", "publish", "operations", "undo", "files", "diff", "togglePreview", "theme",
     "help", "lastError", "quit"],
   files: ["down", "up", "focus", "pageUp", "pageDown", "previewUp", "previewDown", "previewHalfUp", "previewHalfDown", "togglePreview", "files", "back",
-    "selectFile", "clearSelection", "filterFiles", "help", "quit"],
+    "selectFile", "clearSelection", "filterFiles", "split", "squash", "fileActions", "help", "quit"],
   // Choosing an inline rebase or squash destination in the graph.
   destination: ["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "rebaseTarget", "loadMore", "togglePreview"],
   // Action menus, pickers, the theme chooser, the keyboard reference, and the rebase and squash form.
@@ -109,13 +109,16 @@ function checkReserved(scope: Scope, table: Keybindings) {
 }
 /**
  * Actions added after their default keys could already be bound to something else: back took over h and Left, which
- * were fixed keys before they could be bound, and the file browser's select, clear and filter keys came later. Unless
- * an action is configured itself, its default keys step aside for any other action of the scope bound to them, so a
- * configuration that put help on h or down on / keeps working.
+ * were fixed keys before they could be bound, and the file browser's select, clear, filter and actions keys came later.
+ * Split and squash joined the file browser later too, so they give way there only. Unless an action is configured
+ * itself, its default keys step aside for any other action of the scope bound to them, so a configuration that put help
+ * on h or down on / or s keeps working.
  */
-const yieldingActions: readonly Action[] = ["back", "selectFile", "clearSelection", "filterFiles"];
+const yieldingActions: readonly Action[] = ["back", "selectFile", "clearSelection", "filterFiles", "fileActions"];
+const yieldingInScope: Partial<Record<Scope, readonly Action[]>> = { files: ["split", "squash"] };
+function yields(scope: Scope, action: Action) { return yieldingActions.includes(action) || !!yieldingInScope[scope]?.includes(action); }
 function yieldDefaults(scope: Scope, table: Keybindings, configured: ReadonlySet<Action> = new Set()): Keybindings {
-  const yielding = scopeActions[scope].filter(action => yieldingActions.includes(action) && !configured.has(action));
+  const yielding = scopeActions[scope].filter(action => yields(scope, action) && !configured.has(action));
   if (!yielding.length) return table;
   const others = scopeActions[scope].filter(action => !yielding.includes(action)).flatMap(action => table[action]);
   let result = table;
@@ -158,7 +161,7 @@ export function loadKeybindings(value: unknown, preset?: Preset): KeybindingConf
   let overrides = Object.keys(bindings).length;
   const scopes = {} as Record<Scope, Keybindings>;
   // Yielding actions the configuration binds, globally or in one scope, keep their keys.
-  const global = yieldingActions.filter(action => Object.hasOwn(bindings, action));
+  const global = Object.keys(bindings) as Action[];
   const configured = Object.fromEntries(scopeNames.map(scope => [scope, new Set<Action>(global)])) as Record<Scope, Set<Action>>;
   for (const scope of scopeNames) scopes[scope] = structuredClone(result);
   for (const [scope, table] of Object.entries(scoped)) {
