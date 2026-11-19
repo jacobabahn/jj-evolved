@@ -362,7 +362,7 @@ export class Repository {
       case "describe": summary = `Describe ${label(action.revision)}\n\n${action.description}`; break;
       case "new": summary = `Create an empty child of ${label(action.parent)}`; break;
       case "edit": summary = `Make this change the working copy:\n${label(action.revision)}`; break;
-      case "absorb": summary = await projectedAbsorb(this.root, action.revision, operationId); break;
+      case "absorb": summary = await projectedAbsorb(this.root, action, operationId); break;
       case "abandon":
       case "rebase": {
         summary = `${action.kind === "abandon" ? "Abandon" : "Rebase"} ${label(action.revision)}\n`;

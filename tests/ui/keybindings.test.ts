@@ -214,15 +214,16 @@ test("the file browser's select, clear and filter keys give way to a configurati
   expect(loadKeybindings({ scopes: { files: { selectFile: ["x"], filterFiles: ["f"] } } }).scopes.files).toMatchObject({ selectFile: ["x"], filterFiles: ["f"] });
 });
 
-test("the file browser's split, squash and actions keys give way there to a configuration that already uses them", () => {
+test("the file browser's split, squash, absorb and actions keys give way there to a configuration that already uses them", () => {
   const defaults = loadKeybindings({});
-  expect(defaults.scopes.files).toMatchObject({ split: ["s"], squash: ["S"], fileActions: ["m"] });
-  expect(loadKeybindings({}, "legacy").scopes.files).toMatchObject({ split: [], squash: ["S"], fileActions: ["m"] });
+  expect(defaults.scopes.files).toMatchObject({ split: ["s"], squash: ["S"], absorb: ["A"], fileActions: ["m"] });
+  expect(loadKeybindings({}, "legacy").scopes.files).toMatchObject({ split: [], squash: ["S"], absorb: ["a"], fileActions: ["m"] });
   // A files-scope binding from before the browser had these actions keeps working, and they step aside.
-  const taken = loadKeybindings({ scopes: { files: { down: ["s"], up: ["S"], help: ["m"] } } });
-  expect(taken.scopes.files).toMatchObject({ split: [], squash: [], fileActions: [], down: ["s"], up: ["S"], help: ["m"] });
-  // In the revision list split and squash keep their keys and conflicts, as before.
-  expect(taken.scopes.revisions).toMatchObject({ split: ["s"], squash: ["S"] });
+  const taken = loadKeybindings({ scopes: { files: { down: ["s"], up: ["S"], help: ["m"], togglePreview: ["A"] } } });
+  expect(taken.scopes.files).toMatchObject({ split: [], squash: [], absorb: [], fileActions: [], down: ["s"], up: ["S"], help: ["m"], togglePreview: ["A"] });
+  // In the revision list split, squash and absorb keep their keys and conflicts, as before.
+  expect(taken.scopes.revisions).toMatchObject({ split: ["s"], squash: ["S"], absorb: ["A"] });
+  expect(() => loadKeybindings({ bindings: { help: ["A"] } })).toThrow("Key A conflicts between absorb and help in the revision list");
   expect(() => loadKeybindings({ bindings: { help: ["s"] } })).toThrow("Key s conflicts between split and help in the revision list");
   // A global split or squash binding, written for the revision list, still gives way in the file browser.
   expect(loadKeybindings({ bindings: { split: ["x"] }, scopes: { files: { help: ["x"] } } }).scopes.files).toMatchObject({ split: [], help: ["x"] });
@@ -230,6 +231,7 @@ test("the file browser's split, squash and actions keys give way there to a conf
   const globalC = loadKeybindings({ bindings: { split: ["c"] } });
   expect(globalC.scopes.files).toMatchObject({ split: [], clearSelection: ["c"] });
   expect(globalC.scopes.revisions.split).toEqual(["c"]);
+  expect(loadKeybindings({ bindings: { absorb: ["m"] } }).scopes.files).toMatchObject({ absorb: [], fileActions: ["m"] });
   // Without a clash it still applies in the file browser.
   expect(loadKeybindings({ bindings: { split: ["x"] } }).scopes.files.split).toEqual(["x"]);
   // Bound on purpose in the file browser, they are checked like any other action.

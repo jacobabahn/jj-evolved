@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { Repository } from "../src/repository/repository";
+import type { Mutation } from "../src/repository/model";
+import { mutationArgs } from "../src/repository/mutation";
 import { fixture } from "./fixture";
 
 async function revision(repo: Repository, revset: string) {
@@ -46,6 +48,65 @@ test("absorb previews two recipients and leftovers without applying, then rewrit
     expect((await revision(repo, "@")).changeId).toBe(workingCopy.changeId);
   } finally { await f.cleanup(); }
 }, 15_000);
+
+// An ancestor owns three files whose names jj would read as fileset syntax or glob patterns; the source edits all three.
+async function absorbableFiles(f: Awaited<ReturnType<typeof fixture>>) {
+  const names = ["a b.txt", "x*.txt", "xy.txt"];
+  for (const name of names) await Bun.write(`${f.path}/${name}`, `${name} original\n`);
+  await f.jj("describe", "-m", "Owners");
+  await f.jj("new", "-m", "Fixes");
+  for (const name of names) await Bun.write(`${f.path}/${name}`, `${name} fixed\n`);
+  return names;
+}
+
+test("absorb limited to files moves only their edits, takes each path literally, and its preview lists only them", async () => {
+  const f = await fixture();
+  try {
+    await absorbableFiles(f);
+    const repo = await Repository.open(f.path);
+    const source = await revision(repo, "@");
+    // As a glob, x*.txt would also match xy.txt.
+    const action: Mutation = { kind: "absorb", revision: source, files: ["x*.txt"] };
+    expect(mutationArgs(action)).toEqual(["absorb", "--from", source.commitId, "--", 'root-file:"x*.txt"']);
+    const operation = await repo.operationId();
+    const prepared = await repo.prepare(action);
+    expect(prepared.summary).toContain("Only this file's edits can move; other files' edits stay in the source:\n  x*.txt\n");
+    const [, projected = "", remaining = ""] = prepared.summary.split(/Projected changes:|Remaining in source:/);
+    expect(projected).toContain("+x*.txt fixed");
+    expect(projected).not.toContain("xy.txt");
+    expect(projected).not.toContain("a b.txt");
+    expect(remaining).toContain("+xy.txt fixed");
+    expect(remaining).toContain("+a b.txt fixed");
+    expect(remaining).not.toContain("x*.txt");
+    expect(await repo.operationId()).toBe(operation);
+    await repo.apply(prepared);
+    const owners = "description(exact:'Owners\n')";
+    expect(await f.jj("file", "show", "-r", owners, 'root-file:"x*.txt"')).toBe("x*.txt fixed\n");
+    expect(await f.jj("file", "show", "-r", owners, 'root-file:"xy.txt"')).toBe("xy.txt original\n");
+    expect(await f.jj("file", "show", "-r", owners, 'root-file:"a b.txt"')).toBe("a b.txt original\n");
+    expect((await repo.files(await revision(repo, source.changeId))).map(file => file.path)).toEqual(["a b.txt", "xy.txt"]);
+  } finally { await f.cleanup(); }
+}, 15_000);
+
+test("absorb limited to a path with a space moves it with the others chosen, and absorb with no files still moves every file", async () => {
+  for (const files of [["a b.txt", "xy.txt"], undefined]) {
+    const f = await fixture();
+    try {
+      await absorbableFiles(f);
+      const repo = await Repository.open(f.path);
+      const source = await revision(repo, "@");
+      const prepared = await repo.prepare({ kind: "absorb", revision: source, ...(files ? { files } : {}) });
+      expect(prepared.summary.includes("other files' edits stay in the source")).toBe(!!files);
+      await repo.apply(prepared);
+      const owners = "description(exact:'Owners\n')";
+      for (const name of ["a b.txt", "x*.txt", "xy.txt"]) {
+        const moved = !files || files.includes(name);
+        expect(await f.jj("file", "show", "-r", owners, `root-file:${JSON.stringify(name)}`)).toBe(`${name} ${moved ? "fixed" : "original"}\n`);
+      }
+      expect((await repo.files(await revision(repo, source.changeId))).map(file => file.path)).toEqual(files ? ["x*.txt"] : []);
+    } finally { await f.cleanup(); }
+  }
+}, 20_000);
 
 for (const described of [false, true]) {
   test(`absorb fully assigned source, described=${described}`, async () => {
