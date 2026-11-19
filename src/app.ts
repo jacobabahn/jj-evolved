@@ -49,7 +49,8 @@ type Prompt =
   | { kind: "revset" }
   | { kind: "describe"; revision: Revision; original: string; discard: boolean }
   | { kind: "picker"; title: string; all: Choice[]; choices: Choice[]; attach?: () => void; source: boolean }
-  | { kind: "files"; revision: Revision; files: ChangedFile[] }
+  // `typing` holds the filter from before the one being typed, which Escape restores; null when no filter is being typed.
+  | { kind: "files"; revision: Revision; files: ChangedFile[]; typing: string | null }
   | { kind: "text"; label: string; accept: (value: string) => void }
   // Typing a bookmark name into the revision's row, with suggestions beneath it in the graph.
   | { kind: "bookmark"; revision: Revision }
@@ -131,6 +132,9 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["previewHalfDown", "previewHalfUp"]), "Scroll the preview by half page"],
       [keys(["diff"]), "Show the selected revision's diff"],
       [keys(["files"]), `Expand changed files under the revision; ${slash(keyLabel(files, "down", true), keyLabel(files, "up", true))} file, Enter focus diff, ${either(files, "back", "Esc")} collapse`],
+      [keys(["selectFile"], files), "In changed files, select or unselect the highlighted file (marked ✓); actions on files act on the selected ones, or on the highlighted file when none are"],
+      [keys(["clearSelection"], files), "In changed files, unselect every file"],
+      [keys(["filterFiles"], files), `In changed files, show only paths containing the typed text, ignoring case; selections stay when hidden, and ${either(files, "back", "Esc")} clears the filter before collapsing`],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -264,11 +268,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   const searchInput = new InputRenderable(renderer, { id: "search-input", visible: false, flexGrow: 1, minWidth: 1, placeholder: "Search active revset", ...fieldColors(colors), placeholderColor: colors.muted });
   const searchPrefix = new TextRenderable(renderer, { id: "search-prefix", visible: false, flexShrink: 0, marginLeft: 2, fg: colors.accent, content: "/" });
   const searchStatus = new EllipsisText(renderer, { id: "search-status", visible: false, height: 1, flexShrink: 0, marginLeft: 2, fg: colors.accent });
+  // The changed-files filter is typed in the same place as a search, and once kept shows there as "/text  3 of 10 files".
+  const fileFilterPrefix = new TextRenderable(renderer, { id: "file-filter-prefix", visible: false, flexShrink: 0, marginLeft: 2, fg: colors.accent, content: "/" });
+  const fileFilterInput = new InputRenderable(renderer, { id: "file-filter-input", visible: false, flexGrow: 1, minWidth: 1, placeholder: "Filter changed files", ...fieldColors(colors), placeholderColor: colors.muted });
+  const fileFilterStatus = new EllipsisText(renderer, { id: "file-filter-status", visible: false, height: 1, flexShrink: 0, marginLeft: 2, fg: colors.accent });
   const navigationStatus = new TextRenderable(renderer, { id: "navigation-status", visible: false, height: 1, fg: colors.accent, content: "temporary view (up to 40) · + outside filter" });
   // The one status slot: progress, results, errors and a kept search's position all report here, at the right end of the
   // revset row. While a search is typed, its field takes the message's place.
   const message = new EllipsisText(renderer, { id: "message", height: 1, flexShrink: 0, marginLeft: 2, maxWidth: statusWidth(), fg: colors.muted, content: "Loading history…" });
-  for (const child of [filter, message, searchPrefix, searchInput, searchStatus]) statusRow.add(child);
+  for (const child of [filter, message, searchPrefix, searchInput, searchStatus, fileFilterPrefix, fileFilterInput, fileFilterStatus]) statusRow.add(child);
   const inlineHint = new TextRenderable(renderer, { id: "inline-action", height: 2, flexShrink: 0, visible: false, fg: colors.accent });
   const shortcuts = new TextRenderable(renderer, { id: "shortcuts", height: 2, wrapMode: "none", fg: colors.accent });
   const chooser = new GroupedSelect(renderer, { id: "action-choices", visible: false, width: "100%", height: "45%", minHeight: 2, options: [], ...chooserColors(colors), showDescription: true, itemSpacing: 0, wrapSelection: false });
@@ -394,7 +402,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   // An error, or what a fetch or push reported, takes the room it needs and the revset gives way, as before. Other
   // messages, such as what a local action did, fit beside the revset and are cut with … instead.
   function fitMessage() {
-    const used = Bun.stringWidth(filter.plainText) + (searchStatus.visible ? 2 + Bun.stringWidth(searchStatus.plainText) : 0);
+    const used = Bun.stringWidth(filter.plainText) + [searchStatus, fileFilterStatus].reduce((total, status) => total + (status.visible ? 2 + Bun.stringWidth(status.plainText) : 0), 0);
     const wide = shownError || (remoteReport !== "" && shown === remoteReport);
     message.maxWidth = wide ? statusWidth() : Math.max(8, Math.min(statusWidth(), renderer.width - used - 2));
   }
@@ -473,12 +481,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const quit: Shortcut[] = [[key("help"), "help"], [key("quit"), "quit"]];
     switch (prompt.kind) {
       case "browse": break;
-      case "files": return [
-        { left: focus === "preview"
-          ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
-          : [[move, "file"], [preview.visible ? bothKeys("Enter", key("focus")) : "Enter", "focus diff"], [page, "scroll diff"], togglePreview] },
-        { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), "collapse"]], right: quit },
-      ];
+      case "files": {
+        if (prompt.typing !== null) return [{ left: [["Enter", "keep filter"]], right: [["Esc", "cancel"]] }, { left: [] }];
+        const marked = fileList.markedPaths.length;
+        return [
+          { left: focus === "preview"
+            ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
+            : [[move, "file"], [key("filterFiles"), "filter"], [preview.visible ? bothKeys("Enter", key("focus")) : "Enter", "focus diff"], [page, "scroll diff"], togglePreview] },
+          { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), fileList.filter ? "clear filter" : "collapse"],
+            [key("selectFile"), marked ? `select · ${marked} selected` : "select"], ...(marked ? [[key("clearSelection"), "clear"] as Shortcut] : [])], right: quit },
+        ];
+      }
       case "inline": return [{
         // Short labels, so Enter and the target still fit at 80 columns.
         left: [[move, "destination"], ...(prompt.action.kind === "rebase" ? [[key("rebaseScope"), "descendants"], [key("rebaseTarget"), `target: ${prompt.action.target}`]] as Shortcut[] : []),
@@ -749,9 +762,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     navigationStatus.visible = returnPoint !== null;
     const typing = prompt.kind === "search";
     searchStatus.visible = search.query.length > 0 || typing;
-    message.visible = !typing;
-    // While a search is typed, its field starts right after the revset and takes the rest of the row.
-    filter.flexGrow = typing ? 0 : 1;
+    const typingFilter = prompt.kind === "files" && prompt.typing !== null;
+    message.visible = !typing && !typingFilter;
+    // While a search or a files filter is typed, its field starts right after the revset and takes the rest of the row.
+    filter.flexGrow = typing || typingFilter ? 0 : 1;
     searchPrefix.visible = typing;
     const index = search.matches.findIndex(item => item.commitId === selected()?.commitId);
     const count = search.matches.length;
@@ -1008,6 +1022,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     chooser.blur();
     chooser.visible = false;
     fileList.blur();
+    fileFilterInput.blur();
+    fileFilterPrefix.visible = fileFilterInput.visible = fileFilterStatus.visible = false;
     list.collapse();
     listBox.title = " Revisions ";
     promptField.visible = false;
@@ -1217,12 +1233,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     const themed: [object[], (colors: Theme) => object][] = [
       [[app], c => ({ backgroundColor: c.bg })],
       [[suggestions], c => ({ fg: c.text })],
-      [[header, navigationStatus, searchPrefix, searchStatus, inlineHint, shortcuts, promptGlyph], c => ({ fg: c.accent })],
+      [[header, navigationStatus, searchPrefix, searchStatus, fileFilterPrefix, fileFilterStatus, inlineHint, shortcuts, promptGlyph], c => ({ fg: c.accent })],
       [[filter, message], c => ({ fg: c.muted })],
       [[listBox], c => ({ backgroundColor: c.panel })],
       [[overlayPreview], c => ({ borderColor: c.border })],
-      [[input, descriptionInput, searchInput], fieldColors],
-      [[input, searchInput], c => ({ placeholderColor: c.muted })],
+      [[input, descriptionInput, searchInput, fileFilterInput], fieldColors],
+      [[input, searchInput, fileFilterInput], c => ({ placeholderColor: c.muted })],
       [[bookmarkInput], bookmarkFieldColors],
       [[chooser], chooserColors],
     ];
@@ -1399,20 +1415,24 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const files = await repository.files(revision);
       if (stopped) return;
       closePrompt();
-      prompt = { kind: "files", revision, files };
+      prompt = { kind: "files", revision, files, typing: null };
       list.mouseSelectionEnabled = false;
       list.blur();
+      fileList.reset();
       expandFiles(revision, files);
       setFocus("list");
       if (files.length) void loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
     }, true);
   }
+  // The result is how many marked files left the change.
   function expandFiles(revision: Revision, files: ChangedFile[], selectPath?: string) {
     const index = revisions.findIndex(item => item.commitId === revision.commitId);
-    fileList.setFiles(files, list.continuationPrefix(index), maxFileRows(), selectPath);
+    const dropped = fileList.setFiles(files, list.continuationPrefix(index), maxFileRows(), selectPath);
     list.expand(index, fileList);
     list.scrollChildIntoView(fileList.id);
     updateFilesTitle();
+    updateFileFilterStatus();
+    return dropped;
   }
   // A third of the graph, so a large change scrolls within its list and the surrounding history stays in view.
   function maxFileRows() { return Math.max(3, Math.floor(list.viewport.height / 3)); }
@@ -1431,8 +1451,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (unchanged && !force) return;
     const files = unchanged ? current.files : await repository.files(revision);
     if (stopped || prompt !== current) return;
-    prompt = { kind: "files", revision, files };
-    expandFiles(revision, files, fileList.selectedFile?.path);
+    prompt = { ...current, revision, files };
+    const dropped = expandFiles(revision, files, fileList.selectedFile?.path);
+    if (dropped) report(`${dropped} selected ${dropped === 1 ? "file" : "files"} left the change.`);
     if (files.length) await loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
   }
   function fitTitle(text: string, width: number, keepEnd = false) {
@@ -1451,11 +1472,48 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   async function loadFilePreview() {
     if (prompt.kind !== "files") return;
-    const { revision } = prompt;
+    const { revision, files } = prompt;
     const file = fileList.selectedFile;
-    if (!file) return;
+    if (!file) {
+      // The filter hides every file. (For an empty change, the callers show that it is empty.)
+      if (files.length) show(`No changed files match ${JSON.stringify(fileList.filter)}.`, "Changed files");
+      return;
+    }
     ++previewNavigation;
     await previews.load({ target: "main", title: fileTitle(file.path), loading: "Loading diff…", read: signal => repository.diff(revision, [file.path], { signal }), empty: `No differences in ${file.path}.`, key: `file ${revision.changeId} ${file.path}` });
+  }
+  // The files filter's place in the status row: its field while typed, then "/text  3 of 10 files" while it applies.
+  function updateFileFilterStatus() {
+    const browsing = prompt.kind === "files", typing = prompt.kind === "files" && prompt.typing !== null;
+    fileFilterPrefix.visible = fileFilterInput.visible = typing;
+    fileFilterStatus.visible = typing || (browsing && fileList.filter !== "");
+    const position = `${fileList.visibleCount} of ${fileList.fileCount} ${fileList.fileCount === 1 ? "file" : "files"}`;
+    fileFilterStatus.content = terminalText(typing ? position : `/${fileList.filter}  ${position}`);
+    updateSearchStatus();
+  }
+  function beginFileFilter(state: Extract<Prompt, { kind: "files" }>) {
+    state.typing = fileList.filter;
+    fileFilterInput.value = fileList.filter;
+    if (focus === "preview") setFocus("list");
+    updateFileFilterStatus();
+    fileList.blur();
+    fileFilterInput.focus();
+  }
+  // Enter keeps the typed filter; Escape puts back the one from before.
+  function finishFileFilter(state: Extract<Prompt, { kind: "files" }>, cancel: boolean) {
+    if (state.typing === null) return;
+    if (cancel) fileList.setFilter(state.typing);
+    state.typing = null;
+    fileFilterInput.blur();
+    fileList.focus();
+    updateFileFilterStatus();
+  }
+  function onFileFilterInput() {
+    if (prompt.kind !== "files" || prompt.typing === null) return;
+    fileList.setFilter(fileFilterInput.value);
+    updateFileFilterStatus();
+    // With every file hidden there is no highlight to change, so the preview names the text as it is typed.
+    if (!fileList.selectedFile) void loadFilePreview();
   }
   function closeFiles() {
     if (prompt.kind !== "files") return;
@@ -2042,7 +2100,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function keyScope(): Scope | null {
     switch (prompt.kind) {
       case "browse": return "revisions";
-      case "files": return "files";
+      case "files": return prompt.typing === null ? "files" : null;
       case "inline": return "destination";
       case "picker": return pickerSearch?.active ? null : "menu";
       case "theme": case "help": return "menu";
@@ -2073,10 +2131,29 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (move) overlayPreview.scrollBy(move);
     else if (key.name === "pageup" || key.name === "pagedown") scrollPage(key, overlayPreview);
   }
-  function filesKey(key: KeyEvent) {
+  function filesKey(key: KeyEvent, state: Extract<Prompt, { kind: "files" }>) {
+    // While the filter is typed, the field takes every key but Enter and Escape.
+    if (state.typing !== null) {
+      if (key.name === "escape" || key.name === "return") { key.preventDefault(); finishFileFilter(state, key.name === "escape"); }
+      return;
+    }
     const action = keyAction;
     if (action === "togglePreview") { key.preventDefault(); setPreviewVisible(!preview.visible); return; }
-    if (key.name === "escape" || action === "back" || action === "files") { key.preventDefault(); if (!isBusy()) closeFiles(); return; }
+    if (key.name === "escape" || action === "back" || action === "files") {
+      key.preventDefault();
+      // The first press clears a filter, showing every file again with its selection; the next collapses.
+      if (fileList.filter) { fileList.setFilter(""); updateFileFilterStatus(); return; }
+      if (!isBusy()) closeFiles();
+      return;
+    }
+    if (action === "selectFile") { key.preventDefault(); if (fileList.selectedFile) fileList.toggleMark(); else report("No file to select."); return; }
+    if (action === "clearSelection") {
+      key.preventDefault();
+      const count = fileList.clearMarks();
+      report(count ? `Unselected ${count} ${count === 1 ? "file" : "files"}.` : "No files are selected.");
+      return;
+    }
+    if (action === "filterFiles") { key.preventDefault(); beginFileFilter(state); return; }
     if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (action === "help") { key.preventDefault(); showHelp(); return; }
     if (action === "focus" || key.name === "return") {
@@ -2321,6 +2398,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   bookmarkInput.on("input", updateCompletions);
   bookmarkInput.onCursorChange = updateCompletions;
   searchInput.on("input", queueSearch);
+  fileFilterInput.on("input", onFileFilterInput);
   list.canDrag = () => !stopped && !isBusy() && prompt.kind === "browse";
   list.onRebaseDrop = (revision, destination) => confirm({ kind: "rebase", revision, destination, descendants: false });
   list.onBookmarkDrop = (name, revision) => confirm({ kind: "bookmark-move", name, revision });

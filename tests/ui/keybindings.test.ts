@@ -197,6 +197,23 @@ test("scopes override an action in one place and check conflicts only among the 
   expect(() => loadKeybindings({ bindings: { help: ["h"] }, scopes: { menu: { back: ["h"] } } })).toThrow("Key h conflicts between help and back in the menus");
 });
 
+test("the file browser's select, clear and filter keys give way to a configuration that already uses them", () => {
+  const defaults = loadKeybindings({});
+  expect(defaults.scopes.files).toMatchObject({ selectFile: ["space"], clearSelection: ["c"], filterFiles: ["/"] });
+  // Space is the action menu in the revision list, which the file browser does not listen to.
+  expect(defaults.scopes.revisions.actions).toEqual(["space"]);
+  expect(keyLabel(defaults.scopes.files, "selectFile")).toBe("Space");
+  const taken = loadKeybindings({ bindings: { help: ["c"] }, scopes: { files: { down: ["/", "down"], up: ["space"] } } });
+  expect(taken.scopes.files).toMatchObject({ filterFiles: [], clearSelection: [], selectFile: [], down: ["/", "down"], help: ["c"], up: ["space"] });
+  expect(loadKeybindings({ bindings: { down: ["c x"] } }).scopes.files.clearSelection).toEqual([]);
+  // In the legacy preset, / is the revset filter in the revision list and still filters files in the browser.
+  expect(loadKeybindings({}, "legacy").scopes.files.filterFiles).toEqual(["/"]);
+  // Bound on purpose, they are checked like any other action, globally or in the files scope.
+  expect(() => loadKeybindings({ bindings: { filterFiles: ["/"] }, scopes: { files: { down: ["/"] } } })).toThrow("Key / conflicts between down and filterFiles in the file browser");
+  expect(() => loadKeybindings({ bindings: { help: ["c"] }, scopes: { files: { clearSelection: ["c"] } } })).toThrow("Key c conflicts between help and clearSelection in the file browser");
+  expect(loadKeybindings({ scopes: { files: { selectFile: ["x"], filterFiles: ["f"] } } }).scopes.files).toMatchObject({ selectFile: ["x"], filterFiles: ["f"] });
+});
+
 test("text prompts accept only keys that typing and editing do not use", () => {
   for (const key of ["x", "X", "space", "left", "return", "ctrl+a", "ctrl+e", "ctrl+w", "ctrl+u", "ctrl+k"]) {
     expect(() => loadKeybindings({ scopes: { prompt: { nextCompletion: [key] } } })).toThrow("would stop text prompts from accepting it");
