@@ -458,6 +458,37 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "file-selection", title: "Select changed files, filter them, and keep the selection, at 80x24",
+    async run(ui) {
+      await ui.f.jj("describe", "-m", "Tidy docs and scripts");
+      await Bun.write(`${ui.f.path}/hello.txt`, "hello, selected\n");
+      for (const name of ["docs/guide.md", "docs/release notes.md", "scripts/build*.sh", "src/main.ts"]) await Bun.write(`${ui.f.path}/${name}`, `${name}\n`);
+      await ui.resize(80, 24);
+      ui.key("r", { ctrl: true });
+      await ui.until("Tidy docs and scripts");
+      await ui.settled();
+      ui.key("l");
+      await ui.until("A src/main.ts");
+      // Select the release notes and the build script.
+      ui.key("j"); ui.key(" "); ui.key("j"); ui.key("j"); ui.key(" ");
+      await ui.until("2 selected");
+      assert(ui.screen.captureCharFrame().includes("✓ A docs/release notes.md"));
+      await ui.capture("Space selects files and the footer counts them");
+      ui.key("/");
+      await ui.until("Enter keep filter");
+      await ui.type("DOCS");
+      await ui.until("2 of 5 files");
+      ui.key("RETURN");
+      await ui.until("/DOCS  2 of 5 files");
+      assert(!ui.screen.captureCharFrame().includes("build*.sh"));
+      await ui.capture("A filter hides rows; the hidden selection still counts");
+      ui.key("h");
+      await ui.until("A scripts/build*.sh");
+      assert(ui.screen.captureCharFrame().includes("✓ A scripts/build*.sh"));
+      await ui.capture("h clears the filter first, and both files are still selected");
+    },
+  },
+  {
     name: "rebase", title: "Rebase preview and cancellation",
     async run(ui) {
       const before = await ui.repo.operationId();

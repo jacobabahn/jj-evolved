@@ -1892,7 +1892,7 @@ test("a large change scrolls within a height cap that follows resizes, and reope
     await t.until("── f00.txt ──");
     await t.screen.renderOnce();
     expect(files.scrollTop).toBe(0);
-    expect(t.screen.captureCharFrame()).toContain("┃ A f00.txt");
+    expect(t.screen.captureCharFrame()).toContain("┃  A f00.txt");
   } finally { await t.cleanup(); }
 }, 20_000);
 

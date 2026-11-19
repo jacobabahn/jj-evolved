@@ -16,7 +16,8 @@ export const jjuiBindings = {
   abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
   new: ["n"], actions: ["space"], bookmarks: ["b"], setBookmark: ["B"], git: ["g"], publish: [], operations: ["o"], undo: ["u"], files: ["l", "right"],
   diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], lastError: ["ctrl+e"], quit: ["q"],
-  back: ["h", "left"], nextCompletion: ["tab", "ctrl+n"], previousCompletion: ["ctrl+p"], saveDescription: ["ctrl+s", "ctrl+d"],
+  back: ["h", "left"], selectFile: ["space"], clearSelection: ["c"], filterFiles: ["/"],
+  nextCompletion: ["tab", "ctrl+n"], previousCompletion: ["ctrl+p"], saveDescription: ["ctrl+s", "ctrl+d"],
 } satisfies Record<string, string[]>;
 export type Action = keyof typeof jjuiBindings;
 export type Keybindings = Record<Action, string[]>;
@@ -31,7 +32,8 @@ export const scopeActions = {
     "clearSearch", "describe", "describeExternal", "edit", "rebase", "squash", "abandon", "absorb", "split", "evolution", "new",
     "actions", "bookmarks", "setBookmark", "git", "publish", "operations", "undo", "files", "diff", "togglePreview", "theme",
     "help", "lastError", "quit"],
-  files: ["down", "up", "focus", "pageUp", "pageDown", "previewUp", "previewDown", "previewHalfUp", "previewHalfDown", "togglePreview", "files", "back", "help", "quit"],
+  files: ["down", "up", "focus", "pageUp", "pageDown", "previewUp", "previewDown", "previewHalfUp", "previewHalfDown", "togglePreview", "files", "back",
+    "selectFile", "clearSelection", "filterFiles", "help", "quit"],
   // Choosing an inline rebase or squash destination in the graph.
   destination: ["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "rebaseTarget", "loadMore", "togglePreview"],
   // Action menus, pickers, the theme chooser, the keyboard reference, and the rebase and squash form.
@@ -106,14 +108,22 @@ function checkReserved(scope: Scope, table: Keybindings) {
   }
 }
 /**
- * back took over h and Left, which were fixed keys before they could be bound. Its default keys step aside for any
- * other action of the scope bound to them, so a configuration that put help on h keeps working.
+ * Actions added after their default keys could already be bound to something else: back took over h and Left, which
+ * were fixed keys before they could be bound, and the file browser's select, clear and filter keys came later. Unless
+ * an action is configured itself, its default keys step aside for any other action of the scope bound to them, so a
+ * configuration that put help on h or down on / keeps working.
  */
-function yieldBack(scope: Scope, table: Keybindings): Keybindings {
-  if (!(scopeActions[scope] as readonly Action[]).includes("back")) return table;
-  const others = scopeActions[scope].filter(action => action !== "back").flatMap(action => table[action]);
-  const back = table.back.filter(key => !others.some(binding => binding === key || binding.startsWith(key + " ")));
-  return back.length === table.back.length ? table : { ...table, back };
+const yieldingActions: readonly Action[] = ["back", "selectFile", "clearSelection", "filterFiles"];
+function yieldDefaults(scope: Scope, table: Keybindings, configured: ReadonlySet<Action> = new Set()): Keybindings {
+  const yielding = scopeActions[scope].filter(action => yieldingActions.includes(action) && !configured.has(action));
+  if (!yielding.length) return table;
+  const others = scopeActions[scope].filter(action => !yielding.includes(action)).flatMap(action => table[action]);
+  let result = table;
+  for (const action of yielding) {
+    const keys = table[action].filter(key => !others.some(binding => binding === key || binding.startsWith(key + " ")));
+    if (keys.length !== table[action].length) result = { ...result, [action]: keys };
+  }
+  return result;
 }
 /** Two actions of one scope may not share a key, and no binding may be the start of another, which would never run. */
 function checkConflicts(scope: Scope, table: Keybindings) {
@@ -147,7 +157,9 @@ export function loadKeybindings(value: unknown, preset?: Preset): KeybindingConf
   if (!isObject(scoped)) throw new Error("Expected a scopes object mapping scope names to bindings.");
   let overrides = Object.keys(bindings).length;
   const scopes = {} as Record<Scope, Keybindings>;
-  const explicitBack = new Set<Scope>(Object.hasOwn(bindings, "back") ? scopeNames : []);
+  // Yielding actions the configuration binds, globally or in one scope, keep their keys.
+  const global = yieldingActions.filter(action => Object.hasOwn(bindings, action));
+  const configured = Object.fromEntries(scopeNames.map(scope => [scope, new Set<Action>(global)])) as Record<Scope, Set<Action>>;
   for (const scope of scopeNames) scopes[scope] = structuredClone(result);
   for (const [scope, table] of Object.entries(scoped)) {
     if (!Object.hasOwn(scopeActions, scope)) throw new Error(`Unknown keybinding scope: ${scope}. Use one of: ${scopeNames.join(", ")}.`);
@@ -156,11 +168,11 @@ export function loadKeybindings(value: unknown, preset?: Preset): KeybindingConf
       if (!Object.hasOwn(jjuiBindings, action)) throw new Error(`Unknown keybinding action: ${action}`);
       if (!(scopeActions[scope as Scope] as readonly string[]).includes(action)) throw new Error(`Action ${action} does not apply in the ${scope} scope. Actions there: ${scopeActions[scope as Scope].join(", ")}.`);
       scopes[scope as Scope][action as Action] = parseKeys(action, keys, ` in ${scope}`);
-      if (action === "back") explicitBack.add(scope as Scope);
+      configured[scope as Scope].add(action as Action);
       ++overrides;
     }
   }
-  for (const scope of scopeNames) if (!explicitBack.has(scope)) scopes[scope] = yieldBack(scope, scopes[scope]);
+  for (const scope of scopeNames) scopes[scope] = yieldDefaults(scope, scopes[scope], configured[scope]);
   for (const scope of scopeNames) { checkReserved(scope, scopes[scope]); checkConflicts(scope, scopes[scope]); }
   return { preset: chosen, custom: overrides > 0, bindings: result, scopes };
 }
@@ -169,7 +181,7 @@ export function parseKeybindings(value: unknown, preset?: Preset): Keybindings {
 }
 /** The keymap for a validated global table with no scope overrides. */
 export function keymap(bindings: Keybindings): Keymap {
-  return { bindings, scopes: Object.fromEntries(scopeNames.map(scope => [scope, yieldBack(scope, bindings)])) as Record<Scope, Keybindings> };
+  return { bindings, scopes: Object.fromEntries(scopeNames.map(scope => [scope, yieldDefaults(scope, bindings)])) as Record<Scope, Keybindings> };
 }
 
 export function keybindingsPath() {

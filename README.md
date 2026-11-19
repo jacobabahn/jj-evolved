@@ -65,6 +65,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `p` | Hide or show the preview |
 | `d` | Show the selected revision's diff |
 | `l` / Right | Expand the changed files beneath the revision; `j` / `k` preview one file at a time, `h` / Left collapses |
+| `Space` / `c` / `/` in changed files | Select or unselect the highlighted file / unselect all / filter paths by text (`h` / Left clears the filter first) |
 | `L` | Filter the graph with a revset |
 | `/` | Search revisions; `'` / `"` step through matches |
 | `Ctrl+L` | Load 200 more revisions |

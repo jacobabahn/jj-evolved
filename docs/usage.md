@@ -61,7 +61,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `g` | Git menu: `p` publishes the selected change, `f` fetches, `F` fetches from every remote, `s` syncs the selected stack with trunk, `r` browses remotes |
 | `o` | Browse operation history, inspect an operation, or restore its state |
 | `u` | Preview undo of the latest operation |
-| `l` / Right | Expand the selected revision's changed files beneath it in the graph; `j` / `k` preview one file at a time, `h` / Left / Escape collapses |
+| `l` / Right | Expand the selected revision's changed files beneath it in the graph; `j` / `k` preview one file at a time, Space selects files, `/` filters paths, `h` / Left / Escape collapses |
 | `d` | Return to the revision's diff preview |
 | `t` | Preview and save a theme |
 | `?` | Open scrollable help; Escape or `?` closes it |
@@ -79,7 +79,11 @@ Menu actions open in overlays, leaving the graph and selected revision visible b
 
 ## Changed files
 
-Press `l` or Right, or choose **Browse changed files** from the Space menu, to expand the selected revision's changed files beneath it in the graph. The rest of the graph stays in view, the revision is marked `▾`, and the pane is titled with its change ID. Each file shows a status letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied. A long list scrolls within a third of the pane. `j` and `k` move through the files, and the preview shows only the selected file's diff with the path as its title. Enter reveals the diff if hidden and moves focus to it so `j` and `k` scroll it; Tab switches focus back. Page Up / Page Down, `Ctrl+N` / `Ctrl+P`, `Ctrl+D` / `Ctrl+U`, and `p` control the preview as usual. `h`, Left, Escape, or `l` again collapses the list with the same revision selected and reloads its full diff. An empty change shows "Empty change. No changed files." beneath it. Automatic refresh continues while the list is open: when the change is rewritten, for example as you edit files in the working copy, the list reloads and keeps the selected file; when the change leaves the graph, the list collapses.
+Press `l` or Right, or choose **Browse changed files** from the Space menu, to expand the selected revision's changed files beneath it in the graph. The rest of the graph stays in view, the revision is marked `▾`, and the pane is titled with its change ID. Each file shows a status letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied. A long list scrolls within a third of the pane. `j` and `k` move through the files, and the preview shows only the selected file's diff with the path as its title. Enter reveals the diff if hidden and moves focus to it so `j` and `k` scroll it; Tab switches focus back. Page Up / Page Down, `Ctrl+N` / `Ctrl+P`, `Ctrl+D` / `Ctrl+U`, and `p` control the preview as usual. `h`, Left, Escape, or `l` again collapses the list with the same revision selected and reloads its full diff. An empty change shows "Empty change. No changed files." beneath it. Automatic refresh continues while the list is open: when the change is rewritten, for example as you edit files in the working copy, the list reloads and keeps the highlighted file; when the change leaves the graph, the list collapses.
+
+Space selects the highlighted file, marking its row `✓`, or unselects it; `c` unselects every file. The footer counts the selected files. Actions on files act on the selected ones, in list order, when any are selected, and otherwise on the highlighted file. Selections belong to paths: a refresh keeps them on files still in the change, and when a selected file leaves the change the status line says how many selections were dropped. Selections last until the list collapses.
+
+`/` filters the list to paths containing the typed text, ignoring case; every character, including `*`, `?`, `[` and spaces, is taken literally. The list narrows as you type and the status line counts the files shown; Enter keeps the filter and Escape puts back the one before. The kept filter shows as `/text  3 of 10 files`, and `/` again edits it. Filtering hides rows but never drops a selection, so clearing the filter shows every selected file still selected. While a filter applies, `h`, Left, Escape, or `l` clears it first; the next press collapses the list.
 
 ## Absorb
 
@@ -215,7 +219,7 @@ change an action in one place only:
 | Scope | Where | Actions |
 | --- | --- | --- |
 | `revisions` | Browsing the revision list and the preview beside it | every browse action in the table below |
-| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `help`, `quit` |
+| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `help`, `quit` |
 | `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `rebaseTarget`, `loadMore`, `togglePreview` |
 | `menu` | Action menus, pickers, the theme chooser, help, and the rebase and squash form | `down`, `up`, `back`, `help` |
 | `prompt` | The revset prompt, bookmark names, the description editor and quick inputs | `nextCompletion`, `previousCompletion`, `saveDescription` |
@@ -228,10 +232,11 @@ keys always move, Enter chooses or submits, Escape goes back or cancels, PgDn/Pg
 scroll an overlay's preview, and Shift-Tab picks the previous suggestion. Enter and
 Escape cannot be bound in menus. In `prompt`, only `tab`, `f1`–`f12` and control keys
 can be bound, so every printable key still types; the editing keys `ctrl+a`, `ctrl+b`,
-`ctrl+e`, `ctrl+f`, `ctrl+k`, `ctrl+u` and `ctrl+w` are refused too. `back`'s
-defaults, `h` and Left, give way to any other action of the same scope bound to them
-(a `"help": ["h"]` binding keeps working); bound explicitly, `back` is checked like any
-other action. Text typed into a search or filter field is never matched against
+`ctrl+e`, `ctrl+f`, `ctrl+k`, `ctrl+u` and `ctrl+w` are refused too. The defaults of
+`back` (`h` and Left) and of the file browser's `selectFile`, `clearSelection` and
+`filterFiles` (Space, `c` and `/`) give way to any other action of the same scope bound
+to them (a `"help": ["h"]` binding keeps working); bound explicitly, they are checked
+like any other action. Text typed into a search or filter field is never matched against
 bindings, and the rebase and squash form keeps its `p` preview key.
 
 Available actions and defaults:
@@ -256,6 +261,7 @@ Available actions and defaults:
 | `publish` | unbound | unbound |
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
 | `back` (file browser and menus) | `h`/`left` | same |
+| `selectFile`, `clearSelection`, `filterFiles` (file browser) | `space`, `c`, `/` | same |
 | `nextCompletion`, `previousCompletion` (prompts) | `tab`/`ctrl+n`, `ctrl+p` | same |
 | `saveDescription` (description editor) | `ctrl+s`/`ctrl+d` | same |
 
