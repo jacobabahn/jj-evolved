@@ -120,13 +120,18 @@ function yields(scope: Scope, action: Action) { return yieldingActions.includes(
 function yieldDefaults(scope: Scope, table: Keybindings, configured: ReadonlySet<Action> = new Set()): Keybindings {
   const yielding = scopeActions[scope].filter(action => yields(scope, action) && !configured.has(action));
   if (!yielding.length) return table;
-  const others = scopeActions[scope].filter(action => !yielding.includes(action)).flatMap(action => table[action]);
-  let result = table;
-  for (const action of yielding) {
-    const keys = table[action].filter(key => !others.some(binding => binding === key || binding.startsWith(key + " ")));
-    if (keys.length !== table[action].length) result = { ...result, [action]: keys };
-  }
-  return result;
+  const step = (result: Keybindings, actions: readonly Action[], others: string[]) => {
+    for (const action of actions) {
+      const keys = result[action].filter(key => !others.some(binding => binding === key || binding.startsWith(key + " ")));
+      if (keys.length !== result[action].length) result = { ...result, [action]: keys };
+    }
+    return result;
+  };
+  const result = step(table, yielding, scopeActions[scope].filter(action => !yielding.includes(action)).flatMap(action => table[action]));
+  // An action that gives way in this scope only may carry a global binding meant for elsewhere, so it also gives way to
+  // the other yielding actions here: a global split on c leaves the file browser's c to clear the selection.
+  const scoped = yielding.filter(action => yieldingInScope[scope]?.includes(action));
+  return step(result, scoped, scopeActions[scope].filter(action => !scoped.includes(action)).flatMap(action => result[action]));
 }
 /** Two actions of one scope may not share a key, and no binding may be the start of another, which would never run. */
 function checkConflicts(scope: Scope, table: Keybindings) {
@@ -160,8 +165,10 @@ export function loadKeybindings(value: unknown, preset?: Preset): KeybindingConf
   if (!isObject(scoped)) throw new Error("Expected a scopes object mapping scope names to bindings.");
   let overrides = Object.keys(bindings).length;
   const scopes = {} as Record<Scope, Keybindings>;
-  // Yielding actions the configuration binds, globally or in one scope, keep their keys.
-  const global = Object.keys(bindings) as Action[];
+  // Yielding actions the configuration binds, globally or in one scope, keep their keys. An action that gives way in one
+  // scope only, such as split in the file browser, may have been bound globally before it applied there, so only a
+  // binding in that scope keeps its keys there.
+  const global = yieldingActions.filter(action => Object.hasOwn(bindings, action));
   const configured = Object.fromEntries(scopeNames.map(scope => [scope, new Set<Action>(global)])) as Record<Scope, Set<Action>>;
   for (const scope of scopeNames) scopes[scope] = structuredClone(result);
   for (const [scope, table] of Object.entries(scoped)) {

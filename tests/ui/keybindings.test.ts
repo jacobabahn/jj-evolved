@@ -224,8 +224,16 @@ test("the file browser's split, squash and actions keys give way there to a conf
   // In the revision list split and squash keep their keys and conflicts, as before.
   expect(taken.scopes.revisions).toMatchObject({ split: ["s"], squash: ["S"] });
   expect(() => loadKeybindings({ bindings: { help: ["s"] } })).toThrow("Key s conflicts between split and help in the revision list");
-  // Bound on purpose, they are checked like any other action.
-  expect(() => loadKeybindings({ bindings: { split: ["c"] }, scopes: { files: { clearSelection: ["c"] } } })).toThrow("Key c conflicts between split and clearSelection in the file browser");
+  // A global split or squash binding, written for the revision list, still gives way in the file browser.
+  expect(loadKeybindings({ bindings: { split: ["x"] }, scopes: { files: { help: ["x"] } } }).scopes.files).toMatchObject({ split: [], help: ["x"] });
+  expect(loadKeybindings({ bindings: { squash: ["x"] }, scopes: { files: { togglePreview: ["x"] } } }).scopes.files).toMatchObject({ squash: [], togglePreview: ["x"] });
+  const globalC = loadKeybindings({ bindings: { split: ["c"] } });
+  expect(globalC.scopes.files).toMatchObject({ split: [], clearSelection: ["c"] });
+  expect(globalC.scopes.revisions.split).toEqual(["c"]);
+  // Without a clash it still applies in the file browser.
+  expect(loadKeybindings({ bindings: { split: ["x"] } }).scopes.files.split).toEqual(["x"]);
+  // Bound on purpose in the file browser, they are checked like any other action.
+  expect(() => loadKeybindings({ scopes: { files: { split: ["c"], clearSelection: ["c"] } } })).toThrow("Key c conflicts between split and clearSelection in the file browser");
   expect(loadKeybindings({ scopes: { files: { fileActions: ["x"], split: ["X"] } } }).scopes.files).toMatchObject({ fileActions: ["x"], split: ["X"] });
 });
 
