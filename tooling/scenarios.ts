@@ -564,6 +564,38 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "file-history", title: "Show a changed file's history from the changed-files browser, and return, at 80x24",
+    async run(ui) {
+      // The release notes change in three revisions; the build script, whose * would match build.sh as a glob, in one.
+      const steps: [string, Record<string, string>][] = [
+        ["Draft release notes", { "docs/release notes.md": "draft", "scripts/build.sh": "build" }],
+        ["Add the build script", { "scripts/build*.sh": "build all" }],
+        ["Reword release notes", { "docs/release notes.md": "reworded", "scripts/build.sh": "build quietly" }],
+        ["Final release notes", { "docs/release notes.md": "final", "scripts/build*.sh": "build all quietly" }],
+      ];
+      for (const [description, contents] of steps) {
+        await ui.f.jj("new", "-m", description);
+        for (const [name, text] of Object.entries(contents)) await Bun.write(`${ui.f.path}/${name}`, `${text}\n`);
+      }
+      await ui.resize(80, 24);
+      ui.key("r", { ctrl: true });
+      await ui.until("Final release notes");
+      await ui.settled();
+      ui.key("@");
+      await ui.settled();
+      ui.key("l");
+      await ui.until("M scripts/build*.sh");
+      await ui.until("H history");
+      await ui.capture("The changed-files browser offers the highlighted file's history");
+      ui.key("H");
+      await ui.until('revset: files(root-file:"docs/release notes.md")  ·  3 revisions');
+      await ui.capture("The graph lists the revisions that change that path");
+      ui.key("o", { ctrl: true });
+      await ui.until("M scripts/build*.sh");
+      await ui.capture("Return restores the revset and the files browser");
+    },
+  },
+  {
     name: "rebase", title: "Rebase preview and cancellation",
     async run(ui) {
       const before = await ui.repo.operationId();
