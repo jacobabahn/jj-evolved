@@ -33,7 +33,7 @@ export const scopeActions = {
     "actions", "bookmarks", "setBookmark", "git", "publish", "operations", "undo", "files", "diff", "togglePreview", "theme",
     "help", "lastError", "quit"],
   files: ["down", "up", "focus", "pageUp", "pageDown", "previewUp", "previewDown", "previewHalfUp", "previewHalfDown", "togglePreview", "files", "back",
-    "selectFile", "clearSelection", "filterFiles", "split", "squash", "fileActions", "help", "quit"],
+    "selectFile", "clearSelection", "filterFiles", "split", "squash", "absorb", "fileActions", "help", "quit"],
   // Choosing an inline rebase or squash destination in the graph.
   destination: ["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "rebaseTarget", "loadMore", "togglePreview"],
   // Action menus, pickers, the theme chooser, the keyboard reference, and the rebase and squash form.
@@ -110,12 +110,12 @@ function checkReserved(scope: Scope, table: Keybindings) {
 /**
  * Actions added after their default keys could already be bound to something else: back took over h and Left, which
  * were fixed keys before they could be bound, and the file browser's select, clear, filter and actions keys came later.
- * Split and squash joined the file browser later too, so they give way there only. Unless an action is configured
+ * Split, squash and absorb joined the file browser later too, so they give way there only. Unless an action is configured
  * itself, its default keys step aside for any other action of the scope bound to them, so a configuration that put help
  * on h or down on / or s keeps working.
  */
 const yieldingActions: readonly Action[] = ["back", "selectFile", "clearSelection", "filterFiles", "fileActions"];
-const yieldingInScope: Partial<Record<Scope, readonly Action[]>> = { files: ["split", "squash"] };
+const yieldingInScope: Partial<Record<Scope, readonly Action[]>> = { files: ["split", "squash", "absorb"] };
 function yields(scope: Scope, action: Action) { return yieldingActions.includes(action) || !!yieldingInScope[scope]?.includes(action); }
 function yieldDefaults(scope: Scope, table: Keybindings, configured: ReadonlySet<Action> = new Set()): Keybindings {
   const yielding = scopeActions[scope].filter(action => yields(scope, action) && !configured.has(action));

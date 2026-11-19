@@ -107,7 +107,7 @@ test("squash from the selection moves the selected files, a rename included, and
   await mark(ui, "moved [v1].txt", "a b.txt");
   ui.key("m");
   await ui.until("File actions · 2 selected");
-  expect(options(ui)).toEqual(["Split · 2 selected", "Split in diff editor · 2 selected", "Squash · 2 selected", "Squash in diff editor · 2 selected"]);
+  expect(options(ui)).toEqual(["Split · 2 selected", "Split in diff editor · 2 selected", "Squash · 2 selected", "Squash in diff editor · 2 selected", "Absorb · 2 selected"]);
   ui.choose("Squash · 2 selected");
   await ui.until("Files: 2 selected");
   ui.choose("Destination: Choose a revision", "history-fields");
@@ -266,3 +266,77 @@ test("a diff editor that fails returns to the browser with its selection and fil
     }, { prepare: async f => { await tricky.prepare(f); editor = await recordingEditor(f); } });
   } finally { await editor?.cleanup(); }
 }, 20_000);
+
+// "Owners" adds three files, with a space and wildcard characters in their names, and the working copy, "Fixes", edits
+// all three, so absorb could move every edit into Owners.
+const owned = ["a b.txt", "x*.txt", "xy.txt"];
+const absorbable = {
+  prepare: async (f: { path: string; jj(...args: string[]): Promise<string> }) => {
+    for (const name of owned) await Bun.write(join(f.path, name), `${name} original\n`);
+    await f.jj("describe", "-m", "Owners");
+    await f.jj("new", "-m", "Fixes");
+    for (const name of owned) await Bun.write(join(f.path, name), `${name} fixed\n`);
+  },
+};
+async function ownerContents(ui: Ui) {
+  return Object.fromEntries(await Promise.all(owned.map(async name =>
+    [name, (await ui.f.jj("file", "show", "-r", "description(exact:'Owners\n')", `root-file:${JSON.stringify(name)}`)).trim()])));
+}
+
+test("absorb from the highlighted file previews and moves only its edits; the other files' edits stay in the source", () => withUiFixture("file-absorb-highlighted", async ui => {
+  await ui.until("Ready.");
+  ui.key("l");
+  await ui.until("M xy.txt");
+  await highlight(ui, "x*.txt");
+  expect(footer(ui)).toContain("m actions · highlighted file");
+  ui.key("A");
+  await ui.until("Absorb preview · 1 file");
+  const preview = ui.screen.captureCharFrame();
+  expect(preview).toContain("Only this file's edits can move");
+  ui.key("RETURN");
+  await ui.until("Absorbed 1 file of");
+
+  expect(await ownerContents(ui)).toEqual({ "a b.txt": "a b.txt original", "x*.txt": "x*.txt fixed", "xy.txt": "xy.txt original" });
+  expect(await summary(ui, "description(exact:'Fixes\n')")).toEqual(["M a b.txt", "M xy.txt"]);
+  for (const name of owned) expect(await Bun.file(join(ui.f.path, name)).text()).toBe(`${name} fixed\n`);
+}, absorbable), 20_000);
+
+test("absorb from the selection through the menu moves only the selected files, and cancelling it changes nothing", () => withUiFixture("file-absorb-selection", async ui => {
+  await ui.until("Ready.");
+  ui.key("l");
+  await ui.until("M xy.txt");
+  await mark(ui, "a b.txt", "x*.txt");
+  await highlight(ui, "xy.txt");
+  const operation = await ui.repo.operationId();
+  async function backInBrowser(step: string) {
+    await ui.until("m actions · 2 selected");
+    expect({ step, marked: files(ui).markedPaths, highlighted: files(ui).selectedFile?.path })
+      .toEqual({ step, marked: ["a b.txt", "x*.txt"], highlighted: "xy.txt" });
+    expect(ui.node("changed-files").visible).toBe(true);
+    expect(await ui.repo.operationId()).toBe(operation);
+  }
+
+  // Cancel from the review opened by the key, then from the review opened by the menu, which steps back to the menu first.
+  ui.key("A");
+  await ui.until("Absorb preview · 2 files");
+  await escape(ui);
+  await backInBrowser("absorb review");
+  ui.key("m");
+  await ui.until("File actions · 2 selected");
+  ui.choose("Absorb · 2 selected");
+  await ui.until("Absorb preview · 2 files");
+  await escape(ui);
+  await ui.until("File actions · 2 selected");
+  await escape(ui);
+  await backInBrowser("absorb review from the menu");
+  expect(await ownerContents(ui)).toEqual({ "a b.txt": "a b.txt original", "x*.txt": "x*.txt original", "xy.txt": "xy.txt original" });
+
+  ui.key("m");
+  await ui.until("File actions · 2 selected");
+  ui.choose("Absorb · 2 selected");
+  await ui.until("Absorb preview · 2 files");
+  ui.key("RETURN");
+  await ui.until("Absorbed 2 files of");
+  expect(await ownerContents(ui)).toEqual({ "a b.txt": "a b.txt fixed", "x*.txt": "x*.txt fixed", "xy.txt": "xy.txt original" });
+  expect(await summary(ui, "description(exact:'Fixes\n')")).toEqual(["M xy.txt"]);
+}, absorbable), 20_000);

@@ -140,7 +140,8 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["filterFiles"], files), `In changed files, show only paths containing the typed text, ignoring case; selections stay when hidden, and ${either(files, "back", "Esc")} clears the filter before collapsing`],
       [fileKeys("split"), "In changed files, split the selected files, or the highlighted one when none are, into a first change: the split chooser opens with them ticked"],
       [fileKeys("squash"), "In changed files, squash the selected files, or the highlighted one, in the squash form with them as its files"],
-      [keys(["fileActions"], files), "In changed files, the actions for the selected files, or the highlighted one: split or squash in the app or in JJ's diff editor, offering only those files. The footer says which files they act on; cancelling returns to the files with the selection and filter kept"],
+      [fileKeys("absorb"), "In changed files, preview absorbing only the selected files' edits, or the highlighted one's, into mutable ancestors"],
+      [keys(["fileActions"], files), "In changed files, the actions for the selected files, or the highlighted one: split or squash in the app or in JJ's diff editor, offering only those files, or absorb only them. The footer says which files they act on; cancelling returns to the files with the selection and filter kept"],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -1174,7 +1175,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       case "edit": return `${id(action.revision)} is now the working copy.`;
       case "describe": return `Saved the description of ${id(action.revision)}.`;
       case "abandon": return `Abandoned ${id(action.revision)}.`;
-      case "absorb": return `Absorbed ${id(action.revision)} into its ancestors.`;
+      case "absorb": return action.files?.length
+        ? `Absorbed ${fileCount(action.files.length)} of ${id(action.revision)} into its ancestors.`
+        : `Absorbed ${id(action.revision)} into its ancestors.`;
       case "rebase": return `Rebased ${id(action.revision)}${action.descendants ? " and its descendants" : ""} ${rebaseTargetText(action, id)}.`;
       case "squash": return `Squashed ${id(action.revision)} into ${id(action.destination)}.`;
       case "split": return `Split ${id(action.revision)}.`;
@@ -1192,9 +1195,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function operationLabel(kind: Mutation["kind"]) {
     return kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ").replace(/^[a-z]/, letter => letter.toUpperCase());
   }
+  // An absorb from the changed-files browser names how many files it is limited to.
+  function absorbScope(action: Mutation) {
+    return action.kind === "absorb" && action.files?.length ? ` · ${fileCount(action.files.length)}` : "";
+  }
+  function fileCount(count: number) { return `${count} ${count === 1 ? "file" : "files"}`; }
   function openReview(action: Mutation, prepared: PreparedMutation, edit: (() => void) | null, back: (() => void) | null, extras: ReviewExtras = {}) {
     // A rebase names its target in the title, so the review says how the changes will be placed before any scrolling.
-    const title = `${operationLabel(action.kind)} preview${action.kind === "rebase" && action.target && action.target !== "onto" ? ` · ${rebaseTargetName(action.target).toLowerCase()}` : ""}`;
+    const title = `${operationLabel(action.kind)} preview${action.kind === "rebase" && action.target && action.target !== "onto" ? ` · ${rebaseTargetName(action.target).toLowerCase()}` : ""}${absorbScope(action)}`;
     showOverlay(prepared.summary, title);
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
     openPrompt({ kind: "confirm", action, edit, back, extras }, `Review before applying · ${title}`);
@@ -1464,9 +1472,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     return { revision: prompt.revision, targets, back: { ...fileList.state, revision: prompt.revision, files: prompt.files, path: fileList.selectedFile?.path } };
   }
-  /** Starts split or squash on the browser's target files: in the app's chooser and form, or in JJ's diff editor. */
-  function fileAction(kind: "split" | "squash", editor: boolean, revision: Revision, targets: FileTargets, back: FilesReturn) {
+  /** Starts split, squash or absorb on the browser's target files: in the app's chooser, form or review, or in JJ's diff editor. */
+  function fileAction(kind: "split" | "squash" | "absorb", editor: boolean, revision: Revision, targets: FileTargets, back: FilesReturn) {
     const files = targets.paths;
+    if (kind === "absorb") { filesReturn = back; confirm({ kind: "absorb", revision, files }); return; }
     if (kind === "squash" && !editor) { openHistory(revision, "squash", false, files, back); return; }
     filesReturn = back;
     if (kind === "split" && !editor) splitChange(revision, files, targets.label);
@@ -1488,6 +1497,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       entry("split", true, "Choose hunks of only these files in JJ's configured diff editor"),
       entry("squash", false, "Open the squash form with these files as its files"),
       entry("squash", true, "Choose a destination, then hunks of only these files in JJ's configured diff editor"),
+      { key: key("absorb"), name: `Absorb · ${label}`, description: "Preview moving only these files' edits into mutable ancestors",
+        preview: async () => paths, choose: () => fileAction("absorb", false, revision, targets, back) },
     ]);
   }
   // The result is how many marked files left the change.
@@ -2229,7 +2240,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (action === "filterFiles") { key.preventDefault(); beginFileFilter(state); return; }
-    if (action === "split" || action === "squash" || action === "fileActions") {
+    if (action === "split" || action === "squash" || action === "absorb" || action === "fileActions") {
       key.preventDefault();
       if (isBusy()) return;
       const target = fileTargets();

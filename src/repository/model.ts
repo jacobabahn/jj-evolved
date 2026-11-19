@@ -66,7 +66,9 @@ export type Mutation =
   | { kind: "git-fetch-all"; remotes: Remote[] }
   | { kind: "describe"; revision: Revision; description: string }
   | { kind: "new"; parent: Revision }
-  | { kind: "edit" | "abandon" | "absorb"; revision: Revision }
+  | { kind: "edit" | "abandon"; revision: Revision }
+  // `files` limits the absorb to those paths, as the changed-files browser's targets do; without it, every changed file.
+  | { kind: "absorb"; revision: Revision; files?: string[] }
   | RebaseMutation
   | { kind: "squash"; revision: Revision; destination: Revision; description: string; files: string[] }
   | { kind: "split"; revision: Revision; files: string[]; description: string; secondDescription: string }
