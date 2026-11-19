@@ -132,7 +132,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["previewHalfDown", "previewHalfUp"]), "Scroll the preview by half page"],
       [keys(["diff"]), "Show the selected revision's diff"],
       [keys(["files"]), `Expand changed files under the revision; ${slash(keyLabel(files, "down", true), keyLabel(files, "up", true))} file, Enter focus diff, ${either(files, "back", "Esc")} collapse`],
-      [keys(["selectFile"], files), "In changed files, select or unselect the highlighted file (marked ✓); actions on files act on the selected ones, or on the highlighted file when none are"],
+      [keys(["selectFile"], files), "In changed files, select or unselect the highlighted file, marked ✓; the footer counts the selection"],
       [keys(["clearSelection"], files), "In changed files, unselect every file"],
       [keys(["filterFiles"], files), `In changed files, show only paths containing the typed text, ignoring case; selections stay when hidden, and ${either(files, "back", "Esc")} clears the filter before collapsing`],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
