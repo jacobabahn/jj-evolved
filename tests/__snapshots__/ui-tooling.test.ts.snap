@@ -213,7 +213,7 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 │d                Show the selected revision's diff                            │
 │l/Right          Expand changed files under the revision; j/k file, Enter     │
 │                 focus diff, h/Left/Esc collapse                              │
-│w                Working-copy status; Esc returns to the change preview       │
+│Space            In changed files, select or unselect the highlighted file (  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘"
 `;
@@ -453,9 +453,9 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 │d                Show the selected revision's diff                                                │
 │l/Right          Expand changed files under the revision; j/k file, Enter focus diff, h/Left/Esc  │
 │                 collapse                                                                         │
-│w                Working-copy status; Esc returns to the change preview                           │
-│t                Choose a theme, preview and save                                                 │
-│                                                                                                  │
+│Space            In changed files, select or unselect the highlighted file (marked ✓); actions    │
+│                 on files act on the selected ones, or on the highlighted file when none are      │
+│c                In changed files, unselect every file                                            │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 `;
