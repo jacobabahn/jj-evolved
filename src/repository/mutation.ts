@@ -55,6 +55,11 @@ export function mutationArgs(action: Mutation): string[] {
       ? ["rebase", action.descendants ? "--source" : "--revisions", action.revision.commitId, ...rebaseTargetArgs(action)]
       : ["squash", "--from", action.revision.commitId, "--into", action.destination.commitId, "--message", action.description, "--", ...action.files.map(literalPath)]; break;
     case "split": args = ["split", "--revision", action.revision.commitId, "--message", action.description, "--", ...action.files.map(literalPath)]; break;
+    case "restore-files":
+      // Without paths jj would restore every file, so an empty list is refused rather than passed on.
+      if (!action.files.length) throw new Error("Choose at least one file to restore.");
+      args = ["restore", ...(action.from ? ["--from", action.from.commitId, "--into", action.revision.commitId] : ["--changes-in", action.revision.commitId]),
+        "--", ...[...action.files, ...action.renameSources ?? []].map(literalPath)]; break;
     case "bookmark-create": args = ["bookmark", "create", "--revision", action.revision.commitId, "--", newBookmarkName(action.name)]; break;
     case "bookmark-move": args = ["bookmark", "set", "--allow-backwards", "--revision", action.revision.commitId, "--", newBookmarkName(action.name)]; break;
     case "bookmark-delete": args = ["bookmark", "delete", "--", exactName(action.name)]; break;
