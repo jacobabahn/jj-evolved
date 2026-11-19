@@ -36,6 +36,11 @@ function aliasName(path: string): string {
   if (key.startsWith('"')) { try { return string(JSON.parse(key)); } catch { return ""; } }
   return key;
 }
+/**
+ * Every revision that changes exactly `path`, across the whole repository rather than one line of history. The path is a
+ * literal fileset, so spaces, `*`, `?` and `[` are part of the name. A rename is followed only under its current path.
+ */
+export function fileHistoryRevset(path: string): string { return `files(${literalPath(path)})`; }
 const diffKey = (revision: Revision, files: string[]) => [revision.commitId, ...files].join("\0");
 /** One diff read and the callers waiting on it. It is stopped only once every caller has gone and the grace has passed. */
 type SharedDiff = { result: Promise<string>; abandon: () => void; waiting: number; settled: boolean; timer?: Timer };

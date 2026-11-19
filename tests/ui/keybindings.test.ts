@@ -239,6 +239,21 @@ test("the file browser's split, squash, absorb and actions keys give way there t
   expect(loadKeybindings({ scopes: { files: { fileActions: ["x"], split: ["X"] } } }).scopes.files).toMatchObject({ fileActions: ["x"], split: ["X"] });
 });
 
+test("the file browser's history key is H in both presets and gives way to a configuration that already uses it", () => {
+  expect(loadKeybindings({}).scopes.files.fileHistory).toEqual(["H"]);
+  expect(loadKeybindings({}, "legacy").scopes.files.fileHistory).toEqual(["H"]);
+  // It applies only in the file browser.
+  expect(loadKeybindings({}).scopes.revisions.fileHistory).toEqual(["H"]);
+  expect(() => loadKeybindings({ bindings: { help: ["H"] } })).not.toThrow();
+  expect(loadKeybindings({ bindings: { help: ["H"] } }).scopes.files).toMatchObject({ fileHistory: [], help: ["H"] });
+  expect(loadKeybindings({ scopes: { files: { togglePreview: ["H"] } } }).scopes.files).toMatchObject({ fileHistory: [], togglePreview: ["H"] });
+  expect(loadKeybindings({ bindings: { down: ["H x"] } }).scopes.files.fileHistory).toEqual([]);
+  // Bound on purpose, it is checked like any other action and can be rebound.
+  expect(() => loadKeybindings({ bindings: { fileHistory: ["j"] } })).toThrow("Key j conflicts between down and fileHistory in the file browser");
+  expect(loadKeybindings({ scopes: { files: { fileHistory: ["y"] } } }).scopes.files.fileHistory).toEqual(["y"]);
+  expect(() => loadKeybindings({ scopes: { revisions: { fileHistory: ["y"] } } })).toThrow("Action fileHistory does not apply in the revisions scope");
+});
+
 test("text prompts accept only keys that typing and editing do not use", () => {
   for (const key of ["x", "X", "space", "left", "return", "ctrl+a", "ctrl+e", "ctrl+w", "ctrl+u", "ctrl+k"]) {
     expect(() => loadKeybindings({ scopes: { prompt: { nextCompletion: [key] } } })).toThrow("would stop text prompts from accepting it");
