@@ -197,7 +197,8 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 │Tab              Switch focus between the revisions and the preview           │
 │@ [ ]            Jump to the working copy / parent / child; choose when       │
 │                 there are several                                            │
-│^O               Return from a temporary reveal to the previous view          │
+│^O               Return from a temporary reveal, or from a file's history to  │
+│                 its revset and files, to the previous view                   │
 │^L               Load 200 more revisions, keeping the selection               │
 │^R               Refresh history now; external changes also refresh           │
 │                 automatically                                                │
@@ -213,7 +214,6 @@ exports[`styled selection and help layout at 80 columns: help layout 80 1`] = `
 │d                Show the selected revision's diff                            │
 │l/Right          Expand changed files under the revision; j/k file, Enter     │
 │                 focus diff, h/Left/Esc collapse                              │
-│Space            In changed files, select or unselect the highlighted file,   │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘"
 `;
@@ -438,7 +438,8 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 │j/k, down/up     Move through revisions                                                           │
 │Tab              Switch focus between the revisions and the preview                               │
 │@ [ ]            Jump to the working copy / parent / child; choose when there are several         │
-│^O               Return from a temporary reveal to the previous view                              │
+│^O               Return from a temporary reveal, or from a file's history to its revset and       │
+│                 files, to the previous view                                                      │
 │^L               Load 200 more revisions, keeping the selection                                   │
 │^R               Refresh history now; external changes also refresh automatically                 │
 │?                Show this help                                                                   │
@@ -455,7 +456,6 @@ exports[`styled selection and help layout at 120 columns: help layout 120 1`] = 
 │                 collapse                                                                         │
 │Space            In changed files, select or unselect the highlighted file, marked ✓; the footer  │
 │                 counts the selection                                                             │
-│c                In changed files, unselect every file                                            │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 `;

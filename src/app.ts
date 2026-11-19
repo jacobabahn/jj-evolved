@@ -19,7 +19,7 @@ import { joinKeys, keyPair, shortcutBar, type Shortcut, type ShortcutLine } from
 import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
 import { FileList, statusLetter, type FileListState, type FileTargets } from "./revisions/file-list";
-import { Repository } from "./repository/repository";
+import { Repository, fileHistoryRevset } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { EllipsisText, fitText } from "./ui/ellipsis-text";
 import { homedir } from "node:os";
@@ -121,7 +121,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["down", "up"]), "Move through revisions"],
       [keys(["focus"]), "Switch focus between the revisions and the preview"],
       [keys(["workingCopy", "parent", "child"]), "Jump to the working copy / parent / child; choose when there are several"],
-      [keys(["return"]), "Return from a temporary reveal to the previous view"],
+      [keys(["return"]), "Return from a temporary reveal, or from a file's history to its revset and files, to the previous view"],
       [keys(["loadMore"]), "Load 200 more revisions, keeping the selection"],
       [keys(["refresh"]), "Refresh history now; external changes also refresh automatically"],
       [keys(["help"]), "Show this help"],
@@ -141,6 +141,7 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [fileKeys("split"), "In changed files, split the selected files, or the highlighted one when none are, into a first change: the split chooser opens with them ticked"],
       [fileKeys("squash"), "In changed files, squash the selected files, or the highlighted one, in the squash form with them as its files"],
       [fileKeys("absorb"), "In changed files, preview absorbing only the selected files' edits, or the highlighted one's, into mutable ancestors"],
+      [keys(["fileHistory"], files), `In changed files, show the history of the highlighted file: every revision that changes that exact path, as the revset files(root-file:"…"); ${keyLabel(bindings, "return")} returns to the revset and files you had`],
       [keys(["fileActions"], files), "In changed files, the actions for the selected files, or the highlighted one: split or squash in the app or in JJ's diff editor, offering only those files, or absorb only them. The footer says which files they act on; cancelling returns to the files with the selection and filter kept"],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
@@ -328,6 +329,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let currentBookmarks: Bookmark[] = [];
   let outsideFilter: ReadonlySet<string> = new Set();
   let returnPoint: NavigationView | null = null;
+  // Each file history opened from the changed-files browser, latest last: the revset it replaced and the browser as it
+  // was, which the return key puts back. Any other change of revset forgets them.
+  let revsetReturns: { revset: string; back: FilesReturn }[] = [];
   let search: Search = { query: "", matches: [] };
   let searchCandidates: Revision[] = [];
   let searchBookmarks: Bookmark[] = [];
@@ -496,7 +500,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         return [
           { left: focus === "preview"
             ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
-            : [[move, "file"], [key("filterFiles"), "filter"], [preview.visible ? bothKeys("Enter", key("focus")) : "Enter", "focus diff"], [page, "scroll diff"], togglePreview] },
+            : [[move, "file"], [key("filterFiles"), "filter"], [key("fileHistory"), "history"], [preview.visible ? bothKeys("Enter", key("focus")) : "Enter", "focus diff"], [page, "scroll diff"], togglePreview] },
           // The actions key says what file actions act on: the selected files, or the highlighted one.
           { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), fileList.filter ? "clear filter" : "collapse"],
             [key("selectFile"), "select"], ...(marked ? [[key("clearSelection"), "clear"] as Shortcut] : []),
@@ -522,7 +526,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     ];
     const searching = search.query.length > 0;
     return [
-      { left: [[move, "move"], ...(returnPoint ? [[key("return"), "return"] as Shortcut] : []), [key("filter"), "revset"], [key("search"), "search"],
+      { left: [[move, "move"], ...(returnPoint || revsetReturns.length ? [[key("return"), "return"] as Shortcut] : []), [key("filter"), "revset"], [key("search"), "search"],
         preview.visible ? [key("focus"), "focus preview"] : togglePreview,
         ...(searching ? [[pair("nextMatch", "previousMatch"), "match"], [key("clearSearch"), "clear search"]] as Shortcut[] : []), [pair("parent", "child"), "parent/child"], [key("workingCopy"), "working copy"]] },
       { left: [[key("describe"), "describe"], [key("diff"), "diff"], [key("new"), "new"], [key("edit"), "edit"], [key("rebase"), "rebase"], [key("squash"), "squash"]],
@@ -618,6 +622,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (stopped || request !== refreshRequest) return;
     observedOperation = operation;
     const previous = selected();
+    if (nextRevset !== revset) revsetReturns = [];
     revset = nextRevset;
     historyLimit = limit;
     showHistory(loaded, preserveView);
@@ -1501,6 +1506,40 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         preview: async () => paths, choose: () => fileAction("absorb", false, revision, targets, back) },
     ]);
   }
+  /** Sets the revset to the revisions that change the highlighted file; the return key puts back the revset and this browser. */
+  function showFileHistory(state: Extract<Prompt, { kind: "files" }>) {
+    const file = fileList.selectedFile;
+    if (!file) {
+      report(fileList.fileCount ? `No file to show history for: no changed files match ${JSON.stringify(fileList.filter)}.` : "No file to show history for: the change is empty.", true);
+      return;
+    }
+    const history = fileHistoryRevset(file.path);
+    const back: FilesReturn = { ...fileList.state, revision: state.revision, files: state.files, path: file.path };
+    // Asked again for the history already shown, there is no new revset to return from.
+    const returns = history === revset ? revsetReturns : [...revsetReturns, { revset, back }];
+    void run(`Loading history of ${file.path}…`, async () => {
+      // The browsed revision changes the file, so it stays selected in the history.
+      closeFiles();
+      await refresh(history);
+      if (stopped || revset !== history) return;
+      revsetReturns = returns;
+      paintShortcuts();
+      // The header names the path and counts the revisions.
+      report(`${actionKeys("return")} goes back.`);
+    }, true);
+  }
+  function leaveFileHistory() {
+    const last = revsetReturns.at(-1);
+    if (!last) return;
+    const rest = revsetReturns.slice(0, -1);
+    void run("Loading revset…", async () => {
+      await refresh(last.revset);
+      if (stopped || revset !== last.revset) return;
+      revsetReturns = rest;
+      paintShortcuts();
+      reopenFiles(last.back);
+    });
+  }
   // The result is how many marked files left the change.
   function expandFiles(revision: Revision, files: ChangedFile[], selectPath?: string) {
     const index = revisions.findIndex(item => item.commitId === revision.commitId);
@@ -2240,6 +2279,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (action === "filterFiles") { key.preventDefault(); beginFileFilter(state); return; }
+    if (action === "fileHistory") { key.preventDefault(); if (!isBusy()) showFileHistory(state); return; }
     if (action === "split" || action === "squash" || action === "absorb" || action === "fileActions") {
       key.preventDefault();
       if (isBusy()) return;
@@ -2414,6 +2454,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     if (action === "return") {
       key.preventDefault();
       if (returnPoint) { const view = returnPoint; returnPoint = null; displayView(view); void loadPreview(); scheduleFocusRefresh(); }
+      else if (revsetReturns.length) leaveFileHistory();
       return;
     }
     if (action === "clearSearch") { key.preventDefault(); search = { query: "", matches: [] }; updateSearchStatus(); if (statusShown() || previewTitle === "Last error") void loadPreview(); return; }
