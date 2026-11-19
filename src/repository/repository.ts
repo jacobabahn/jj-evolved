@@ -5,6 +5,7 @@ import { CancelledError, run } from "./jj-process";
 import { logSnapshot, logRevisions } from "./log-snapshot";
 import { literalPath, mutationArgs } from "./mutation";
 import { projectedAbsorb } from "./projected-absorb";
+import { projectedRestore } from "./projected-restore";
 import { projectedTree } from "./projected-tree";
 import { runInteractive, openHunk, editDescription } from "./external-tools";
 import { runSplit } from "./split";
@@ -298,6 +299,12 @@ export class Repository {
     return [...paths, ...sources.filter(source => !paths.includes(source))];
   }
 
+  /** A restore of renamed files also restores their old paths, so the rename is undone whole, as the review shows. */
+  private async withRestoredRenames(action: Extract<Mutation, { kind: "restore-files" }>): Promise<Extract<Mutation, { kind: "restore-files" }>> {
+    const renameSources = (await this.withRenameSources(action.revision, action.files)).slice(action.files.length);
+    return renameSources.length ? { ...action, renameSources } : action;
+  }
+
   /** Callers snapshot the working copy first, so these reads can skip it. */
   private async assertCurrent(revisions: Revision[], operationId = "@") {
     const visible = await Promise.all(revisions.map(revision => logRevisions(this.root, `present(${revision.changeId})`, operationId)));
@@ -345,6 +352,7 @@ export class Repository {
     const operationId = await this.operationId();
     const targets = "revision" in action ? [action.revision] : action.kind === "new" ? [action.parent] : [];
     if ("destination" in action) targets.push(action.destination);
+    if (action.kind === "restore-files" && action.from) targets.push(action.from);
     if (action.kind === "rebase" && action.insertBefore) targets.push(action.insertBefore);
     await this.assertCurrent(targets, operationId);
     let summary: string;
@@ -353,6 +361,7 @@ export class Repository {
     let rebasing: Revision[] = [];
     // Existing revisions an insert moves onto the rebased ones; the trees mark them ↳.
     let following: Revision[] = [];
+    let prepared: Mutation = action;
     switch (action.kind) {
       case "git-fetch":
       case "git-push":
@@ -387,6 +396,12 @@ export class Repository {
           following = moved.moves;
         }
         summary += "\n\nDescendants may be rewritten and conflicts may result.";
+        break;
+      }
+      case "restore-files": {
+        const restore = await this.withRestoredRenames(action);
+        summary = await projectedRestore(this.root, restore, operationId);
+        prepared = restore;
         break;
       }
       case "squash":
@@ -425,8 +440,7 @@ export class Repository {
     // The preview and the command move a renamed file's old path with its new one. Absorb is left out on purpose: jj
     // never absorbs a rename's new path, but given the old path too it moves the old path's deletion into the ancestor
     // and leaves the new file added in the source, splitting the rename. With only the new path the rename stays whole.
-    const prepared: Mutation = (action.kind === "split" || action.kind === "squash") && action.files.length
-      ? { ...action, files: await this.withRenameSources(action.revision, action.files) } : action;
+    if ((action.kind === "split" || action.kind === "squash") && action.files.length) prepared = { ...action, files: await this.withRenameSources(action.revision, action.files) };
     const trees = prepared.kind === "rebase" || prepared.kind === "squash"
       ? await projectedTree(this.root, prepared, operationId, rebasing, following) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");

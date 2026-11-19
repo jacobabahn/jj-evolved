@@ -16,7 +16,7 @@ export const jjuiBindings = {
   abandon: ["a"], absorb: ["A"], split: ["s"], evolution: ["v"],
   new: ["n"], actions: ["space"], bookmarks: ["b"], setBookmark: ["B"], git: ["g"], publish: [], operations: ["o"], undo: ["u"], files: ["l", "right"],
   diff: ["d"], togglePreview: ["p"], theme: ["t"], help: ["?"], lastError: ["ctrl+e"], quit: ["q"],
-  back: ["h", "left"], selectFile: ["space"], clearSelection: ["c"], filterFiles: ["/"], fileActions: ["m"], fileHistory: ["H"],
+  back: ["h", "left"], selectFile: ["space"], clearSelection: ["c"], filterFiles: ["/"], fileActions: ["m"], fileHistory: ["H"], restoreFiles: ["r"],
   nextCompletion: ["tab", "ctrl+n"], previousCompletion: ["ctrl+p"], saveDescription: ["ctrl+s", "ctrl+d"],
 } satisfies Record<string, string[]>;
 export type Action = keyof typeof jjuiBindings;
@@ -33,7 +33,7 @@ export const scopeActions = {
     "actions", "bookmarks", "setBookmark", "git", "publish", "operations", "undo", "files", "diff", "togglePreview", "theme",
     "help", "lastError", "quit"],
   files: ["down", "up", "focus", "pageUp", "pageDown", "previewUp", "previewDown", "previewHalfUp", "previewHalfDown", "togglePreview", "files", "back",
-    "selectFile", "clearSelection", "filterFiles", "split", "squash", "absorb", "fileActions", "fileHistory", "help", "quit"],
+    "selectFile", "clearSelection", "filterFiles", "split", "squash", "absorb", "fileActions", "fileHistory", "restoreFiles", "help", "quit"],
   // Choosing an inline rebase or squash destination in the graph.
   destination: ["down", "up", "pageUp", "pageDown", "search", "rebaseScope", "rebaseTarget", "loadMore", "togglePreview"],
   // Action menus, pickers, the theme chooser, the keyboard reference, and the rebase and squash form.
@@ -109,12 +109,13 @@ function checkReserved(scope: Scope, table: Keybindings) {
 }
 /**
  * Actions added after their default keys could already be bound to something else: back took over h and Left, which
- * were fixed keys before they could be bound, and the file browser's select, clear, filter, actions and history keys came later.
+ * were fixed keys before they could be bound, and the file browser's select, clear, filter, actions, history and restore keys
+ * came later.
  * Split, squash and absorb joined the file browser later too, so they give way there only. Unless an action is configured
  * itself, its default keys step aside for any other action of the scope bound to them, so a configuration that put help
  * on h or down on / or s keeps working.
  */
-const yieldingActions: readonly Action[] = ["back", "selectFile", "clearSelection", "filterFiles", "fileActions", "fileHistory"];
+const yieldingActions: readonly Action[] = ["back", "selectFile", "clearSelection", "filterFiles", "fileActions", "fileHistory", "restoreFiles"];
 const yieldingInScope: Partial<Record<Scope, readonly Action[]>> = { files: ["split", "squash", "absorb"] };
 function yields(scope: Scope, action: Action) { return yieldingActions.includes(action) || !!yieldingInScope[scope]?.includes(action); }
 function yieldDefaults(scope: Scope, table: Keybindings, configured: ReadonlySet<Action> = new Set()): Keybindings {

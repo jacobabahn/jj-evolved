@@ -142,7 +142,8 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [fileKeys("squash"), "In changed files, squash the selected files, or the highlighted one, in the squash form with them as its files"],
       [fileKeys("absorb"), "In changed files, preview absorbing only the selected files' edits, or the highlighted one's, into mutable ancestors"],
       [keys(["fileHistory"], files), `In changed files, show the history of the highlighted file: every revision that changes that exact path, as the revset files(root-file:"…"); ${keyLabel(bindings, "return")} returns to the revset and files you had`],
-      [keys(["fileActions"], files), "In changed files, the actions for the selected files, or the highlighted one: split or squash in the app or in JJ's diff editor, offering only those files, or absorb only them. The footer says which files they act on; cancelling returns to the files with the selection and filter kept"],
+      [keys(["restoreFiles"], files), "In changed files, preview restoring the selected files, or the highlighted one, from the change's parent, undoing the change's own edits to them; the actions menu also restores them from a revision you choose"],
+      [keys(["fileActions"], files), "In changed files, the actions for the selected files, or the highlighted one: split or squash in the app or in JJ's diff editor, offering only those files, absorb only them, or restore them from the parent or another revision. The footer says which files they act on; cancelling returns to the files with the selection and filter kept"],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -1059,8 +1060,9 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     pickerSearch?.dispose();
     pickerSearch = null;
     editRevset();
-    // A revset and an undo are not about the selected revision, and Describe names its change in the title.
-    const repositoryWide = next.kind === "revset" || next.kind === "describe" || (next.kind === "confirm" && next.action.kind === "undo");
+    // A revset and an undo are not about the selected revision, and Describe names its change in the title. A restore's
+    // source is another revision than the selected one, so its review names both instead of showing it as the source.
+    const repositoryWide = next.kind === "revset" || next.kind === "describe" || (next.kind === "confirm" && (next.action.kind === "undo" || next.action.kind === "restore-files"));
     activateOverlay(label, true, repositoryWide ? false : undefined);
     // The field's top margin separates it from the source lines, and a short prompt drops their two rows with them.
     promptField.marginTop = overlay.context.visible ? 1 : 0;
@@ -1185,6 +1187,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
         : `Absorbed ${id(action.revision)} into its ancestors.`;
       case "rebase": return `Rebased ${id(action.revision)}${action.descendants ? " and its descendants" : ""} ${rebaseTargetText(action, id)}.`;
       case "squash": return `Squashed ${id(action.revision)} into ${id(action.destination)}.`;
+      case "restore-files": return `Restored ${fileCount(action.files.length)} of ${id(action.revision)} from ${action.from ? id(action.from) : "its parent"}.`;
       case "split": return `Split ${id(action.revision)}.`;
       case "bookmark-create": return `Created bookmark ${action.name}.`;
       case "bookmark-move": return `Moved bookmark ${action.name} to ${id(action.revision)}.`;
@@ -1198,16 +1201,17 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
   }
   function operationLabel(kind: Mutation["kind"]) {
-    return kind.replace("bookmark-", "Bookmark ").replace("git-", "Git ").replace(/^[a-z]/, letter => letter.toUpperCase());
+    return kind.replace("restore-files", "restore files").replace("bookmark-", "Bookmark ").replace("git-", "Git ").replace(/^[a-z]/, letter => letter.toUpperCase());
   }
-  // An absorb from the changed-files browser names how many files it is limited to.
-  function absorbScope(action: Mutation) {
+  // An absorb from the changed-files browser names how many files it is limited to, a restore how many and from where.
+  function fileScope(action: Mutation) {
+    if (action.kind === "restore-files") return ` · ${fileCount(action.files.length)} from ${action.from ? shortChangeId(action.from) : "parent"}`;
     return action.kind === "absorb" && action.files?.length ? ` · ${fileCount(action.files.length)}` : "";
   }
   function fileCount(count: number) { return `${count} ${count === 1 ? "file" : "files"}`; }
   function openReview(action: Mutation, prepared: PreparedMutation, edit: (() => void) | null, back: (() => void) | null, extras: ReviewExtras = {}) {
     // A rebase names its target in the title, so the review says how the changes will be placed before any scrolling.
-    const title = `${operationLabel(action.kind)} preview${action.kind === "rebase" && action.target && action.target !== "onto" ? ` · ${rebaseTargetName(action.target).toLowerCase()}` : ""}${absorbScope(action)}`;
+    const title = `${operationLabel(action.kind)} preview${action.kind === "rebase" && action.target && action.target !== "onto" ? ` · ${rebaseTargetName(action.target).toLowerCase()}` : ""}${fileScope(action)}`;
     showOverlay(prepared.summary, title);
     comparison.setTrees(prepared.trees, action.kind === "rebase" || action.kind === "squash" ? action.kind : undefined);
     openPrompt({ kind: "confirm", action, edit, back, extras }, `Review before applying · ${title}`);
@@ -1487,6 +1491,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     else if (kind === "split") editInteractively({ kind: "split", revision, files }, back);
     else destination(`Squash ${targets.label} in diff editor into`, revision, destination => editInteractively({ kind: "squash", revision, destination, files }, back));
   }
+  /** Previews restoring the browser's target files in `revision` from its parent, or from a revision chosen in the graph. */
+  function restoreFiles(revision: Revision, targets: FileTargets, back: FilesReturn, choose: boolean) {
+    const files = targets.paths;
+    filesReturn = back;
+    if (!choose) { confirm({ kind: "restore-files", revision, files }); return; }
+    destination(`Restore ${targets.label} of ${shortChangeId(revision)} from`, revision, from => confirm({ kind: "restore-files", revision, files, from }));
+  }
   function fileActions(revision: Revision, targets: FileTargets, back: FilesReturn) {
     const key = (action: Action) => tables.files[action].length ? keyLabel(tables.files, action, true) : "—";
     const { label } = targets;
@@ -1504,6 +1515,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       entry("squash", true, "Choose a destination, then hunks of only these files in JJ's configured diff editor"),
       { key: key("absorb"), name: `Absorb · ${label}`, description: "Preview moving only these files' edits into mutable ancestors",
         preview: async () => paths, choose: () => fileAction("absorb", false, revision, targets, back) },
+      { key: key("restoreFiles"), name: `Restore from parent · ${label}`, description: "Preview undoing this change's own edits to these files",
+        preview: async () => paths, choose: () => restoreFiles(revision, targets, back, false) },
+      { key: "—", name: `Restore from another revision · ${label}`, description: "Choose a revision in the graph, then preview giving these files its content here",
+        preview: async () => paths, choose: () => restoreFiles(revision, targets, back, true) },
     ]);
   }
   /** Sets the revset to the revisions that change the highlighted file; the return key puts back the revset and this browser. */
@@ -2280,12 +2295,13 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     }
     if (action === "filterFiles") { key.preventDefault(); beginFileFilter(state); return; }
     if (action === "fileHistory") { key.preventDefault(); if (!isBusy()) showFileHistory(state); return; }
-    if (action === "split" || action === "squash" || action === "absorb" || action === "fileActions") {
+    if (action === "split" || action === "squash" || action === "absorb" || action === "restoreFiles" || action === "fileActions") {
       key.preventDefault();
       if (isBusy()) return;
       const target = fileTargets();
       if (!target) return;
       if (action === "fileActions") fileActions(target.revision, target.targets, target.back);
+      else if (action === "restoreFiles") restoreFiles(target.revision, target.targets, target.back, false);
       else fileAction(action, false, target.revision, target.targets, target.back);
       return;
     }

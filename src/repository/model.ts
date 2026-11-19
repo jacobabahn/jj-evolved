@@ -71,6 +71,10 @@ export type Mutation =
   | { kind: "absorb"; revision: Revision; files?: string[] }
   | RebaseMutation
   | { kind: "squash"; revision: Revision; destination: Revision; description: string; files: string[] }
+  // Restores `files` in `revision` from `from`, or, without it, from the revision's parents, undoing its own edits to them.
+  // `renameSources`, which the review fills in, are the old paths of renamed files among them, restored with them.
+  // Named apart from "restore", which restores the repository to an operation.
+  | { kind: "restore-files"; revision: Revision; files: string[]; from?: Revision; renameSources?: string[] }
   | { kind: "split"; revision: Revision; files: string[]; description: string; secondDescription: string }
   | { kind: "bookmark-create" | "bookmark-move"; name: string; revision: Revision }
   | { kind: "bookmark-rename"; name: string; newName: string }
