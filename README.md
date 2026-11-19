@@ -67,6 +67,7 @@ The default keys follow [jjui](https://github.com/idursun/jjui), so existing jju
 | `l` / Right | Expand the changed files beneath the revision; `j` / `k` preview one file at a time, `h` / Left collapses |
 | `Space` / `c` / `/` in changed files | Select or unselect the highlighted file / unselect all / filter paths by text (`h` / Left clears the filter first) |
 | `s` / `S` / `m` in changed files | Split / squash the selected files, or the highlighted file when none are, with them preselected / list file actions, including split and squash in the diff editor limited to those files; Escape returns with the selection kept |
+| `A` in changed files | Preview absorbing only the selected files' edits, or the highlighted file's, into mutable ancestors; the other files' edits stay in the source |
 | `L` | Filter the graph with a revset |
 | `/` | Search revisions; `'` / `"` step through matches |
 | `Ctrl+L` | Load 200 more revisions |

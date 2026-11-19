@@ -85,11 +85,13 @@ Space selects the highlighted file, marking its row `✓`, or unselects it; `c` 
 
 `/` filters the list to paths containing the typed text, ignoring case; every character, including `*`, `?`, `[` and spaces, is taken literally. The list narrows as you type and the status line counts the files shown; Enter keeps the filter and Escape puts back the one before. The kept filter shows as `/text  3 of 10 files`, and `/` again edits it. Filtering hides rows but never drops a selection, so clearing the filter shows every selected file still selected. While a filter applies, `h`, Left, Escape, or `l` clears it first; the next press collapses the list.
 
-File actions act on the selected files, in list order and including any the filter hides, or on the highlighted file when none are selected. The footer's `m actions` hint says which: `m actions · highlighted file` or `m actions · 2 selected`. `s` opens the split file chooser, titled `Split files · 2 selected`, with those files already ticked; `S` opens the squash form with them as its **Files**. Both can still be changed there. `m` lists the actions, each named with what it acts on and the files shown beside it: **Split**, **Split in diff editor**, **Squash**, and **Squash in diff editor**. The diff-editor actions pass the files to `jj split --interactive` or `jj squash --interactive` as literal paths, so JJ's configured diff editor offers only those files; squash asks for a destination first. A renamed file moves with its old path, so the rename stays whole. Escape at any step goes back one level and, from the first, returns to the files with their selection, filter and highlight as they were, without changing the repository. A diff editor that fails, or leaves the change as it was, also returns to the files; once a split or squash is applied, the graph follows as it does from the Space menu.
+File actions act on the selected files, in list order and including any the filter hides, or on the highlighted file when none are selected. The footer's `m actions` hint says which: `m actions · highlighted file` or `m actions · 2 selected`. `s` opens the split file chooser, titled `Split files · 2 selected`, with those files already ticked; `S` opens the squash form with them as its **Files**. Both can still be changed there. `A` previews absorbing only those files' edits; see [Absorb](#absorb). `m` lists the actions, each named with what it acts on and the files shown beside it: **Split**, **Split in diff editor**, **Squash**, **Squash in diff editor**, and **Absorb**. The diff-editor actions pass the files to `jj split --interactive` or `jj squash --interactive` as literal paths, so JJ's configured diff editor offers only those files; squash asks for a destination first. A renamed file moves with its old path, so the rename stays whole. Escape at any step goes back one level and, from the first, returns to the files with their selection, filter and highlight as they were, without changing the repository. A diff editor that fails, or leaves the change as it was, also returns to the files; once a split, squash or absorb is applied, the graph follows as it does from the Space menu.
 
 ## Absorb
 
 Press `A`, or choose **Absorb into ancestors** from the Space menu, to distribute fixes across a stack. JJ chooses the mutable ancestors that last changed the affected lines. The preview shows the actual proposed operation changes and the edits remaining in the source. Edits JJ cannot assign stay in the source. Enter applies the preview; Escape cancels; `p` refreshes a stale preview. An emptied source with no description is abandoned. The app keeps the source selected if it survives, otherwise selects the working copy.
+
+From the changed-files browser, `A` or **Absorb** in the `m` menu absorbs only the selected files, or the highlighted file when none are selected. It runs `jj absorb --from REV -- <paths>` with every path taken literally, so spaces, `*`, `?` and `[` are part of the name. The review is titled `Absorb preview · 2 files` and lists the files it covers; its operation changes show only their edits moving, and the other files' edits stay in the source. Escape returns to the browser, through the `m` menu if it started there, with the selection, filter and highlight as they were.
 
 ## Change evolution
 
@@ -221,7 +223,7 @@ change an action in one place only:
 | Scope | Where | Actions |
 | --- | --- | --- |
 | `revisions` | Browsing the revision list and the preview beside it | every browse action in the table below |
-| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `split`, `squash`, `fileActions`, `help`, `quit` |
+| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `split`, `squash`, `absorb`, `fileActions`, `help`, `quit` |
 | `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `rebaseTarget`, `loadMore`, `togglePreview` |
 | `menu` | Action menus, pickers, the theme chooser, help, and the rebase and squash form | `down`, `up`, `back`, `help` |
 | `prompt` | The revset prompt, bookmark names, the description editor and quick inputs | `nextCompletion`, `previousCompletion`, `saveDescription` |
@@ -236,10 +238,10 @@ Escape cannot be bound in menus. In `prompt`, only `tab`, `f1`–`f12` and contr
 can be bound, so every printable key still types; the editing keys `ctrl+a`, `ctrl+b`,
 `ctrl+e`, `ctrl+f`, `ctrl+k`, `ctrl+u` and `ctrl+w` are refused too. The defaults of
 `back` (`h` and Left), of the file browser's `selectFile`, `clearSelection`,
-`filterFiles` and `fileActions` (Space, `c`, `/` and `m`), and of `split` and `squash` in
-the file browser only (`s` and `S`) give way to any other action of the same scope bound
+`filterFiles` and `fileActions` (Space, `c`, `/` and `m`), and of `split`, `squash` and
+`absorb` in the file browser only (`s`, `S` and `A`, or `a` in `legacy`) give way to any other action of the same scope bound
 to them (a `"help": ["h"]` binding keeps working); bound explicitly, they are checked
-like any other action. For `split` and `squash`, only a binding in the `files` scope
+like any other action. For `split`, `squash` and `absorb`, only a binding in the `files` scope
 counts as explicit there: a global binding, written for the revision list, still
 gives way in the file browser, to its own keys too (a global `"split": ["c"]` leaves
 `c` clearing the selection). Text typed into a search or filter field is never matched against
