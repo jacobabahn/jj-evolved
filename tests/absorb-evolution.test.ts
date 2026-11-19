@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { rename } from "node:fs/promises";
 import { Repository } from "../src/repository/repository";
 import type { Mutation } from "../src/repository/model";
 import { mutationArgs } from "../src/repository/mutation";
@@ -107,6 +108,24 @@ test("absorb limited to a path with a space moves it with the others chosen, and
     } finally { await f.cleanup(); }
   }
 }, 20_000);
+
+test("absorb limited to a renamed file leaves the rename whole in the source and the old path in the ancestor", async () => {
+  const f = await fixture();
+  try {
+    // The fixture's "Initial feature" adds hello.txt; the source renames it.
+    await rename(`${f.path}/hello.txt`, `${f.path}/moved [v1].txt`);
+    const repo = await Repository.open(f.path);
+    const source = await revision(repo, "@");
+    expect(await repo.files(source)).toEqual([{ path: "moved [v1].txt", status: "renamed", source: "hello.txt" }]);
+    const prepared = await repo.prepare({ kind: "absorb", revision: source, files: ["moved [v1].txt"] });
+    // Only the new path goes to jj: given the old path too, jj would move its deletion into the ancestor.
+    expect(prepared.action).toMatchObject({ files: ["moved [v1].txt"] });
+    await repo.apply(prepared);
+    expect(await f.jj("file", "list", "-r", "feature")).toBe("hello.txt\n");
+    expect(await f.jj("file", "show", "-r", "feature", "hello.txt")).toBe("hello from jj-evolved\n");
+    expect(await repo.files(await revision(repo, source.changeId))).toEqual([{ path: "moved [v1].txt", status: "renamed", source: "hello.txt" }]);
+  } finally { await f.cleanup(); }
+});
 
 for (const described of [false, true]) {
   test(`absorb fully assigned source, described=${described}`, async () => {
