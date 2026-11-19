@@ -564,6 +564,44 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "file-restore", title: "Restore the selected files from the parent in the changed-files browser, at 80x24",
+    async run(ui) {
+      const names = ["docs/guide.md", "docs/release notes.md", "scripts/build*.sh"];
+      for (const name of names) await Bun.write(`${ui.f.path}/${name}`, `${name}\nfirst draft\n`);
+      await ui.f.jj("describe", "-m", "Add docs and scripts");
+      await ui.f.jj("new", "-m", "Review fixes");
+      for (const name of names) await Bun.write(`${ui.f.path}/${name}`, `${name}\nreviewed\n`);
+      await ui.resize(80, 24);
+      ui.key("r", { ctrl: true });
+      await ui.until("Review fixes");
+      await ui.settled();
+      ui.key("@");
+      await ui.settled();
+      ui.key("l");
+      await ui.until("M scripts/build*.sh");
+      // Select the release notes and the build script.
+      ui.key("j"); ui.key(" "); ui.key("j"); ui.key(" ");
+      await ui.until("m actions · 2 selected");
+      ui.key("m");
+      await ui.until("File actions · 2 selected");
+      // The restore entries come last; at 80x24 the list scrolls to them.
+      for (let step = 0; step < 5; step++) ui.key("j");
+      await ui.until("Restore from parent · 2 selected");
+      await ui.capture("m lists Restore from parent and from another revision, naming the files they act on");
+      ui.key("RETURN");
+      await ui.until("Restore files preview · 2 files from parent");
+      await ui.until("Changes to");
+      assert(ui.screen.captureCharFrame().includes("Overwrites these 2 paths in"));
+      await ui.capture("The preview names the source, the destination and the paths it overwrites");
+      ui.key("ESCAPE"); await Bun.sleep(60);
+      await ui.until("File actions · 2 selected");
+      ui.key("ESCAPE"); await Bun.sleep(60);
+      await ui.until("m actions · 2 selected");
+      assert(ui.screen.captureCharFrame().includes("✓ M scripts/build*.sh"));
+      await ui.capture("Escape returns to the files with the selection kept");
+    },
+  },
+  {
     name: "file-history", title: "Show a changed file's history from the changed-files browser, and return, at 80x24",
     async run(ui) {
       // The release notes change in three revisions; the build script, whose * would match build.sh as a glob, in one.
