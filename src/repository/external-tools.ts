@@ -1,4 +1,5 @@
 import type { InteractiveAction, Revision } from "./model";
+import { literalPath } from "./mutation";
 
 async function foreground(root: string, args: string[], env: NodeJS.ProcessEnv, failure: (code: number) => string) {
   const child = Bun.spawn(args, { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit", env });
@@ -11,10 +12,12 @@ async function foreground(root: string, args: string[], env: NodeJS.ProcessEnv, 
 }
 
 export async function runInteractive(root: string, action: InteractiveAction): Promise<void> {
+  // Paths are passed as literal filesets, so spaces and wildcard characters name exactly one file.
+  const paths = (action.kind === "squash" || action.kind === "split") && action.files?.length ? ["--", ...action.files.map(literalPath)] : [];
   const args = action.kind === "squash"
-    ? ["squash", "--interactive", "--from", action.revision.commitId, "--into", action.destination.commitId]
+    ? ["squash", "--interactive", "--from", action.revision.commitId, "--into", action.destination.commitId, ...paths]
     : action.kind === "split"
-      ? ["split", "--interactive", "--revision", action.revision.commitId]
+      ? ["split", "--interactive", "--revision", action.revision.commitId, ...paths]
       : action.kind === "describe"
         ? ["describe", "--editor", action.revision.commitId]
         : ["resolve", "--revision", action.revision.commitId];

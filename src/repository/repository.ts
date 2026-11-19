@@ -273,10 +273,24 @@ export class Repository {
   async generatedBookmarkName(revision: Revision): Promise<string> { return generatedBookmarkName(this.root, revision); }
 
   async files(revision: Revision): Promise<ChangedFile[]> {
-    const template = `'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'`;
+    const template = `'[' ++ json(path) ++ ',' ++ json(status) ++ ',' ++ json(source.path()) ++ ']\n'`;
     const output = await read(this.root, { kind: "files", commitId: revision.commitId, template },
       () => run(this.root, ["--ignore-working-copy", "diff", "-r", revision.commitId, "-T", template]));
-    return tuples(output).map(([path, status]) => ({ path: string(path), status: string(status) }));
+    return tuples(output).map(([path, status, source]) => {
+      const file: ChangedFile = { path: string(path), status: string(status) };
+      if (file.status === "renamed" && string(source) !== file.path) file.source = string(source);
+      return file;
+    });
+  }
+
+  /**
+   * `paths` with the old path of each renamed file among them, so a split or squash moves the rename whole instead of
+   * moving the new file and leaving the old one's deletion behind.
+   */
+  private async withRenameSources(revision: Revision, paths: string[]): Promise<string[]> {
+    if (!paths.length) return paths;
+    const sources = (await this.files(revision)).flatMap(file => file.source && paths.includes(file.path) ? [file.source] : []);
+    return [...paths, ...sources.filter(source => !paths.includes(source))];
   }
 
   /** Callers snapshot the working copy first, so these reads can skip it. */
@@ -290,7 +304,8 @@ export class Repository {
   async interactive(action: InteractiveAction): Promise<void> {
     await this.status();
     await this.assertCurrent(action.kind === "squash" ? [action.revision, action.destination] : [action.revision]);
-    await runInteractive(this.root, action);
+    await runInteractive(this.root, (action.kind === "split" || action.kind === "squash") && action.files?.length
+      ? { ...action, files: await this.withRenameSources(action.revision, action.files) } : action);
   }
 
   async editDescription(revision: Revision): Promise<void> {
@@ -402,10 +417,13 @@ export class Repository {
       case "restore": summary = `Restore repository state and local bookmarks to:\n${action.operation.description}\n${action.operation.id.slice(0, 12)} · ${action.operation.time}\n\nLater changes leave the current view but remain in operation history. Remote-tracking state is preserved.`; break;
       default: { const exhaustive: never = action; throw new Error(`Unknown action ${exhaustive}`); }
     }
-    const trees = action.kind === "rebase" || action.kind === "squash"
-      ? await projectedTree(this.root, action, operationId, rebasing, following) : null;
+    // The preview and the command move a renamed file's old path with its new one.
+    const prepared: Mutation = (action.kind === "split" || action.kind === "squash") && action.files.length
+      ? { ...action, files: await this.withRenameSources(action.revision, action.files) } : action;
+    const trees = prepared.kind === "rebase" || prepared.kind === "squash"
+      ? await projectedTree(this.root, prepared, operationId, rebasing, following) : null;
     if (await this.operationId() !== operationId) throw new Error("Repository changed while preparing the preview. Try again.");
-    return { action, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(caution ? { caution } : {}) };
+    return { action: prepared, operationId, summary: terminalText(summary), trees, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(caution ? { caution } : {}) };
   }
 
   /** Applies a prepared mutation; remote actions return a short report of what changed. */
