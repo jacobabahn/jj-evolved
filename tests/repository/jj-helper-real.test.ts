@@ -56,7 +56,7 @@ test.skipIf(!existsSync(binary))("every request kind is byte-identical to the CL
       }
       pairs.push([{ kind: "log", revset, template: '"x"', limit: 4, graph: false, op: operation }, logArgs(operation, false, 4, revset, '"x"')]);
     }
-    const filesTemplate = '"[" ++ json(path) ++ "," ++ json(status) ++ "]\\n"';
+    const filesTemplate = '"[" ++ json(path) ++ "," ++ json(status) ++ "," ++ json(source.path()) ++ "]\\n"';
     for (const commitId of commits) {
       pairs.push([{ kind: "diff", commitId, paths: [] }, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", commitId, "--git", "--"]]);
       pairs.push([{ kind: "diff", commitId, paths: ['root-file:"a b*.txt"', 'root-file:"ünï.txt"'] }, ["--ignore-working-copy", "--at-op=@", "diff", "--revision", commitId, "--git", "--", 'root-file:"a b*.txt"', 'root-file:"ünï.txt"']]);

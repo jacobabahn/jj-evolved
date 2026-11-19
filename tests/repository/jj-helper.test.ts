@@ -375,7 +375,7 @@ test("routes the read paths with the CLI's exact text, and never anything that s
       { kind: "log", revset: "all()", template: '"x"', limit: 3, graph: false },
       { kind: "log", revset: "description(substring:Initial)", template: revisionTemplate, graph: false, op: "@" },
       { kind: "diff", commitId: initial.commitId, paths: ['root-file:"hello.txt"', 'root-file:"a b*.txt"'] },
-      { kind: "files", commitId: initial.commitId, template: "'[' ++ json(path) ++ ',' ++ json(status) ++ ']\n'" },
+      { kind: "files", commitId: initial.commitId, template: "'[' ++ json(path) ++ ',' ++ json(status) ++ ',' ++ json(source.path()) ++ ']\n'" },
       { kind: "opId" },
       { kind: "bookmarks", template: routed[6]!.template },
       { kind: "remotes" },

@@ -84,9 +84,11 @@ export type TrunkRebase =
   | { kind: "rebase"; action: RebaseMutation }
   | { kind: "current" | "no-trunk" | "blocked"; reason: string };
 
+/** `files` limits a split or squash to those paths, so the diff editor offers only them; without it, every changed file. */
 export type InteractiveAction =
-  | { kind: "squash"; revision: Revision; destination: Revision }
-  | { kind: "split" | "describe" | "resolve"; revision: Revision };
+  | { kind: "squash"; revision: Revision; destination: Revision; files?: string[] }
+  | { kind: "split"; revision: Revision; files?: string[] }
+  | { kind: "describe" | "resolve"; revision: Revision };
 
 export interface Operation { id: string; description: string; time: string; current: boolean }
 /**
@@ -118,7 +120,8 @@ export function pushRoute(name: string, remote: string, bookmarks: Bookmark[]): 
   if (!there && tracking.length && local.targets.length === 1) return { kind: "publish", commitId: local.targets[0]!, tracking };
   return { kind: "push" };
 }
-export interface ChangedFile { path: string; status: string }
+/** `source` is a renamed file's old path. */
+export interface ChangedFile { path: string; status: string; source?: string }
 /** `newConflicts` counts the changes in the trees' scope that are conflicted after the operation and were not before. */
 export interface TreeComparison { before: string; after: string; beforePrefixes: ReadonlyMap<string, string>; afterPrefixes: ReadonlyMap<string, string>; newConflicts?: number }
 /**
