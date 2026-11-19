@@ -489,6 +489,42 @@ export const scenarios: Scenario[] = [
     },
   },
   {
+    name: "file-actions", title: "Split and squash the selected files from the changed-files browser, at 80x24",
+    async run(ui) {
+      await ui.f.jj("describe", "-m", "Tidy docs and scripts");
+      await Bun.write(`${ui.f.path}/hello.txt`, "hello, selected\n");
+      for (const name of ["docs/guide.md", "docs/release notes.md", "scripts/build*.sh", "src/main.ts"]) await Bun.write(`${ui.f.path}/${name}`, `${name}\n`);
+      await ui.resize(80, 24);
+      ui.key("r", { ctrl: true });
+      await ui.until("Tidy docs and scripts");
+      await ui.settled();
+      ui.key("l");
+      await ui.until("A src/main.ts");
+      await ui.until("m actions · highlighted file");
+      await ui.capture("With nothing selected, file actions act on the highlighted file");
+      ui.key("j"); ui.key(" "); ui.key("j"); ui.key("j"); ui.key(" ");
+      await ui.until("m actions · 2 selected");
+      ui.key("m");
+      await ui.until("File actions · 2 selected");
+      await ui.capture("m lists the file actions, naming what they act on");
+      ui.choose("Split · 2 selected");
+      await ui.until("Split files · 2 selected");
+      assert(ui.screen.captureCharFrame().includes("[x] A docs/release notes.md"));
+      await ui.capture("Split opens the file chooser with the selected files ticked");
+      ui.key("ESCAPE"); await Bun.sleep(60);
+      await ui.until("File actions · 2 selected");
+      ui.key("ESCAPE"); await Bun.sleep(60);
+      await ui.until("m actions · 2 selected");
+      ui.key("S");
+      await ui.until("Files: 2 selected");
+      await ui.capture("S opens the squash form with the selected files as its files");
+      ui.key("ESCAPE"); await Bun.sleep(60);
+      await ui.until("m actions · 2 selected");
+      assert(ui.screen.captureCharFrame().includes("✓ A scripts/build*.sh"));
+      await ui.capture("Escape returns to the files with the selection kept");
+    },
+  },
+  {
     name: "rebase", title: "Rebase preview and cancellation",
     async run(ui) {
       const before = await ui.repo.operationId();

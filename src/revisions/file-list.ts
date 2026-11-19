@@ -26,6 +26,8 @@ export function matchesFilter(path: string, filter: string) {
 
 /** The files an action from the files browser acts on, and how its footer or menu text names them. */
 export interface FileTargets { paths: string[]; label: string }
+/** What the browser puts back after an action is cancelled: the marked paths and the filter. */
+export interface FileListState { marks: string[]; filter: string }
 
 // A revision's changed files, expanded beneath it in the graph. Rows continue the graph's lanes, and the list
 // scrolls within a height cap so a large change leaves the surrounding graph in view.
@@ -54,11 +56,13 @@ export class FileList extends ScrollBoxRenderable {
     this.paint();
   }
 
-  /** Forgets the marks and the filter, for a list opened afresh. */
-  reset() {
-    this.marks.clear();
-    this.query = "";
+  /** Forgets the marks and the filter, for a list opened afresh, or puts back saved ones before `setFiles`. */
+  reset(state: FileListState = { marks: [], filter: "" }) {
+    this.marks = new Set(state.marks);
+    this.query = state.filter;
   }
+  /** The marks and the filter, to put back with `reset`. */
+  get state(): FileListState { return { marks: [...this.marks], filter: this.query }; }
 
   /**
    * `prefix` is the graph lanes continuing below the revision; `selectPath` keeps a file highlighted across reloads.

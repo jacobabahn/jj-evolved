@@ -214,6 +214,21 @@ test("the file browser's select, clear and filter keys give way to a configurati
   expect(loadKeybindings({ scopes: { files: { selectFile: ["x"], filterFiles: ["f"] } } }).scopes.files).toMatchObject({ selectFile: ["x"], filterFiles: ["f"] });
 });
 
+test("the file browser's split, squash and actions keys give way there to a configuration that already uses them", () => {
+  const defaults = loadKeybindings({});
+  expect(defaults.scopes.files).toMatchObject({ split: ["s"], squash: ["S"], fileActions: ["m"] });
+  expect(loadKeybindings({}, "legacy").scopes.files).toMatchObject({ split: [], squash: ["S"], fileActions: ["m"] });
+  // A files-scope binding from before the browser had these actions keeps working, and they step aside.
+  const taken = loadKeybindings({ scopes: { files: { down: ["s"], up: ["S"], help: ["m"] } } });
+  expect(taken.scopes.files).toMatchObject({ split: [], squash: [], fileActions: [], down: ["s"], up: ["S"], help: ["m"] });
+  // In the revision list split and squash keep their keys and conflicts, as before.
+  expect(taken.scopes.revisions).toMatchObject({ split: ["s"], squash: ["S"] });
+  expect(() => loadKeybindings({ bindings: { help: ["s"] } })).toThrow("Key s conflicts between split and help in the revision list");
+  // Bound on purpose, they are checked like any other action.
+  expect(() => loadKeybindings({ bindings: { split: ["c"] }, scopes: { files: { clearSelection: ["c"] } } })).toThrow("Key c conflicts between split and clearSelection in the file browser");
+  expect(loadKeybindings({ scopes: { files: { fileActions: ["x"], split: ["X"] } } }).scopes.files).toMatchObject({ fileActions: ["x"], split: ["X"] });
+});
+
 test("text prompts accept only keys that typing and editing do not use", () => {
   for (const key of ["x", "X", "space", "left", "return", "ctrl+a", "ctrl+e", "ctrl+w", "ctrl+u", "ctrl+k"]) {
     expect(() => loadKeybindings({ scopes: { prompt: { nextCompletion: [key] } } })).toThrow("would stop text prompts from accepting it");

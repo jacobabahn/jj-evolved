@@ -18,7 +18,7 @@ import { ActionOverlay } from "./ui/action-overlay";
 import { joinKeys, keyPair, shortcutBar, type Shortcut, type ShortcutLine } from "./ui/shortcut-bar";
 import { HistoryForm } from "./history/history-form";
 import { RevisionLog } from "./revisions/revision-log";
-import { FileList, statusLetter } from "./revisions/file-list";
+import { FileList, statusLetter, type FileListState, type FileTargets } from "./revisions/file-list";
 import { Repository } from "./repository/repository";
 import { terminalText } from "./terminal-text";
 import { EllipsisText, fitText } from "./ui/ellipsis-text";
@@ -56,7 +56,8 @@ type Prompt =
   | { kind: "bookmark"; revision: Revision }
   | { kind: "help" }
   | { kind: "confirm"; action: Mutation; edit: (() => void) | null; back: (() => void) | null; extras: ReviewExtras };
-
+/** The changed-files browser as an action started from it found it, so cancelling the action can put it back. */
+type FilesReturn = FileListState & { revision: Revision; files: ChangedFile[]; path: string | undefined };
 
 const noRemotes = "No Git remotes are configured. Add one in your terminal with jj git remote add <name> <url>.";
 // How many rows `text` takes when wrapped at word boundaries to `width` columns.
@@ -113,6 +114,8 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
   const slash = (...labels: string[]) => labels.filter(label => label !== "unbound").join("/");
   // Every key for one action, and any fixed ones after them, as the footer writes alternatives.
   const either = (table: Keybindings, action: Action, ...fixed: string[]) => joinKeys([...table[action].map(bindingLabel), ...fixed]);
+  // An unbound file action is still in the file browser's action menu.
+  const fileKeys = (action: Action) => files[action].length ? keys([action], files) : files.fileActions.length ? `(${keyLabel(files, "fileActions", true)} menu)` : "(unbound)";
   return [
     { title: "Navigate", rows: [
       [keys(["down", "up"]), "Move through revisions"],
@@ -135,6 +138,9 @@ function helpSections(scopes: Record<Scope, Keybindings>): { title: string; rows
       [keys(["selectFile"], files), "In changed files, select or unselect the highlighted file, marked ✓; the footer counts the selection"],
       [keys(["clearSelection"], files), "In changed files, unselect every file"],
       [keys(["filterFiles"], files), `In changed files, show only paths containing the typed text, ignoring case; selections stay when hidden, and ${either(files, "back", "Esc")} clears the filter before collapsing`],
+      [fileKeys("split"), "In changed files, split the selected files, or the highlighted one when none are, into a first change: the split chooser opens with them ticked"],
+      [fileKeys("squash"), "In changed files, squash the selected files, or the highlighted one, in the squash form with them as its files"],
+      [keys(["fileActions"], files), "In changed files, the actions for the selected files, or the highlighted one: split or squash in the app or in JJ's diff editor, offering only those files. The footer says which files they act on; cancelling returns to the files with the selection and filter kept"],
       [keys(["status"]), "Working-copy status; Esc returns to the change preview"],
       [keys(["theme"]), "Choose a theme, preview and save"],
     ] },
@@ -329,6 +335,8 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   let pickerSearch: RevisionSearch | ListSearch<Choice> | null = null;
   let prompt: Prompt = { kind: "browse" };
   let helpReturn: Extract<Prompt, { kind: "files" }> | null = null;
+  // Set while an action started from the changed-files browser is open: cancelling it returns there instead of the graph.
+  let filesReturn: FilesReturn | null = null;
   let footer: { signature: string; colors: Theme } | null = null;
   let levels: (() => void)[] = [];
   let completionItems: Completion[] = [];
@@ -488,8 +496,10 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
           { left: focus === "preview"
             ? [[move, "scroll"], [page, "page"], [pair("previewHalfDown", "previewHalfUp"), "half page"], [key("focus"), "focus files"], togglePreview]
             : [[move, "file"], [key("filterFiles"), "filter"], [preview.visible ? bothKeys("Enter", key("focus")) : "Enter", "focus diff"], [page, "scroll diff"], togglePreview] },
+          // The actions key says what file actions act on: the selected files, or the highlighted one.
           { left: [[joinKeys(["Esc", ...[key("back"), key("files")].filter(label => label !== "unbound")]), fileList.filter ? "clear filter" : "collapse"],
-            [key("selectFile"), marked ? `select · ${marked} selected` : "select"], ...(marked ? [[key("clearSelection"), "clear"] as Shortcut] : [])], right: quit },
+            [key("selectFile"), "select"], ...(marked ? [[key("clearSelection"), "clear"] as Shortcut] : []),
+            [key("fileActions"), `actions · ${fileList.targets()?.label ?? "no file"}`]], right: quit },
         ];
       }
       case "inline": return [{
@@ -989,7 +999,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   }
   function goBack() {
     const level = levels.pop();
-    if (!level) { closePrompt(); void loadPreview(); return; }
+    if (!level) { closeToBase(); return; }
     pickerSearch?.dispose();
     pickerSearch = null;
     review.cancel();
@@ -998,7 +1008,14 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
     prompt = { kind: "browse" };
     level();
   }
+  // Closes the last overlay level: back to the changed-files browser when the action started there, else to the graph.
+  function closeToBase() {
+    const back = filesReturn;
+    closePrompt();
+    if (back) reopenFiles(back); else void loadPreview();
+  }
   function closePrompt() {
+    filesReturn = null;
     pickerSearch?.dispose();
     pickerSearch = null;
     suggestions.visible = false;
@@ -1385,11 +1402,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (searchImmediately) pickerSearch?.start();
     }, true);
   }
-  function chooseFiles(revision: Revision, title: string, accept: (paths: string[]) => void) {
+  // `preselected` paths start ticked, as the changed-files browser's targets do.
+  function chooseFiles(revision: Revision, title: string, accept: (paths: string[]) => void, preselected: string[] = []) {
     void run("Loading changed files…", async () => {
       const files = await repository.files(revision);
       if (stopped) return;
-      const chosen = new Set<string>();
+      const chosen = new Set(preselected.filter(path => files.some(file => file.path === path)));
       function renderFiles(replace = false) {
         // The files come first, so the list opens on one to select, and each shows the status letter the files list uses.
         // Continuing comes last, once there is something to continue with.
@@ -1415,14 +1433,62 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       const files = await repository.files(revision);
       if (stopped) return;
       closePrompt();
-      prompt = { kind: "files", revision, files, typing: null };
-      list.mouseSelectionEnabled = false;
-      list.blur();
-      fileList.reset();
-      expandFiles(revision, files);
-      setFocus("list");
-      if (files.length) void loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
+      openFiles(revision, files);
     }, true);
+  }
+  // `back` puts the marks, the filter and the highlight back as an action from the browser found them.
+  function openFiles(revision: Revision, files: ChangedFile[], back?: FilesReturn) {
+    prompt = { kind: "files", revision, files, typing: null };
+    list.mouseSelectionEnabled = false;
+    list.blur();
+    fileList.reset(back);
+    expandFiles(revision, files, back?.path);
+    setFocus("list");
+    if (files.length) void loadFilePreview(); else show("Empty change. No changed files.", "Changed files");
+  }
+  function reopenFiles(back: FilesReturn) {
+    const index = revisions.findIndex(item => item.changeId === back.revision.changeId);
+    if (index < 0) { report("Collapsed changed files: the change left the graph."); void loadPreview(); return; }
+    list.setSelectedIndex(index);
+    openFiles(back.revision, back.files, back);
+    // The change may have been rewritten meanwhile, by a refresh after an editor; its files then reload.
+    void followFiles().catch(error => report(errorText(error), true));
+  }
+  /** What an action from the changed-files browser acts on, and the browser as it is, to put back if the action is cancelled. */
+  function fileTargets(): { revision: Revision; targets: FileTargets; back: FilesReturn } | undefined {
+    if (prompt.kind !== "files") return;
+    const targets = fileList.targets();
+    if (!targets) {
+      report(fileList.fileCount ? `No file to act on: no changed files match ${JSON.stringify(fileList.filter)}.` : "No file to act on: the change is empty.", true);
+      return;
+    }
+    return { revision: prompt.revision, targets, back: { ...fileList.state, revision: prompt.revision, files: prompt.files, path: fileList.selectedFile?.path } };
+  }
+  /** Starts split or squash on the browser's target files: in the app's chooser and form, or in JJ's diff editor. */
+  function fileAction(kind: "split" | "squash", editor: boolean, revision: Revision, targets: FileTargets, back: FilesReturn) {
+    const files = targets.paths;
+    if (kind === "squash" && !editor) { openHistory(revision, "squash", false, files, back); return; }
+    filesReturn = back;
+    if (kind === "split" && !editor) splitChange(revision, files, targets.label);
+    else if (kind === "split") editInteractively({ kind: "split", revision, files }, back);
+    else destination(`Squash ${targets.label} in diff editor into`, revision, destination => editInteractively({ kind: "squash", revision, destination, files }, back));
+  }
+  function fileActions(revision: Revision, targets: FileTargets, back: FilesReturn) {
+    const key = (action: Action) => tables.files[action].length ? keyLabel(tables.files, action, true) : "—";
+    const { label } = targets;
+    // The selection pane lists the files each action acts on.
+    const paths = `${targets.paths.length === 1 ? "File" : "Files"}:\n${targets.paths.map(path => `  ${terminalText(path)}`).join("\n")}`;
+    const entry = (kind: "split" | "squash", editor: boolean, description: string): Choice => ({
+      key: editor ? "—" : key(kind), name: `${kind === "split" ? "Split" : "Squash"}${editor ? " in diff editor" : ""} · ${label}`,
+      description, preview: async () => paths, choose: () => fileAction(kind, editor, revision, targets, back),
+    });
+    filesReturn = back;
+    pick(`File actions · ${label}`, [
+      entry("split", false, "Put these files in a first change; the split file chooser opens with them ticked"),
+      entry("split", true, "Choose hunks of only these files in JJ's configured diff editor"),
+      entry("squash", false, "Open the squash form with these files as its files"),
+      entry("squash", true, "Choose a destination, then hunks of only these files in JJ's configured diff editor"),
+    ]);
   }
   // The result is how many marked files left the change.
   function expandFiles(revision: Revision, files: ChangedFile[], selectPath?: string) {
@@ -1786,10 +1852,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       if (prepared) openReview(action, prepared, null, null);
     }, true);
   }
-  function openHistory(revision: Revision, kind: "rebase" | "squash", descendants = false) {
+  // `files` preselects the squash form's files; `back` is the changed-files browser to return to if the form is closed.
+  function openHistory(revision: Revision, kind: "rebase" | "squash", descendants = false, files: string[] = [], back: FilesReturn | null = null) {
     closePrompt();
+    filesReturn = back;
     const form = new HistoryForm(renderer, repository, revision,
-      kind === "rebase" ? { kind, descendants } : { kind, files: [], description: "", keepDescription: true },
+      kind === "rebase" ? { kind, descendants } : { kind, files, description: "", keepDescription: true },
       review, async () => {
         try { report(await applyReviewed() ?? "Ready."); }
         catch (error) { if (prompt.kind === "browse") report(errorText(error), true); throw error; }
@@ -1807,21 +1875,27 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function describe(revision: Revision) {
     openPrompt({ kind: "describe", revision, original: "", discard: false }, `Describe ${revision.changeId.slice(0, 8)}`, revision.description.replace(/\n$/, ""));
   }
-  function editInteractively(action: InteractiveAction) {
+  function editInteractively(action: InteractiveAction, back: FilesReturn | null = null) {
     const editor = action.kind === "describe" ? "description editor" : action.kind === "resolve" ? "merge tool" : "diff editor";
-    openExternal(`JJ's ${editor} for ${action.kind}`, () => repository.interactive(action), action.kind === "describe" || action.kind === "resolve");
+    openExternal(`JJ's ${editor} for ${action.kind}`, () => repository.interactive(action), action.kind === "describe" || action.kind === "resolve", back);
   }
-  function openExternal(name: string, launch: () => Promise<void>, preserveSelection = false) {
+  // `back` is the changed-files browser the action started from: when the editor leaves that change as it was, because
+  // it was quit or failed, the app returns there.
+  function openExternal(name: string, launch: () => Promise<void>, preserveSelection = false, back: FilesReturn | null = null) {
     void run(`Opening ${name}…`, async () => {
       closePrompt();
+      const failed = (error: unknown) => {
+        throw new Error(`Refreshing after ${name} failed. Press ${actionKeys("refresh")} to reload before repeating the action. ${errorText(error)}`);
+      };
       try {
         renderer.suspend();
         await launch();
       } finally {
         renderer.resume();
-        await refresh(preserveSelection ? revset : defaultRevset, !preserveSelection).catch(error => {
-          throw new Error(`Refreshing after ${name} failed. Press ${actionKeys("refresh")} to reload before repeating the action. ${errorText(error)}`);
-        });
+        const follow = !preserveSelection && !back;
+        await refresh(follow ? defaultRevset : revset, follow).catch(failed);
+        if (back && revisions.some(item => item.commitId === back.revision.commitId)) reopenFiles(back);
+        else if (back && !preserveSelection) await refresh(defaultRevset, true).catch(failed);
       }
     });
   }
@@ -1921,11 +1995,12 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   function describeExternally(revision: Revision) {
     openExternal("JJ's description editor", () => repository.editDescription(revision), true);
   }
-  function splitChange(revision: Revision) {
-    chooseFiles(revision, "Split files", files => ask("First change description", "", description => pick("Second change description", [
+  // `files` start ticked in the chooser, and `target` names them in its title ("2 selected").
+  function splitChange(revision: Revision, preselected: string[] = [], target?: string) {
+    chooseFiles(revision, target ? `Split files · ${target}` : "Split files", files => ask("First change description", "", description => pick("Second change description", [
       { name: "Keep original description", description: revision.description || "(no description)", choose: () => confirm({ kind: "split", revision, files, description, secondDescription: revision.description }) },
       { name: "Edit second description", description: "Enter a replacement description", choose: () => ask("Second change description", revision.description.trim().includes("\n") ? "" : revision.description.trim(), secondDescription => confirm({ kind: "split", revision, files, description, secondDescription })) },
-    ])));
+    ])), preselected);
   }
   function showStatus() {
     setPreviewVisible(true);
@@ -2068,7 +2143,7 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
   type KeyHandlers = { [K in Prompt["kind"]]: (key: KeyEvent, state: Extract<Prompt, { kind: K }>) => void };
   const keyHandlers: KeyHandlers = {
     browse: browseKey, files: filesKey, inline: inlineKey, search: searchKey, theme: themeKey, help: helpKey,
-    form: (key, state) => { if (state.form.handleKey(key, keyAction) === "close") { closePrompt(); void loadPreview(); } },
+    form: (key, state) => { if (state.form.handleKey(key, keyAction) === "close") closeToBase(); },
     picker: pickerKey, describe: describeKey, confirm: confirmKey, revset: completionKey, bookmark: completionKey, text: dialogKey,
   };
   function onKey(key: KeyEvent) {
@@ -2154,6 +2229,15 @@ export function createApp(renderer: CliRenderer, repository: Repository, theme: 
       return;
     }
     if (action === "filterFiles") { key.preventDefault(); beginFileFilter(state); return; }
+    if (action === "split" || action === "squash" || action === "fileActions") {
+      key.preventDefault();
+      if (isBusy()) return;
+      const target = fileTargets();
+      if (!target) return;
+      if (action === "fileActions") fileActions(target.revision, target.targets, target.back);
+      else fileAction(action, false, target.revision, target.targets, target.back);
+      return;
+    }
     if (action === "quit") { key.preventDefault(); stop(); renderer.destroy(); return; }
     if (action === "help") { key.preventDefault(); showHelp(); return; }
     if (action === "focus" || key.name === "return") {
