@@ -38,7 +38,7 @@ The bundled palettes adapt [Gruvbox](https://github.com/morhetz/gruvbox), [Tokyo
 | `'` / `"` | Next / previous accepted search match, wrapping at either end |
 | `@` | Select the working copy without editing it |
 | `[` / `]` | Jump to a parent / child; choose when there are several |
-| `Ctrl+O` | Return to the original view after revealing a distant or filtered target |
+| `Ctrl+O` | Return to the original view after revealing a distant or filtered target, or from a file's history to the revset and changed files it was opened from |
 | `Escape` | Cancel search editing, or clear an accepted search |
 | `w` | Show working-copy status |
 | `Ctrl+R` | Refresh repository data |
@@ -86,6 +86,8 @@ Space selects the highlighted file, marking its row `✓`, or unselects it; `c` 
 `/` filters the list to paths containing the typed text, ignoring case; every character, including `*`, `?`, `[` and spaces, is taken literally. The list narrows as you type and the status line counts the files shown; Enter keeps the filter and Escape puts back the one before. The kept filter shows as `/text  3 of 10 files`, and `/` again edits it. Filtering hides rows but never drops a selection, so clearing the filter shows every selected file still selected. While a filter applies, `h`, Left, Escape, or `l` clears it first; the next press collapses the list.
 
 File actions act on the selected files, in list order and including any the filter hides, or on the highlighted file when none are selected. The footer's `m actions` hint says which: `m actions · highlighted file` or `m actions · 2 selected`. `s` opens the split file chooser, titled `Split files · 2 selected`, with those files already ticked; `S` opens the squash form with them as its **Files**. Both can still be changed there. `A` previews absorbing only those files' edits; see [Absorb](#absorb). `m` lists the actions, each named with what it acts on and the files shown beside it: **Split**, **Split in diff editor**, **Squash**, **Squash in diff editor**, and **Absorb**. The diff-editor actions pass the files to `jj split --interactive` or `jj squash --interactive` as literal paths, so JJ's configured diff editor offers only those files; squash asks for a destination first. Split and squash move a renamed file with its old path, so the rename stays whole; absorb leaves a renamed file in the source. Escape at any step goes back one level and, from the first, returns to the files with their selection, filter and highlight as they were, without changing the repository. A diff editor that fails, or leaves the change as it was, also returns to the files; once a split, squash or absorb is applied, the graph follows as it does from the Space menu.
+
+`H` shows the history of the highlighted file (whatever is selected): the graph's revset becomes `files(root-file:"PATH")`, every visible revision that changes that exact path. It covers the whole repository, other branches included, not only the ancestors of the working copy. The path is written as a literal fileset, so spaces, `*`, `?` and `[` are part of the name and `x*.txt` never lists a revision that only changed `xy.txt`. The header shows the revset and how many revisions it has, as for any revset, and the revision you browsed stays selected. `Ctrl+O` returns to the revset you had before and reopens the changed files on the same revision, with their selection, filter and highlight. `H` from a history pushes another step, which `Ctrl+O` undoes one at a time; setting a revset any other way forgets them. A renamed file's history follows only its current path, so revisions before the rename are not listed.
 
 ## Absorb
 
@@ -223,7 +225,7 @@ change an action in one place only:
 | Scope | Where | Actions |
 | --- | --- | --- |
 | `revisions` | Browsing the revision list and the preview beside it | every browse action in the table below |
-| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `split`, `squash`, `absorb`, `fileActions`, `help`, `quit` |
+| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `split`, `squash`, `absorb`, `fileActions`, `fileHistory`, `help`, `quit` |
 | `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `rebaseTarget`, `loadMore`, `togglePreview` |
 | `menu` | Action menus, pickers, the theme chooser, help, and the rebase and squash form | `down`, `up`, `back`, `help` |
 | `prompt` | The revset prompt, bookmark names, the description editor and quick inputs | `nextCompletion`, `previousCompletion`, `saveDescription` |
@@ -238,7 +240,7 @@ Escape cannot be bound in menus. In `prompt`, only `tab`, `f1`–`f12` and contr
 can be bound, so every printable key still types; the editing keys `ctrl+a`, `ctrl+b`,
 `ctrl+e`, `ctrl+f`, `ctrl+k`, `ctrl+u` and `ctrl+w` are refused too. The defaults of
 `back` (`h` and Left), of the file browser's `selectFile`, `clearSelection`,
-`filterFiles` and `fileActions` (Space, `c`, `/` and `m`), and of `split`, `squash` and
+`filterFiles`, `fileActions` and `fileHistory` (Space, `c`, `/`, `m` and `H`), and of `split`, `squash` and
 `absorb` in the file browser only (`s`, `S` and `A`, or `a` in `legacy`) give way to any other action of the same scope bound
 to them (a `"help": ["h"]` binding keeps working); bound explicitly, they are checked
 like any other action. For `split`, `squash` and `absorb`, only a binding in the `files` scope
@@ -271,6 +273,7 @@ Available actions and defaults:
 | `back` (file browser and menus) | `h`/`left` | same |
 | `selectFile`, `clearSelection`, `filterFiles` (file browser) | `space`, `c`, `/` | same |
 | `fileActions` (file browser) | `m` | same |
+| `fileHistory` (file browser) | `H` | same |
 | `nextCompletion`, `previousCompletion` (prompts) | `tab`/`ctrl+n`, `ctrl+p` | same |
 | `saveDescription` (description editor) | `ctrl+s`/`ctrl+d` | same |
 
