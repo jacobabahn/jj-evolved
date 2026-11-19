@@ -81,9 +81,11 @@ Menu actions open in overlays, leaving the graph and selected revision visible b
 
 Press `l` or Right, or choose **Browse changed files** from the Space menu, to expand the selected revision's changed files beneath it in the graph. The rest of the graph stays in view, the revision is marked `▾`, and the pane is titled with its change ID. Each file shows a status letter: `A` added, `M` modified, `D` deleted, `R` renamed, `C` copied. A long list scrolls within a third of the pane. `j` and `k` move through the files, and the preview shows only the selected file's diff with the path as its title. Enter reveals the diff if hidden and moves focus to it so `j` and `k` scroll it; Tab switches focus back. Page Up / Page Down, `Ctrl+N` / `Ctrl+P`, `Ctrl+D` / `Ctrl+U`, and `p` control the preview as usual. `h`, Left, Escape, or `l` again collapses the list with the same revision selected and reloads its full diff. An empty change shows "Empty change. No changed files." beneath it. Automatic refresh continues while the list is open: when the change is rewritten, for example as you edit files in the working copy, the list reloads and keeps the highlighted file; when the change leaves the graph, the list collapses.
 
-Space selects the highlighted file, marking its row `✓`, or unselects it; `c` unselects every file. Space works while the diff has focus too. The footer counts the selected files. Selections belong to paths: a refresh keeps them on files still in the change, and when a selected file leaves the change the status line says how many selections were dropped. Selections last until the list collapses.
+Space selects the highlighted file, marking its row `✓`, or unselects it; `c` unselects every file. Space works while the diff has focus too. The footer counts the selected files in its `m actions · 2 selected` hint. Selections belong to paths: a refresh keeps them on files still in the change, and when a selected file leaves the change the status line says how many selections were dropped. Selections last until the list collapses.
 
 `/` filters the list to paths containing the typed text, ignoring case; every character, including `*`, `?`, `[` and spaces, is taken literally. The list narrows as you type and the status line counts the files shown; Enter keeps the filter and Escape puts back the one before. The kept filter shows as `/text  3 of 10 files`, and `/` again edits it. Filtering hides rows but never drops a selection, so clearing the filter shows every selected file still selected. While a filter applies, `h`, Left, Escape, or `l` clears it first; the next press collapses the list.
+
+File actions act on the selected files, in list order and including any the filter hides, or on the highlighted file when none are selected. The footer's `m actions` hint says which: `m actions · highlighted file` or `m actions · 2 selected`. `s` opens the split file chooser, titled `Split files · 2 selected`, with those files already ticked; `S` opens the squash form with them as its **Files**. Both can still be changed there. `m` lists the actions, each named with what it acts on and the files shown beside it: **Split**, **Split in diff editor**, **Squash**, and **Squash in diff editor**. The diff-editor actions pass the files to `jj split --interactive` or `jj squash --interactive` as literal paths, so JJ's configured diff editor offers only those files; squash asks for a destination first. A renamed file moves with its old path, so the rename stays whole. Escape at any step goes back one level and, from the first, returns to the files with their selection, filter and highlight as they were, without changing the repository. A diff editor that fails, or leaves the change as it was, also returns to the files; once a split or squash is applied, the graph follows as it does from the Space menu.
 
 ## Absorb
 
@@ -219,7 +221,7 @@ change an action in one place only:
 | Scope | Where | Actions |
 | --- | --- | --- |
 | `revisions` | Browsing the revision list and the preview beside it | every browse action in the table below |
-| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `help`, `quit` |
+| `files` | The changed-files browser | `down`, `up`, `focus`, `pageUp`, `pageDown`, `previewUp`, `previewDown`, `previewHalfUp`, `previewHalfDown`, `togglePreview`, `files`, `back`, `selectFile`, `clearSelection`, `filterFiles`, `split`, `squash`, `fileActions`, `help`, `quit` |
 | `destination` | Choosing an inline rebase or squash destination | `down`, `up`, `pageUp`, `pageDown`, `search`, `rebaseScope`, `rebaseTarget`, `loadMore`, `togglePreview` |
 | `menu` | Action menus, pickers, the theme chooser, help, and the rebase and squash form | `down`, `up`, `back`, `help` |
 | `prompt` | The revset prompt, bookmark names, the description editor and quick inputs | `nextCompletion`, `previousCompletion`, `saveDescription` |
@@ -233,8 +235,9 @@ scroll an overlay's preview, and Shift-Tab picks the previous suggestion. Enter 
 Escape cannot be bound in menus. In `prompt`, only `tab`, `f1`–`f12` and control keys
 can be bound, so every printable key still types; the editing keys `ctrl+a`, `ctrl+b`,
 `ctrl+e`, `ctrl+f`, `ctrl+k`, `ctrl+u` and `ctrl+w` are refused too. The defaults of
-`back` (`h` and Left) and of the file browser's `selectFile`, `clearSelection` and
-`filterFiles` (Space, `c` and `/`) give way to any other action of the same scope bound
+`back` (`h` and Left), of the file browser's `selectFile`, `clearSelection`,
+`filterFiles` and `fileActions` (Space, `c`, `/` and `m`), and of `split` and `squash` in
+the file browser only (`s` and `S`) give way to any other action of the same scope bound
 to them (a `"help": ["h"]` binding keeps working); bound explicitly, they are checked
 like any other action. Text typed into a search or filter field is never matched against
 bindings, and the rebase and squash form keeps its `p` preview key.
@@ -262,11 +265,13 @@ Available actions and defaults:
 | `undo`, `files`, `theme`, `help`, `quit` | `u`, `l`/`right`, `t`, `?`, `q` | `u`, `f`, `t`, `?`, `q` |
 | `back` (file browser and menus) | `h`/`left` | same |
 | `selectFile`, `clearSelection`, `filterFiles` (file browser) | `space`, `c`, `/` | same |
+| `fileActions` (file browser) | `m` | same |
 | `nextCompletion`, `previousCompletion` (prompts) | `tab`/`ctrl+n`, `ctrl+p` | same |
 | `saveDescription` (description editor) | `ctrl+s`/`ctrl+d` | same |
 
 Unbound actions stay reachable from the Space menu, which shows the effective
-key for every item and `—` for unbound ones. `rebaseScope` toggles
+key for every item and `—` for unbound ones. In the file browser, `split` and `squash` stay
+reachable from the `m` menu the same way. `rebaseScope` toggles
 descendants and `rebaseTarget` switches the target while choosing an inline rebase destination. Because they are only live
 there, they may share a key with a browse action that is not: the default Tab is
 also `focus`. It cannot share a key with `loadMore` or `togglePreview`, which stay
