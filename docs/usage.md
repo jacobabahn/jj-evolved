@@ -239,7 +239,10 @@ can be bound, so every printable key still types; the editing keys `ctrl+a`, `ct
 `filterFiles` and `fileActions` (Space, `c`, `/` and `m`), and of `split` and `squash` in
 the file browser only (`s` and `S`) give way to any other action of the same scope bound
 to them (a `"help": ["h"]` binding keeps working); bound explicitly, they are checked
-like any other action. Text typed into a search or filter field is never matched against
+like any other action. For `split` and `squash`, only a binding in the `files` scope
+counts as explicit there: a global binding, written for the revision list, still
+gives way in the file browser, to its own keys too (a global `"split": ["c"]` leaves
+`c` clearing the selection). Text typed into a search or filter field is never matched against
 bindings, and the rebase and squash form keeps its `p` preview key.
 
 Available actions and defaults:
